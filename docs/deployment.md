@@ -119,10 +119,10 @@ go build -o dist/deploy/boxfleet-agent ./cmd/boxfleet-agent
 
 ## Node Bootstrap
 
-Create a node from the Web UI's Nodes page, or use the admin API. Set:
+Create a node from the Web UI's Nodes page. The generated bootstrap string
+includes `sing_box_url` automatically, defaulting to:
 
 ```text
-server_url:  http://<server-host>:18081
 sing_box_url: http://<server-host>:18081/artifacts/sing-box
 ```
 

@@ -311,11 +311,15 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 		if serverURL == "" {
 			serverURL = requestBaseURL(r)
 		}
+		singBoxURL := strings.TrimSpace(payload.SingBoxURL)
+		if singBoxURL == "" {
+			singBoxURL = serverURL + "/artifacts/sing-box"
+		}
 		bootstrapString, err := model.EncodeBootstrap(model.BootstrapConfig{
 			NodeName:        issued.NodeName,
 			Token:           issued.Token,
 			ServerURL:       serverURL,
-			SingBoxURL:      strings.TrimSpace(payload.SingBoxURL),
+			SingBoxURL:      singBoxURL,
 			InstallDir:      agent.DefaultInstallDir,
 			AgentConfigPath: agent.DefaultConfigPath,
 			V2RayAPIAddress: agent.DefaultV2RayAPIAddress,

@@ -738,7 +738,7 @@ function AddNodeModal({
         ) : (
           <div className="flex flex-col gap-4">
             <Note variant="success" size="md">
-              接入字符串已生成，请尽快在目标服务器上完成接入
+              接入字符串已生成。Agent 会在 bootstrap 过程中拉取并安装 sing-box
             </Note>
 
             <div className="flex flex-col gap-2">

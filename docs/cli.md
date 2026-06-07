@@ -57,10 +57,10 @@ on the node, then run:
 sudo ./boxfleet-agent bootstrap 'boxfleet-bootstrap:...'
 ```
 
-The bootstrap command writes the agent config, installs the current binary to
-the configured agent path, checks that `sing-box` is built with
-`with_v2ray_api` (or downloads it when `sing_box_url` is present), installs
-systemd units, applies config, and starts the agent service.
+The Web UI bootstrap string includes `sing_box_url` by default, so the
+bootstrap command writes the agent config, installs the current binary to the
+configured agent path, downloads `sing-box`, verifies it has `with_v2ray_api`,
+installs systemd units, applies config, and starts the agent service.
 
 ### Proxies
 

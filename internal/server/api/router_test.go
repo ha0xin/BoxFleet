@@ -350,7 +350,10 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bootstrapConfig.NodeName != "edge-a" || bootstrapConfig.ServerURL != "http://boxfleet.example" || bootstrapConfig.Token == "" {
+	if bootstrapConfig.NodeName != "edge-a" ||
+		bootstrapConfig.ServerURL != "http://boxfleet.example" ||
+		bootstrapConfig.SingBoxURL != "http://boxfleet.example/artifacts/sing-box" ||
+		bootstrapConfig.Token == "" {
 		t.Fatalf("bootstrap config = %#v", bootstrapConfig)
 	}
 	ok, err := store.VerifyNodeToken(context.Background(), "edge-a", bootstrapConfig.Token)
