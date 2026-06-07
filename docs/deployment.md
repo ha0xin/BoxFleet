@@ -26,8 +26,9 @@ implemented yet.
 
 ## Build Artifacts
 
-GitHub Actions builds Linux amd64 artifacts on every push to `main`. Download
-the `boxfleet-linux-amd64` artifact from the latest successful Build Artifacts
+GitHub Actions builds Linux amd64 artifacts when the Build Artifacts workflow is
+manually dispatched or a `v*` tag is pushed. Download the
+`boxfleet-linux-amd64` artifact from the latest successful Build Artifacts
 workflow run; it contains:
 
 - `bf-linux-amd64`
@@ -37,8 +38,8 @@ workflow run; it contains:
 - `SHA256SUMS`
 
 Pushing a `v*` tag also publishes the archive and checksums to a GitHub
-Release. The release workflow builds `sing-box` from upstream revision
-`6b07a229185de1566a403582832df5aae8276bc0` with the BoxFleet-required tags.
+Release. The release workflow builds `sing-box` from pinned upstream tag
+`v1.13.13` with the BoxFleet-required tags.
 
 ## Server Install
 

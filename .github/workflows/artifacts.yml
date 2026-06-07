@@ -3,8 +3,6 @@ name: Build Artifacts
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
     tags:
       - "v*"
 
@@ -19,7 +17,7 @@ jobs:
     env:
       GOOS: linux
       GOARCH: amd64
-      SING_BOX_REVISION: 6b07a229185de1566a403582832df5aae8276bc0
+      SING_BOX_REVISION: v1.13.13
       SING_BOX_TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,badlinkname,tfogo_checklinkname0,with_v2ray_api
 
     steps:

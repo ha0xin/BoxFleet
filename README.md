@@ -98,8 +98,9 @@ npm --prefix web run build
 go test ./...
 ```
 
-GitHub Actions builds downloadable Linux amd64 artifacts on pushes to `main`
-and on `v*` tags. The artifact bundle contains:
+GitHub Actions builds downloadable Linux amd64 artifacts when the Build
+Artifacts workflow is manually dispatched or a `v*` tag is pushed. The artifact
+bundle contains:
 
 - `bf`
 - `boxfleet-server`
