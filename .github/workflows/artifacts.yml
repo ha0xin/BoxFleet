@@ -110,5 +110,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/boxfleet-linux-amd64.tar.gz \
             dist/SHA256SUMS \
+            dist/artifacts/bf-linux-amd64 \
+            dist/artifacts/boxfleet-server-linux-amd64 \
+            dist/artifacts/boxfleet-agent-linux-amd64 \
+            dist/artifacts/sing-box-linux-amd64 \
             --verify-tag \
             --generate-notes

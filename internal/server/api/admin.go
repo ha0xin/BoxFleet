@@ -18,6 +18,8 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/render"
 )
 
+const defaultSingBoxReleaseURL = "https://github.com/ha0xin/BoxFleet/releases/latest/download/sing-box-linux-amd64"
+
 type adminOverview struct {
 	Nodes         []adminNode        `json:"nodes"`
 	Users         []adminUser        `json:"users"`
@@ -313,7 +315,7 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 		}
 		singBoxURL := strings.TrimSpace(payload.SingBoxURL)
 		if singBoxURL == "" {
-			singBoxURL = serverURL + "/artifacts/sing-box"
+			singBoxURL = defaultSingBoxReleaseURL
 		}
 		bootstrapString, err := model.EncodeBootstrap(model.BootstrapConfig{
 			NodeName:        issued.NodeName,

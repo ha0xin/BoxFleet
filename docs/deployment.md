@@ -11,7 +11,7 @@ management/server host
   - embedded /admin Web UI
   - bf CLI
   - SQLite database
-  - sing-box binary artifact for nodes
+  - GitHub Release URL for the node sing-box binary
 
 proxy node
   - boxfleet-agent systemd service
@@ -60,13 +60,12 @@ tar -xzf boxfleet-linux-amd64.tar.gz
 
 ## Server Install
 
-Install the server-side binaries and the node `sing-box` artifact:
+Install the server-side binaries:
 
 ```bash
-sudo install -d -m 0755 /opt/boxfleet/bin /opt/boxfleet/server /opt/boxfleet/artifacts
+sudo install -d -m 0755 /opt/boxfleet/bin /opt/boxfleet/server
 sudo install -m 0755 bf-linux-amd64 /opt/boxfleet/bin/bf
 sudo install -m 0755 boxfleet-server-linux-amd64 /opt/boxfleet/bin/boxfleet-server
-sudo install -m 0755 sing-box-linux-amd64 /opt/boxfleet/artifacts/sing-box
 sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db init
 ```
 
@@ -81,7 +80,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=BOXFLEET_ADMIN_TOKEN=<admin-token>
-ExecStart=/opt/boxfleet/bin/boxfleet-server --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db --artifact-dir /opt/boxfleet/artifacts --admin-path-token <path-token>
+ExecStart=/opt/boxfleet/bin/boxfleet-server --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db --admin-path-token <path-token>
 Restart=always
 RestartSec=5s
 LimitNOFILE=1048576
@@ -123,7 +122,7 @@ Create a node from the Web UI's Nodes page. The generated bootstrap string
 includes `sing_box_url` automatically, defaulting to:
 
 ```text
-sing_box_url: http://<server-host>:18081/artifacts/sing-box
+sing_box_url: https://github.com/ha0xin/BoxFleet/releases/latest/download/sing-box-linux-amd64
 ```
 
 Copy the generated `boxfleet-bootstrap:...` string. On the node, install the

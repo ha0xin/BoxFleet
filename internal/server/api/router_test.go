@@ -352,7 +352,7 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 	}
 	if bootstrapConfig.NodeName != "edge-a" ||
 		bootstrapConfig.ServerURL != "http://boxfleet.example" ||
-		bootstrapConfig.SingBoxURL != "http://boxfleet.example/artifacts/sing-box" ||
+		bootstrapConfig.SingBoxURL != defaultSingBoxReleaseURL ||
 		bootstrapConfig.Token == "" {
 		t.Fatalf("bootstrap config = %#v", bootstrapConfig)
 	}
