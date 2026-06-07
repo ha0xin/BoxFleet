@@ -630,6 +630,16 @@ function AddNodeModal({
   const [createdAt, setCreatedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const createdAtRef = useRef<number | null>(null);
+  const bootstrapCommand = useMemo(
+    () => [
+      "curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz",
+      "tar -xzf boxfleet-linux-amd64.tar.gz boxfleet-agent-linux-amd64",
+      "sudo install -d -m 0755 /opt/boxfleet/bin",
+      "sudo install -m 0755 boxfleet-agent-linux-amd64 /opt/boxfleet/bin/boxfleet-agent",
+      `sudo /opt/boxfleet/bin/boxfleet-agent bootstrap '${joinString}'`
+    ],
+    [joinString]
+  );
 
   async function checkStatus() {
     try {
@@ -737,22 +747,8 @@ function AddNodeModal({
             </div>
 
             <div className="border-t border-gray-alpha-400 pt-3">
-              <div className="mb-2 text-xs font-semibold text-gray-1000">下一步：在服务器执行以下操作</div>
-              <ol className="m-0 list-decimal space-y-2 pl-5 text-xs leading-5 text-gray-900">
-                <li>
-                  下载 Agent：
-                  <code className="ml-1 font-mono text-[11px] text-gray-1000">
-                    curl -fsSL https://get.boxfleet.io/agent | sudo bash
-                  </code>
-                </li>
-                <li>
-                  运行命令：
-                  <code className="ml-1 font-mono text-[11px] text-gray-1000">
-                    sudo boxfleet-agent join
-                  </code>
-                </li>
-                <li>粘贴上面生成的字符串</li>
-              </ol>
+              <div className="mb-2 text-xs font-semibold text-gray-1000">下一步：在服务器执行</div>
+              <Snippet wrap text={bootstrapCommand} />
             </div>
 
             <StatusCard
@@ -839,7 +835,7 @@ function StatusCard({
           </Button>
         }
       >
-        节点暂未上线，请确认服务器已执行 join 操作
+        节点暂未上线，请确认服务器已执行 bootstrap 命令
       </Note>
     );
   }
