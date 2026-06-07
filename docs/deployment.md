@@ -24,22 +24,39 @@ proxy node
 Quota enforcement, rate limits, abuse detection, and subscription URLs are not
 implemented yet.
 
-## Build Artifacts
+## Release Artifacts
 
-GitHub Actions builds Linux amd64 artifacts when the Build Artifacts workflow is
-manually dispatched or a `v*` tag is pushed. Download the
-`boxfleet-linux-amd64` artifact from the latest successful Build Artifacts
-workflow run; it contains:
+GitHub Actions builds Linux amd64 release artifacts when a `v*` tag is pushed.
+Create a release by tagging the commit you want to deploy:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow uploads:
 
 - `bf-linux-amd64`
 - `boxfleet-server-linux-amd64`
 - `boxfleet-agent-linux-amd64`
 - `sing-box-linux-amd64` built with `with_v2ray_api`
+- `boxfleet-linux-amd64.tar.gz`
 - `SHA256SUMS`
 
-Pushing a `v*` tag also publishes the archive and checksums to a GitHub
-Release. The release workflow builds `sing-box` from pinned upstream tag
-`v1.13.13` with the BoxFleet-required tags.
+The release workflow builds `sing-box` from pinned upstream tag `v1.13.13` with
+the BoxFleet-required tags. The Build Artifacts workflow can also be manually
+dispatched for pre-release testing, but server deployments should use GitHub
+Releases.
+
+Wait for the release workflow to finish, then download the latest public
+release on a Linux amd64 host:
+
+```bash
+curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz
+curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf boxfleet-linux-amd64.tar.gz
+```
 
 ## Server Install
 
@@ -110,9 +127,11 @@ sing_box_url: http://<server-host>:18081/artifacts/sing-box
 ```
 
 Copy the generated `boxfleet-bootstrap:...` string. On the node, install the
-agent artifact and run bootstrap:
+agent from the public release and run bootstrap:
 
 ```bash
+curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz
+tar -xzf boxfleet-linux-amd64.tar.gz boxfleet-agent-linux-amd64
 sudo install -d -m 0755 /opt/boxfleet/bin
 sudo install -m 0755 boxfleet-agent-linux-amd64 /opt/boxfleet/bin/boxfleet-agent
 sudo /opt/boxfleet/bin/boxfleet-agent bootstrap 'boxfleet-bootstrap:...'

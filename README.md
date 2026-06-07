@@ -99,8 +99,9 @@ go test ./...
 ```
 
 GitHub Actions builds downloadable Linux amd64 artifacts when the Build
-Artifacts workflow is manually dispatched or a `v*` tag is pushed. The artifact
-bundle contains:
+Artifacts workflow is manually dispatched or a `v*` tag is pushed. Pushing a
+`v*` tag publishes a GitHub Release, which is the default deployment source.
+The release bundle contains:
 
 - `bf`
 - `boxfleet-server`
