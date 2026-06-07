@@ -1,0 +1,116 @@
+name: Build Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-amd64:
+    name: Linux amd64
+    runs-on: ubuntu-latest
+
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      SING_BOX_REVISION: 6b07a229185de1566a403582832df5aae8276bc0
+      SING_BOX_TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,badlinkname,tfogo_checklinkname0,with_v2ray_api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set build version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      - name: Build embedded web UI
+        run: npm --prefix web run build
+
+      - name: Build BoxFleet binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/artifacts
+          ldflags="-s -w -X main.version=${{ steps.version.outputs.value }}"
+          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/bf-linux-amd64 ./cmd/bf
+          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/boxfleet-server-linux-amd64 ./cmd/boxfleet-server
+          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/boxfleet-agent-linux-amd64 ./cmd/boxfleet-agent
+
+      - name: Build sing-box with V2Ray API
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          git -C /tmp/sing-box checkout "$SING_BOX_REVISION"
+          (
+            cd /tmp/sing-box
+            sing_box_ldflags="$(cat release/LDFLAGS)"
+            CGO_ENABLED=0 go build -trimpath -tags "$SING_BOX_TAGS" -ldflags "$sing_box_ldflags" -o "$GITHUB_WORKSPACE/dist/artifacts/sing-box-linux-amd64" ./cmd/sing-box
+          )
+          "$GITHUB_WORKSPACE/dist/artifacts/sing-box-linux-amd64" version | grep with_v2ray_api
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod 0755 dist/artifacts/*
+          tar -C dist/artifacts -czf dist/boxfleet-linux-amd64.tar.gz \
+            bf-linux-amd64 \
+            boxfleet-server-linux-amd64 \
+            boxfleet-agent-linux-amd64 \
+            sing-box-linux-amd64
+          (
+            cd dist
+            sha256sum boxfleet-linux-amd64.tar.gz artifacts/* > SHA256SUMS
+          )
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boxfleet-linux-amd64
+          path: |
+            dist/boxfleet-linux-amd64.tar.gz
+            dist/SHA256SUMS
+            dist/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/boxfleet-linux-amd64.tar.gz \
+            dist/SHA256SUMS \
+            --verify-tag \
+            --generate-notes

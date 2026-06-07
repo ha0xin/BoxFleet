@@ -1,0 +1,13 @@
+server_url: "https://boxfleet.example.com"
+node_id: "node-1"
+node_token: "change-me"
+
+sing_box:
+  binary: "/usr/bin/sing-box"
+  config_path: "/etc/sing-box/config.json"
+  work_dir: "/var/lib/sing-box"
+  service_name: "sing-box"
+
+agent:
+  poll_interval_seconds: 30
+  report_interval_seconds: 60

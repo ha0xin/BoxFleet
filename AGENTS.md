@@ -1,0 +1,126 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code/OpenAI Codex when working with code in this repository.
+
+`CLAUDE.md` is a symlink to this file. Keep shared agent guidance here and do
+not edit both paths separately.
+
+## What BoxFleet is
+
+A central server (`boxfleet-server`) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + `systemd` + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators drive the server with the `bf` CLI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
+
+Current target protocol is VLESS-Reality with `xtls-rprx-vision`; renderer rejects other protocols.
+
+## Common commands
+
+```bash
+# Full pre-commit check (build the UI, run all tests, vet)
+npm --prefix web run build
+go test ./...
+go vet ./...
+
+# Run a single Go test
+go test ./internal/server/db -run TestProxyAccessIssue -v
+
+# Regenerate sqlc code after changing queries/*.sql or migrations
+$(go env GOPATH)/bin/sqlc generate
+# If sqlc is missing:
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+# Local server (admin token is required by default — see "Admin auth")
+go run ./cmd/boxfleet-server --db /tmp/bf.db --admin-token devtoken
+# Or for local development without a token:
+go run ./cmd/boxfleet-server --db /tmp/bf.db --allow-insecure-admin
+
+# CLI against a local db
+go run ./cmd/bf --db /tmp/bf.db db init
+go run ./cmd/bf --db /tmp/bf.db node create azus --public-host 1.2.3.4
+
+# Web UI dev (vite); build output is embedded into the server binary via go:embed
+npm --prefix web run dev
+npm --prefix web run build
+
+# CI/CD mirrors these checks on GitHub:
+# - .github/workflows/ci.yml builds the embedded Web UI, runs Go tests, and runs go vet.
+# - .github/workflows/artifacts.yml builds downloadable Linux amd64 artifacts for bf, boxfleet-server, boxfleet-agent, and sing-box.
+```
+
+## Architecture
+
+### Three binaries, two trust domains
+
+- `cmd/boxfleet-server` — central API + admin UI. Owns SQLite, renders sing-box configs, stores published config versions, accepts node reports.
+- `cmd/bf` — operator CLI. Opens the same SQLite directly (no server round-trip); runs migrations on demand via `withMigratedStore`. **Do not** introduce server round-trips here — `bf` is a local DB tool.
+- `cmd/boxfleet-agent` — runs on each node. Pulls config from server, runs `sing-box check`, atomically writes config, restarts `sing-box` via systemctl, reports back. Talks to server with bearer tokens; never trusts node-supplied identity (server overrides `NodeName` in all decoded payloads).
+
+### Server-side data flow
+
+```
+queries/*.sql ──sqlc generate──▶ internal/server/store/sqlc/  (typed raw layer)
+                                            │
+                                            ▼
+                                 internal/server/db/  (facade: domain types, validation, ID generation)
+                                            │
+                                            ▼
+                                 internal/server/api/  (chi handlers; admin auth middleware)
+                                            │
+                                            ▼
+                                 internal/server/render/  (DB rows → sing-box JSON config)
+```
+
+- `internal/server/db` is the only package allowed to touch sqlc-generated code. Everything else (api, render, cli) consumes the facade's domain types.
+- `proxy_details` and `proxy_access_details` SQL views flatten the joins so sqlc generates a single row type per query — this is why no `mapProxy(any)` type-switch exists anymore. Keep it that way: when adding a new proxy/access query, select from the view, not from raw tables.
+- API errors: `writeAdminError` returns 422 uniformly. If you need to distinguish NotFound, do it explicitly at the handler.
+
+### Migrations rule
+
+`migrations/010_init.sql` is the public baseline schema. Future migrations are **append-only** once committed: start at `011_*.sql`, never edit a migration that's already in `main`, and keep `schema/schema.sql` as the current full-state snapshot. The baseline intentionally starts at version 10 so existing dev DBs already migrated to v10 remain compatible.
+
+### Agent ↔ server contract
+
+Payload structs live in `internal/model/` and are imported by both `internal/agent` and `internal/server/db`. When changing the wire format, change them there once. `NodeName` fields on `*Report` types are decorative — the server overwrites them with the authenticated node name from the bearer token. Treat them as server-populated.
+
+Agent state (`State` in `internal/agent/agent.go`) tracks v2ray counter values plus a per-counter `CounterEpoch` to detect sing-box restarts (counter goes backwards → epoch++, treat current value as the delta). Do not switch to `reset=true` on v2ray `GetStats` — losing a single response loses traffic.
+
+### Renderer and sing-box
+
+`internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. Only VLESS-Reality is rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client-side `NodeInfo` generation.
+
+Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the client). Counter naming is `user>>><name>>>>traffic>>>{uplink,downlink}` — defined upstream in `refs/sing-box/experimental/v2rayapi/stats.go`. Per-connection metadata (source IP, host, etc.) is **not** exposed by v2ray API; current code scrapes journalctl log text from sing-box (`internal/server/db/log_events.go`) and is fragile by design — sing-box log format changes will break it.
+
+### Web UI
+
+`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. UI is split into `types.ts`, `navigation.ts`, `pages.tsx`, `components.tsx`, `utils.ts`, and shadcn-style primitives under `components/ui/`. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
+
+Use the established frontend stack instead of hand-rolling UI behavior:
+
+- shadcn/Radix primitives for dialogs, dropdowns, popovers, selects, switches, tabs, labels, and other interactive controls. Do not use native `<select>` for app controls when a Radix/shadcn primitive exists.
+- TanStack Query for API request state, caching, refresh, and invalidation.
+- TanStack Table for non-trivial tables, especially paginated/filterable admin data.
+- react-hook-form plus zod for form state and validation.
+- date-fns plus react-day-picker for date/time formatting, duration math, and date/range picking.
+- lucide-react for icons.
+
+Network Events is the reference implementation for this stack: the page uses server-side pagination/filtering, URL-synced filters, TanStack Query, TanStack Table, react-hook-form/zod filters, and a react-day-picker date range. Time inputs are interpreted in the browser's local timezone and sent to the server as RFC3339 UTC query parameters. Structured network events are retained for `network_event_retention_days` from `settings` (default 90); raw network log rows are not retained.
+
+Admin pages use client-side routes under the admin mount. Keep sidebar tabs linkable and refresh-safe (`/admin/nodes`, `/admin/network-events`, etc.); the server's web UI handler intentionally falls back to `index.html` for nested admin paths.
+
+## Admin auth
+
+`boxfleet-server` requires `--admin-token` (or `BOXFLEET_ADMIN_TOKEN`) by default. `--allow-insecure-admin` disables auth and logs a WARN — only for local dev. The `/api/node/*` paths use per-node bearer tokens (`bf node token issue <name>`) and are independent of admin auth.
+
+## Library policy
+
+Use the established libraries listed in README (`cobra`, `viper`, `chi`, `goose`, `sqlc`, `zerolog`, `go-pretty/table`, `humanize`, `lucide-react`, etc.). Do not hand-roll command parsing, UUID generation, migration execution, SQL scanning, token hashing, routing, logging, byte-unit parsing, CLI table rendering, or protocol clients.
+
+## Tests
+
+Most coverage lives in `internal/agent`, `internal/cli/bf`, `internal/server/{api,db,render}`, `internal/v2raystats`. Renderer tests are golden-style: render against a fixed SQLite fixture, compare normalized JSON. SQLite tests use `t.TempDir()`. Agent tests fake out the `Runner` interface (`ExecRunner` is replaced) — never spawn real `sing-box` / `systemctl` / `journalctl` in unit tests. Real-node checks belong in the deployment smoke flow, not the regular test suite.
+
+## Docs to consult
+
+- `docs/deployment.md` — artifact-based server and node deployment flow.
+- `docs/testing.md` — current layer-by-layer test strategy and the gap list.
+- `docs/mvp-decisions.md` — why SQLite, why `bf`, why split binaries.
+- `docs/cli.md`, `docs/config-generation.md`, `docs/web-ui.md`, `docs/db-schema.md`, `docs/architecture.md` — topic-specific design notes.
+- `deploy/sing-box/README.md` — sing-box config layout and reality key handling.

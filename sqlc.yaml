@@ -1,0 +1,16 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema:
+      - "schema/schema.sql"
+    queries:
+      - "queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/server/store/sqlc"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: false
+        emit_exact_table_names: false
+        query_parameter_limit: 1

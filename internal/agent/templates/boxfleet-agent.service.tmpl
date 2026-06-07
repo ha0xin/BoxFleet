@@ -1,0 +1,13 @@
+[Unit]
+Description=BoxFleet node agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ quote .AgentPath }} run --config {{ quote .AgentConfigPath }}
+Restart={{ .Restart }}
+RestartSec={{ .RestartSec }}
+
+[Install]
+WantedBy=multi-user.target

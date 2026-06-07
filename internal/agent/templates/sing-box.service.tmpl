@@ -1,0 +1,14 @@
+[Unit]
+Description=sing-box managed by BoxFleet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ quote .SingBoxPath }} run -c {{ quote .SingBoxConfig }}
+Restart={{ .Restart }}
+RestartSec={{ .RestartSec }}
+LimitNOFILE={{ .SingBoxLimitFiles }}
+
+[Install]
+WantedBy=multi-user.target

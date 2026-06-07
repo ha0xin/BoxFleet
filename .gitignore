@@ -1,0 +1,40 @@
+# Local reference repositories
+/refs/
+/sing-box-management-sh/
+
+# Build outputs
+/bin/
+/dist/
+/build/
+/web/node_modules/
+/web/*.tsbuildinfo
+/web/vite.config.d.ts
+/web/vite.config.js
+/web/playwright-report/
+/web/test-results/
+/internal/server/webui/assets/assets/
+/internal/server/webui/assets/generated/
+/internal/server/webui/assets/index.html
+
+# Local databases and runtime state
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+
+# Local configuration and secrets
+*.local.yaml
+*.local.yml
+*.local.json
+.env
+.env.*
+
+# Go
+/coverage.out
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

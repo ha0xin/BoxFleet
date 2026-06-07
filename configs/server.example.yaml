@@ -1,0 +1,15 @@
+listen: "127.0.0.1:8080"
+database_path: "boxfleet.db"
+public_url: "https://boxfleet.example.com"
+
+security:
+  admin_token: "change-me"
+  config_signing_key: "change-me"
+
+sqlite:
+  wal: true
+  busy_timeout_seconds: 5
+
+defaults:
+  user_quota_gb: 50
+  user_max_connections: 30
