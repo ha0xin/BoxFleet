@@ -624,6 +624,7 @@ function AddNodeModal({
   const [nodeName, setNodeName] = useState("");
   const [description, setDescription] = useState("");
   const [joinString, setJoinString] = useState("");
+  const [installScriptURL, setInstallScriptURL] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [nodeStatus, setNodeStatus] = useState<"pending" | "online" | "offline">("pending");
@@ -632,13 +633,10 @@ function AddNodeModal({
   const createdAtRef = useRef<number | null>(null);
   const bootstrapCommand = useMemo(
     () => [
-      "curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz",
-      "tar -xzf boxfleet-linux-amd64.tar.gz boxfleet-agent-linux-amd64",
-      "sudo install -d -m 0755 /opt/boxfleet/bin",
-      "sudo install -m 0755 boxfleet-agent-linux-amd64 /opt/boxfleet/bin/boxfleet-agent",
-      `sudo /opt/boxfleet/bin/boxfleet-agent bootstrap '${joinString}'`
+      `curl -fsSL ${shellQuote(installScriptURL)} -o /tmp/boxfleet-install.sh`,
+      `sudo sh /tmp/boxfleet-install.sh ${shellQuote(joinString)}`
     ],
-    [joinString]
+    [installScriptURL, joinString]
   );
 
   async function checkStatus() {
@@ -688,6 +686,7 @@ function AddNodeModal({
         body: JSON.stringify({ name: trimmed })
       });
       setJoinString(payload.bootstrap_string);
+      setInstallScriptURL(payload.install_script_url);
       setStep("generated");
       setNodeStatus("pending");
       const now = Date.now();
@@ -738,7 +737,7 @@ function AddNodeModal({
         ) : (
           <div className="flex flex-col gap-4">
             <Note variant="success" size="md">
-              接入字符串已生成。Agent 会在 bootstrap 过程中拉取并安装 sing-box
+              接入字符串已生成。安装脚本会拉取 agent 和 sing-box，然后执行 bootstrap
             </Note>
 
             <div className="flex flex-col gap-2">
@@ -782,6 +781,10 @@ function AddNodeModal({
       </DialogContent>
     </Dialog>
   );
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function StatusCard({

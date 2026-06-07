@@ -13,7 +13,10 @@ import (
 
 	"github.com/haoxin/boxfleet/internal/server/api"
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"github.com/haoxin/boxfleet/internal/server/install"
 )
+
+var version = "dev"
 
 func main() {
 	if err := newServerCommand().Execute(); err != nil {
@@ -79,9 +82,12 @@ func runServer(ctx context.Context) error {
 		AdminToken:         adminToken,
 		AdminPathToken:     adminPathToken,
 		AllowInsecureAdmin: allowInsecureAdmin,
+		Version:            version,
+		Repo:               install.DefaultRepo,
+		SingBoxVersion:     install.DefaultSingBoxVersion,
 	})
 
-	logger.Info().Str("addr", addr).Str("db", dbPath).Str("artifact_dir", artifactDir).Bool("admin_auth", adminToken != "").Bool("admin_path_token", adminPathToken != "").Msg("starting boxfleet-server")
+	logger.Info().Str("addr", addr).Str("db", dbPath).Str("artifact_dir", artifactDir).Str("version", version).Bool("admin_auth", adminToken != "").Bool("admin_path_token", adminPathToken != "").Msg("starting boxfleet-server")
 	if err := http.ListenAndServe(addr, router); err != nil {
 		logger.Error().Err(err).Msg("server stopped")
 		return err

@@ -101,12 +101,16 @@ go test ./...
 GitHub Actions builds downloadable Linux amd64 artifacts when the Build
 Artifacts workflow is manually dispatched or a `v*` tag is pushed. Pushing a
 `v*` tag publishes a GitHub Release, which is the default deployment source.
-The release bundle contains:
+The release bundle contains versioned Linux amd64 assets:
 
-- `bf`
-- `boxfleet-server`
-- `boxfleet-agent`
-- `sing-box` built with BoxFleet's required tags
+- `bf-<boxfleet-version>-linux-amd64`
+- `boxfleet-server-<boxfleet-version>-linux-amd64`
+- `boxfleet-agent-<boxfleet-version>-linux-amd64`
+- `sing-box-v1.13.13-linux-amd64` built with BoxFleet's required tags
+
+The management server embeds `/install.sh` for node bootstrap. Nodes fetch that
+script from the server; the script downloads the versioned agent and sing-box
+assets from the matching GitHub Release.
 
 See:
 

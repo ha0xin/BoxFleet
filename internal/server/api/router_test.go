@@ -337,8 +337,9 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Node            adminNode `json:"node"`
-		BootstrapString string    `json:"bootstrap_string"`
+		Node             adminNode `json:"node"`
+		BootstrapString  string    `json:"bootstrap_string"`
+		InstallScriptURL string    `json:"install_script_url"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
@@ -352,9 +353,12 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 	}
 	if bootstrapConfig.NodeName != "edge-a" ||
 		bootstrapConfig.ServerURL != "http://boxfleet.example" ||
-		bootstrapConfig.SingBoxURL != defaultSingBoxReleaseURL ||
+		bootstrapConfig.SingBoxURL != "" ||
 		bootstrapConfig.Token == "" {
 		t.Fatalf("bootstrap config = %#v", bootstrapConfig)
+	}
+	if payload.InstallScriptURL != "http://boxfleet.example/install.sh" {
+		t.Fatalf("install script url = %q", payload.InstallScriptURL)
 	}
 	ok, err := store.VerifyNodeToken(context.Background(), "edge-a", bootstrapConfig.Token)
 	if err != nil {
@@ -362,6 +366,39 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("issued bootstrap token did not verify")
+	}
+}
+
+func TestInstallScriptEndpoint(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{
+		DB:             store,
+		Version:        "v0.1.0",
+		Repo:           "ha0xin/BoxFleet",
+		SingBoxVersion: "v1.13.13",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/install.sh", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`REPO="${BOXFLEET_REPO:-ha0xin/BoxFleet}"`,
+		`BOXFLEET_VERSION="${BOXFLEET_VERSION_OVERRIDE:-v0.1.0}"`,
+		`SING_BOX_VERSION="${BOXFLEET_SING_BOX_VERSION:-v1.13.13}"`,
+		`agent_asset="boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"`,
+		`sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"`,
+		"boxfleet-agent\" bootstrap \"$BOOTSTRAP_STRING\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("install script missing %q:\n%s", want, body)
+		}
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/x-shellscript") {
+		t.Fatalf("content type = %q", got)
 	}
 }
 

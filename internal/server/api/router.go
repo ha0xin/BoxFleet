@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"github.com/haoxin/boxfleet/internal/server/install"
 	"github.com/haoxin/boxfleet/internal/server/render"
 	"github.com/haoxin/boxfleet/internal/server/webui"
 )
@@ -19,6 +20,9 @@ type Options struct {
 	AdminToken         string
 	AdminPathToken     string
 	AllowInsecureAdmin bool
+	Version            string
+	Repo               string
+	SingBoxVersion     string
 }
 
 func NewRouter(options Options) http.Handler {
@@ -27,6 +31,7 @@ func NewRouter(options Options) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	})
+	router.Get("/install.sh", installScriptHandler(options))
 	router.Get("/api/node/config", nodeConfigHandler(options.DB))
 	router.Post("/api/node/apply-result", nodeApplyResultHandler(options.DB))
 	router.Post("/api/node/heartbeat", nodeHeartbeatHandler(options.DB))
@@ -36,7 +41,7 @@ func NewRouter(options Options) http.Handler {
 	adminPrefix := adminRoutePrefix(options.AdminPathToken)
 	router.Route(adminPrefix+"/api/admin", func(r chi.Router) {
 		r.Use(adminAuthMiddleware(options.AdminToken, options.AllowInsecureAdmin))
-		r.Get("/overview", adminOverviewHandler(options.DB))
+		r.Get("/overview", adminOverviewHandler(options.DB, options))
 		r.Get("/config/changes", adminConfigChangesHandler(options.DB))
 		r.Post("/config/publish", adminPublishChangedConfigsHandler(options.DB))
 		r.Get("/proxies", adminProxiesHandler(options.DB))
@@ -86,6 +91,23 @@ func adminRoutePrefix(pathToken string) string {
 		return ""
 	}
 	return "/" + pathToken
+}
+
+func installScriptHandler(options Options) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		script, err := install.Script(install.ScriptData{
+			Repo:            options.Repo,
+			BoxFleetVersion: options.Version,
+			SingBoxVersion:  options.SingBoxVersion,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(script)
+	}
 }
 
 func nodeConfigHandler(store *db.DB) http.HandlerFunc {

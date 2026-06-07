@@ -1,0 +1,63 @@
+#!/bin/sh
+set -eu
+
+BOOTSTRAP_STRING="${1:-}"
+if [ -z "$BOOTSTRAP_STRING" ]; then
+  echo "usage: install.sh <boxfleet-bootstrap:string>" >&2
+  exit 2
+fi
+
+REPO="${BOXFLEET_REPO:-{{ .Repo }}}"
+BOXFLEET_VERSION="${BOXFLEET_VERSION_OVERRIDE:-{{ .BoxFleetVersion }}}"
+SING_BOX_VERSION="${BOXFLEET_SING_BOX_VERSION:-{{ .SingBoxVersion }}}"
+INSTALL_DIR="${BOXFLEET_INSTALL_DIR:-/opt/boxfleet}"
+BIN_DIR="${INSTALL_DIR}/bin"
+TMP_DIR="$(mktemp -d)"
+
+if [ "$BOXFLEET_VERSION" = "dev" ] || [ "$BOXFLEET_VERSION" = "" ]; then
+  echo "boxfleet-server was built without a release version; deploy a tagged release first" >&2
+  exit 1
+fi
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT INT TERM
+
+download() {
+  url="$1"
+  dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dest" "$url"
+  else
+    echo "curl or wget is required" >&2
+    exit 1
+  fi
+}
+
+release_url() {
+  asset="$1"
+  printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$BOXFLEET_VERSION" "$asset"
+}
+
+agent_asset="boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"
+sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"
+
+mkdir -p "$TMP_DIR/artifacts"
+download "$(release_url "$agent_asset")" "$TMP_DIR/artifacts/$agent_asset"
+download "$(release_url "$sing_box_asset")" "$TMP_DIR/artifacts/$sing_box_asset"
+download "$(release_url SHA256SUMS)" "$TMP_DIR/SHA256SUMS"
+
+if command -v sha256sum >/dev/null 2>&1 && sha256sum --help 2>/dev/null | grep -q -- '--ignore-missing'; then
+  (cd "$TMP_DIR" && sha256sum -c --ignore-missing SHA256SUMS)
+fi
+
+chmod 0755 "$TMP_DIR/artifacts/$agent_asset" "$TMP_DIR/artifacts/$sing_box_asset"
+
+install -d -m 0755 "$BIN_DIR"
+install -m 0755 "$TMP_DIR/artifacts/$agent_asset" "$BIN_DIR/boxfleet-agent"
+install -m 0755 "$TMP_DIR/artifacts/$sing_box_asset" "$BIN_DIR/sing-box"
+
+"$BIN_DIR/boxfleet-agent" bootstrap "$BOOTSTRAP_STRING"

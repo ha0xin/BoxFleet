@@ -50,16 +50,17 @@ bf node bootstrap <name> --ssh <ssh-target> --server-url <url> --agent-bin <path
 ```
 
 The Web UI's Nodes page also has a simplified Add Node flow. Enter a node name,
-copy the generated `boxfleet-bootstrap:...` string, download `boxfleet-agent`
-on the node, then run:
+copy the generated command, and run it on the node:
 
 ```bash
-sudo ./boxfleet-agent bootstrap 'boxfleet-bootstrap:...'
+curl -fsSL https://<server-host>:18081/install.sh -o /tmp/boxfleet-install.sh
+sudo sh /tmp/boxfleet-install.sh 'boxfleet-bootstrap:...'
 ```
 
-The Web UI bootstrap string includes `sing_box_url` by default, so the
-bootstrap command writes the agent config, installs the current binary to the
-configured agent path, downloads `sing-box`, verifies it has `with_v2ray_api`,
+The server embeds `install.sh`. That script downloads the versioned
+`boxfleet-agent` and `sing-box` release assets, installs them under
+`/opt/boxfleet/bin`, and then runs `boxfleet-agent bootstrap`. The bootstrap
+command writes the agent config, verifies `sing-box` has `with_v2ray_api`,
 installs systemd units, applies config, and starts the agent service.
 
 ### Proxies

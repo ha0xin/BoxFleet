@@ -9,9 +9,9 @@ server and native node agent.
 management/server host
   - boxfleet-server
   - embedded /admin Web UI
+  - embedded /install.sh node installer
   - bf CLI
   - SQLite database
-  - GitHub Release URL for the node sing-box binary
 
 proxy node
   - boxfleet-agent systemd service
@@ -36,11 +36,11 @@ git push origin v0.1.0
 
 The release workflow uploads:
 
-- `bf-linux-amd64`
-- `boxfleet-server-linux-amd64`
-- `boxfleet-agent-linux-amd64`
-- `sing-box-linux-amd64` built with `with_v2ray_api`
-- `boxfleet-linux-amd64.tar.gz`
+- `bf-<boxfleet-version>-linux-amd64`
+- `boxfleet-server-<boxfleet-version>-linux-amd64`
+- `boxfleet-agent-<boxfleet-version>-linux-amd64`
+- `sing-box-v1.13.13-linux-amd64` built with `with_v2ray_api`
+- `boxfleet-<boxfleet-version>-linux-amd64.tar.gz`
 - `SHA256SUMS`
 
 The release workflow builds `sing-box` from pinned upstream tag `v1.13.13` with
@@ -48,14 +48,15 @@ the BoxFleet-required tags. The Build Artifacts workflow can also be manually
 dispatched for pre-release testing, but server deployments should use GitHub
 Releases.
 
-Wait for the release workflow to finish, then download the latest public
-release on a Linux amd64 host:
+Wait for the release workflow to finish, then download the release on a Linux
+amd64 host:
 
 ```bash
-curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz
-curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/SHA256SUMS
+BOXFLEET_VERSION=v0.1.0
+curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/boxfleet-${BOXFLEET_VERSION}-linux-amd64.tar.gz"
+curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/SHA256SUMS"
 sha256sum -c --ignore-missing SHA256SUMS
-tar -xzf boxfleet-linux-amd64.tar.gz
+tar -xzf "boxfleet-${BOXFLEET_VERSION}-linux-amd64.tar.gz"
 ```
 
 ## Server Install
@@ -64,8 +65,8 @@ Install the server-side binaries:
 
 ```bash
 sudo install -d -m 0755 /opt/boxfleet/bin /opt/boxfleet/server
-sudo install -m 0755 bf-linux-amd64 /opt/boxfleet/bin/bf
-sudo install -m 0755 boxfleet-server-linux-amd64 /opt/boxfleet/bin/boxfleet-server
+sudo install -m 0755 "bf-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/bf
+sudo install -m 0755 "boxfleet-server-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/boxfleet-server
 sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db init
 ```
 
@@ -118,28 +119,27 @@ go build -o dist/deploy/boxfleet-agent ./cmd/boxfleet-agent
 
 ## Node Bootstrap
 
-Create a node from the Web UI's Nodes page. The generated bootstrap string
-includes `sing_box_url` automatically, defaulting to:
-
-```text
-sing_box_url: https://github.com/ha0xin/BoxFleet/releases/latest/download/sing-box-linux-amd64
-```
-
-Copy the generated `boxfleet-bootstrap:...` string. On the node, install the
-agent from the public release and run bootstrap:
+Create a node from the Web UI's Nodes page. The generated modal returns a
+`boxfleet-bootstrap:...` string and an install command that downloads
+`/install.sh` from the management server. On the node, run the generated
+command:
 
 ```bash
-curl -fsSLO https://github.com/ha0xin/BoxFleet/releases/latest/download/boxfleet-linux-amd64.tar.gz
-tar -xzf boxfleet-linux-amd64.tar.gz boxfleet-agent-linux-amd64
-sudo install -d -m 0755 /opt/boxfleet/bin
-sudo install -m 0755 boxfleet-agent-linux-amd64 /opt/boxfleet/bin/boxfleet-agent
-sudo /opt/boxfleet/bin/boxfleet-agent bootstrap 'boxfleet-bootstrap:...'
+curl -fsSL https://<server-host>:18081/install.sh -o /tmp/boxfleet-install.sh
+sudo sh /tmp/boxfleet-install.sh 'boxfleet-bootstrap:...'
 ```
 
-The agent copies itself to the configured path, writes
-`/etc/boxfleet/agent.json`, downloads `sing-box` from `sing_box_url`, verifies
-`with_v2ray_api`, installs systemd units, pulls config, and starts
-`boxfleet-agent.service`.
+The embedded install script downloads
+`boxfleet-agent-<boxfleet-version>-linux-amd64` and
+`sing-box-v1.13.13-linux-amd64` from the GitHub Release matching the running
+server version, verifies checksums when supported by `sha256sum`, installs both
+under `/opt/boxfleet/bin`, then runs `boxfleet-agent bootstrap`.
+
+The agent writes `/etc/boxfleet/agent.json`, verifies the installed `sing-box`
+has `with_v2ray_api`, installs systemd units, pulls config, and starts
+`boxfleet-agent.service`. The bootstrap API still accepts an explicit
+`sing_box_url` for custom installs, but the Web UI's default flow relies on the
+server install script instead.
 
 ## Config Flow
 

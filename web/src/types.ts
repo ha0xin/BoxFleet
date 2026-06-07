@@ -17,6 +17,7 @@ export type AdminNode = {
 export type AdminNodeBootstrap = {
   node: AdminNode;
   bootstrap_string: string;
+  install_script_url: string;
 };
 
 export type AdminProxy = {
@@ -133,6 +134,11 @@ export type Overview = {
   traffic: TrafficRow[];
   system_logs: SystemLog[];
   system_log_note: string;
+  release: {
+    repo: string;
+    boxfleet_version: string;
+    sing_box_version: string;
+  };
 };
 
 export type SystemLogsResponse = {

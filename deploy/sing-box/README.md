@@ -11,9 +11,10 @@ BoxFleet's MVP traffic backend uses the `sing-box` V2Ray API. The official
 `sing-box` documentation says this API is not included by default; builds must
 include the `with_v2ray_api` tag.
 
-GitHub Releases publish a compatible `sing-box-linux-amd64` binary built from
-pinned upstream tag `v1.13.13`. Node agents download that file directly during
-bootstrap when `sing_box_url` is set.
+GitHub Releases publish a compatible `sing-box-v1.13.13-linux-amd64` binary
+built from pinned upstream tag `v1.13.13`. The management server embeds
+`/install.sh`; nodes download that script from the server, and the script
+downloads the versioned `sing-box` asset from GitHub Releases.
 
 The current local build tags are:
 

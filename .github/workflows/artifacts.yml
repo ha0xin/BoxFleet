@@ -33,6 +33,7 @@ jobs:
           else
             echo "value=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           fi
+          echo "sing_box=${SING_BOX_REVISION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -59,9 +60,10 @@ jobs:
           set -euo pipefail
           mkdir -p dist/artifacts
           ldflags="-s -w -X main.version=${{ steps.version.outputs.value }}"
-          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/bf-linux-amd64 ./cmd/bf
-          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/boxfleet-server-linux-amd64 ./cmd/boxfleet-server
-          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o dist/artifacts/boxfleet-agent-linux-amd64 ./cmd/boxfleet-agent
+          boxfleet_version="${{ steps.version.outputs.value }}"
+          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/bf-${boxfleet_version}-linux-amd64" ./cmd/bf
+          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/boxfleet-server-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-server
+          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/boxfleet-agent-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-agent
 
       - name: Build sing-box with V2Ray API
         shell: bash
@@ -72,31 +74,28 @@ jobs:
           (
             cd /tmp/sing-box
             sing_box_ldflags="$(cat release/LDFLAGS)"
-            CGO_ENABLED=0 go build -trimpath -tags "$SING_BOX_TAGS" -ldflags "$sing_box_ldflags" -o "$GITHUB_WORKSPACE/dist/artifacts/sing-box-linux-amd64" ./cmd/sing-box
+            CGO_ENABLED=0 go build -trimpath -tags "$SING_BOX_TAGS" -ldflags "$sing_box_ldflags" -o "$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" ./cmd/sing-box
           )
-          "$GITHUB_WORKSPACE/dist/artifacts/sing-box-linux-amd64" version | grep with_v2ray_api
+          "$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" version | grep with_v2ray_api
 
       - name: Package artifacts
         shell: bash
         run: |
           set -euo pipefail
           chmod 0755 dist/artifacts/*
-          tar -C dist/artifacts -czf dist/boxfleet-linux-amd64.tar.gz \
-            bf-linux-amd64 \
-            boxfleet-server-linux-amd64 \
-            boxfleet-agent-linux-amd64 \
-            sing-box-linux-amd64
+          boxfleet_version="${{ steps.version.outputs.value }}"
+          tar -C dist/artifacts -czf "dist/boxfleet-${boxfleet_version}-linux-amd64.tar.gz" .
           (
             cd dist
-            sha256sum boxfleet-linux-amd64.tar.gz artifacts/* > SHA256SUMS
+            sha256sum "boxfleet-${boxfleet_version}-linux-amd64.tar.gz" artifacts/* > SHA256SUMS
           )
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: boxfleet-linux-amd64
+          name: boxfleet-${{ steps.version.outputs.value }}-linux-amd64
           path: |
-            dist/boxfleet-linux-amd64.tar.gz
+            dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz
             dist/SHA256SUMS
             dist/artifacts/*
           if-no-files-found: error
@@ -108,11 +107,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            dist/boxfleet-linux-amd64.tar.gz \
+            dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz \
             dist/SHA256SUMS \
-            dist/artifacts/bf-linux-amd64 \
-            dist/artifacts/boxfleet-server-linux-amd64 \
-            dist/artifacts/boxfleet-agent-linux-amd64 \
-            dist/artifacts/sing-box-linux-amd64 \
+            dist/artifacts/bf-${{ steps.version.outputs.value }}-linux-amd64 \
+            dist/artifacts/boxfleet-server-${{ steps.version.outputs.value }}-linux-amd64 \
+            dist/artifacts/boxfleet-agent-${{ steps.version.outputs.value }}-linux-amd64 \
+            dist/artifacts/sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64 \
             --verify-tag \
             --generate-notes

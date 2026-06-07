@@ -15,10 +15,9 @@ import (
 	"github.com/haoxin/boxfleet/internal/model"
 	"github.com/haoxin/boxfleet/internal/secret"
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"github.com/haoxin/boxfleet/internal/server/install"
 	"github.com/haoxin/boxfleet/internal/server/render"
 )
-
-const defaultSingBoxReleaseURL = "https://github.com/ha0xin/BoxFleet/releases/latest/download/sing-box-linux-amd64"
 
 type adminOverview struct {
 	Nodes         []adminNode        `json:"nodes"`
@@ -26,6 +25,13 @@ type adminOverview struct {
 	Traffic       []adminUserTraffic `json:"traffic"`
 	SystemLogs    []adminSystemLog   `json:"system_logs"`
 	SystemLogNote string             `json:"system_log_note"`
+	Release       adminRelease       `json:"release"`
+}
+
+type adminRelease struct {
+	Repo            string `json:"repo"`
+	BoxFleetVersion string `json:"boxfleet_version"`
+	SingBoxVersion  string `json:"sing_box_version"`
 }
 
 type adminNode struct {
@@ -159,8 +165,9 @@ type adminNodeBootstrapPayload struct {
 }
 
 type adminNodeBootstrapResponse struct {
-	Node            adminNode `json:"node"`
-	BootstrapString string    `json:"bootstrap_string"`
+	Node             adminNode `json:"node"`
+	BootstrapString  string    `json:"bootstrap_string"`
+	InstallScriptURL string    `json:"install_script_url"`
 }
 
 type adminProxyPayload struct {
@@ -229,7 +236,7 @@ func adminAuthMiddleware(token string, allowInsecure bool) func(http.Handler) ht
 	}
 }
 
-func adminOverviewHandler(store *db.DB) http.HandlerFunc {
+func adminOverviewHandler(store *db.DB, options Options) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodes, err := listAdminNodes(r, store)
 		if err != nil {
@@ -257,6 +264,11 @@ func adminOverviewHandler(store *db.DB) http.HandlerFunc {
 			Traffic:       traffic,
 			SystemLogs:    adminSystemLogs(systemLogs),
 			SystemLogNote: "",
+			Release: adminRelease{
+				Repo:            releaseRepo(options),
+				BoxFleetVersion: releaseVersion(options),
+				SingBoxVersion:  releaseSingBoxVersion(options),
+			},
 		})
 	}
 }
@@ -314,9 +326,6 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 			serverURL = requestBaseURL(r)
 		}
 		singBoxURL := strings.TrimSpace(payload.SingBoxURL)
-		if singBoxURL == "" {
-			singBoxURL = defaultSingBoxReleaseURL
-		}
 		bootstrapString, err := model.EncodeBootstrap(model.BootstrapConfig{
 			NodeName:        issued.NodeName,
 			Token:           issued.Token,
@@ -331,10 +340,35 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, adminNodeBootstrapResponse{
-			Node:            adminNodeFromNode(node),
-			BootstrapString: bootstrapString,
+			Node:             adminNodeFromNode(node),
+			BootstrapString:  bootstrapString,
+			InstallScriptURL: serverURL + "/install.sh",
 		})
 	}
+}
+
+func releaseRepo(options Options) string {
+	repo := strings.TrimSpace(options.Repo)
+	if repo == "" {
+		return install.DefaultRepo
+	}
+	return repo
+}
+
+func releaseVersion(options Options) string {
+	version := strings.TrimSpace(options.Version)
+	if version == "" {
+		return "dev"
+	}
+	return version
+}
+
+func releaseSingBoxVersion(options Options) string {
+	version := strings.TrimSpace(options.SingBoxVersion)
+	if version == "" {
+		return install.DefaultSingBoxVersion
+	}
+	return version
 }
 
 func requestBaseURL(r *http.Request) string {

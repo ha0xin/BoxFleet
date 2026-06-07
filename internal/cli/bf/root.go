@@ -11,6 +11,7 @@ const defaultDBPath = "boxfleet.db"
 var (
 	cfgFile string
 	okText  = color.New(color.FgGreen, color.Bold)
+	Version = "dev"
 )
 
 func Execute() error {
@@ -21,6 +22,7 @@ func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "bf",
 		Short:         "Manage a BoxFleet server",
+		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/haoxin/boxfleet/internal/model"
 )
@@ -50,9 +51,26 @@ func installCurrentBinary(target string) error {
 	if err != nil {
 		return err
 	}
+	if samePath(current, target) {
+		return nil
+	}
 	raw, err := os.ReadFile(current)
 	if err != nil {
 		return err
 	}
 	return atomicWrite(target, raw, defaultBinaryFilePerm)
+}
+
+func samePath(a, b string) bool {
+	resolvedA, errA := filepath.EvalSymlinks(a)
+	if errA == nil {
+		a = resolvedA
+	}
+	resolvedB, errB := filepath.EvalSymlinks(b)
+	if errB == nil {
+		b = resolvedB
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && absA == absB
 }
