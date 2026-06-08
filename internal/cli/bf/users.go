@@ -122,7 +122,7 @@ func userNodeInfoCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&nodeName, "node", "", "node name")
-	cmd.Flags().StringVar(&format, "format", "text", "output format: json")
+	cmd.Flags().StringVar(&format, "format", "json", "output format: json")
 	_ = cmd.MarkFlagRequired("node")
 	return cmd
 }

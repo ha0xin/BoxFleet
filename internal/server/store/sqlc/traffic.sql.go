@@ -144,6 +144,40 @@ func (q *Queries) GetTrafficCredentialByNodeAuthName(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getTrafficReportBySequence = `-- name: GetTrafficReportBySequence :one
+SELECT
+  id,
+  node_id,
+  sequence,
+  agent_boot_id,
+  reported_at,
+  created_at
+FROM traffic_reports
+WHERE node_id = ?1
+  AND agent_boot_id = ?2
+  AND sequence = ?3
+`
+
+type GetTrafficReportBySequenceParams struct {
+	NodeID      string `json:"node_id"`
+	AgentBootID string `json:"agent_boot_id"`
+	Sequence    int64  `json:"sequence"`
+}
+
+func (q *Queries) GetTrafficReportBySequence(ctx context.Context, arg GetTrafficReportBySequenceParams) (TrafficReport, error) {
+	row := q.db.QueryRowContext(ctx, getTrafficReportBySequence, arg.NodeID, arg.AgentBootID, arg.Sequence)
+	var i TrafficReport
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.Sequence,
+		&i.AgentBootID,
+		&i.ReportedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const sumTrafficByAllUsers = `-- name: SumTrafficByAllUsers :many
 SELECT
   u.name AS user_name,

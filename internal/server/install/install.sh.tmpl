@@ -50,9 +50,17 @@ download "$(release_url "$agent_asset")" "$TMP_DIR/artifacts/$agent_asset"
 download "$(release_url "$sing_box_asset")" "$TMP_DIR/artifacts/$sing_box_asset"
 download "$(release_url SHA256SUMS)" "$TMP_DIR/SHA256SUMS"
 
-if command -v sha256sum >/dev/null 2>&1 && sha256sum --help 2>/dev/null | grep -q -- '--ignore-missing'; then
-  (cd "$TMP_DIR" && sha256sum -c --ignore-missing SHA256SUMS)
+if ! command -v sha256sum >/dev/null 2>&1; then
+  echo "sha256sum is required to verify downloaded artifacts" >&2
+  exit 1
 fi
+awk -v path="artifacts/$agent_asset" '$2 == path { print }' "$TMP_DIR/SHA256SUMS" > "$TMP_DIR/SHA256SUMS.selected"
+awk -v path="artifacts/$sing_box_asset" '$2 == path { print }' "$TMP_DIR/SHA256SUMS" >> "$TMP_DIR/SHA256SUMS.selected"
+if [ "$(wc -l < "$TMP_DIR/SHA256SUMS.selected")" -ne 2 ]; then
+  echo "SHA256SUMS does not contain expected artifact checksums" >&2
+  exit 1
+fi
+(cd "$TMP_DIR" && sha256sum -c SHA256SUMS.selected)
 
 chmod 0755 "$TMP_DIR/artifacts/$agent_asset" "$TMP_DIR/artifacts/$sing_box_asset"
 

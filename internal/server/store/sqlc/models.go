@@ -93,12 +93,13 @@ type NodeOutbound struct {
 }
 
 type NodeToken struct {
-	ID         string         `json:"id"`
-	NodeID     string         `json:"node_id"`
-	TokenHash  string         `json:"token_hash"`
-	CreatedAt  string         `json:"created_at"`
-	LastUsedAt sql.NullString `json:"last_used_at"`
-	RevokedAt  sql.NullString `json:"revoked_at"`
+	ID          string         `json:"id"`
+	NodeID      string         `json:"node_id"`
+	TokenHash   string         `json:"token_hash"`
+	TokenDigest sql.NullString `json:"token_digest"`
+	CreatedAt   string         `json:"created_at"`
+	LastUsedAt  sql.NullString `json:"last_used_at"`
+	RevokedAt   sql.NullString `json:"revoked_at"`
 }
 
 type Proxy struct {

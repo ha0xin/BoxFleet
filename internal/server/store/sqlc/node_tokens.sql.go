@@ -7,29 +7,75 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createNodeToken = `-- name: CreateNodeToken :exec
 INSERT INTO node_tokens (
   id,
   node_id,
-  token_hash
+  token_hash,
+  token_digest
 ) VALUES (
   ?1,
   ?2,
-  ?3
+  ?3,
+  ?4
 )
 `
 
 type CreateNodeTokenParams struct {
-	ID        string `json:"id"`
-	NodeID    string `json:"node_id"`
-	TokenHash string `json:"token_hash"`
+	ID          string         `json:"id"`
+	NodeID      string         `json:"node_id"`
+	TokenHash   string         `json:"token_hash"`
+	TokenDigest sql.NullString `json:"token_digest"`
 }
 
 func (q *Queries) CreateNodeToken(ctx context.Context, arg CreateNodeTokenParams) error {
-	_, err := q.db.ExecContext(ctx, createNodeToken, arg.ID, arg.NodeID, arg.TokenHash)
+	_, err := q.db.ExecContext(ctx, createNodeToken,
+		arg.ID,
+		arg.NodeID,
+		arg.TokenHash,
+		arg.TokenDigest,
+	)
 	return err
+}
+
+const getActiveNodeTokenByDigest = `-- name: GetActiveNodeTokenByDigest :one
+SELECT
+  t.id,
+  t.node_id,
+  t.token_hash,
+  t.token_digest,
+  t.created_at,
+  t.last_used_at,
+  t.revoked_at
+FROM node_tokens t
+JOIN nodes n ON n.id = t.node_id
+WHERE n.name = ?1
+  AND n.status != 'disabled'
+  AND t.revoked_at IS NULL
+  AND t.token_digest = ?2
+`
+
+type GetActiveNodeTokenByDigestParams struct {
+	NodeName    string         `json:"node_name"`
+	TokenDigest sql.NullString `json:"token_digest"`
+}
+
+func (q *Queries) GetActiveNodeTokenByDigest(ctx context.Context, arg GetActiveNodeTokenByDigestParams) (NodeToken, error) {
+	row := q.db.QueryRowContext(ctx, getActiveNodeTokenByDigest, arg.NodeName, arg.TokenDigest)
+	var i NodeToken
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.TokenHash,
+		&i.TokenDigest,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
 }
 
 const listActiveNodeTokensByNodeName = `-- name: ListActiveNodeTokensByNodeName :many
@@ -37,6 +83,7 @@ SELECT
   t.id,
   t.node_id,
   t.token_hash,
+  t.token_digest,
   t.created_at,
   t.last_used_at,
   t.revoked_at
@@ -61,6 +108,7 @@ func (q *Queries) ListActiveNodeTokensByNodeName(ctx context.Context, nodeName s
 			&i.ID,
 			&i.NodeID,
 			&i.TokenHash,
+			&i.TokenDigest,
 			&i.CreatedAt,
 			&i.LastUsedAt,
 			&i.RevokedAt,

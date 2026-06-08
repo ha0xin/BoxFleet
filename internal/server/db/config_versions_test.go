@@ -66,6 +66,71 @@ func TestTrafficAndLogReports(t *testing.T) {
 	if len(summary) != 1 || summary[0].RawBytes != 1024 {
 		t.Fatalf("summary = %#v", summary)
 	}
+	if err := store.RecordTrafficReport(ctx, TrafficReport{
+		NodeName:    "azus",
+		Sequence:    1,
+		AgentBootID: "boot",
+		Deltas: []TrafficDelta{{
+			AuthName:      "vless-39090@alice",
+			Direction:     "downlink",
+			RawBytesDelta: 1024,
+			CounterValue:  2048,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = store.SumTrafficByUser(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary) != 1 || summary[0].RawBytes != 1024 {
+		t.Fatalf("duplicate report changed summary = %#v", summary)
+	}
+	if err := store.RecordTrafficReport(ctx, TrafficReport{
+		NodeName:    "azus",
+		Sequence:    2,
+		AgentBootID: "boot",
+		Deltas: []TrafficDelta{{
+			AuthName:      "deleted-access",
+			Direction:     "downlink",
+			RawBytesDelta: 2048,
+			CounterValue:  4096,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordTrafficReport(ctx, TrafficReport{
+		NodeName:    "azus",
+		Sequence:    3,
+		AgentBootID: "boot",
+		Deltas: []TrafficDelta{{
+			AuthName:      "deleted-access",
+			Direction:     "downlink",
+			RawBytesDelta: 2048,
+			CounterValue:  4096,
+		}, {
+			AuthName:      "vless-39090@alice",
+			Direction:     "uplink",
+			RawBytesDelta: 512,
+			CounterValue:  512,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = store.SumTrafficByUser(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary) != 2 {
+		t.Fatalf("summary after stale auth = %#v", summary)
+	}
+	byDirection := make(map[string]int64)
+	for _, row := range summary {
+		byDirection[row.Direction] = row.RawBytes
+	}
+	if byDirection["downlink"] != 1024 || byDirection["uplink"] != 512 {
+		t.Fatalf("summary after stale auth = %#v", summary)
+	}
 	if err := store.RecordLogEvents(ctx, LogEventReport{
 		NodeName: "azus",
 		Events: []LogEventInput{{

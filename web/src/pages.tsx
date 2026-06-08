@@ -903,6 +903,7 @@ export function ProxiesPage({ nodes, request }: { nodes: AdminNode[]; request: R
   const [showDisabled, setShowDisabled] = useState(false);
   const [message, setMessage] = useState("");
   const [deleteMessage, setDeleteMessage] = useState("");
+  const [savingProxy, setSavingProxy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const visibleProxies = showDisabled ? proxies : proxies.filter((proxy) => proxy.enabled);
 
@@ -941,6 +942,9 @@ export function ProxiesPage({ nodes, request }: { nodes: AdminNode[]; request: R
   }
 
   async function saveProxy() {
+    if (savingProxy) {
+      return;
+    }
     const targetNode = selectedProxy?.node_name || nodeName;
     if (!targetNode) {
       setMessage("Select a node first.");
@@ -949,15 +953,23 @@ export function ProxiesPage({ nodes, request }: { nodes: AdminNode[]; request: R
     const path = selectedProxy
       ? `/api/admin/nodes/${encodeURIComponent(selectedProxy.node_name)}/proxies/${encodeURIComponent(selectedProxy.name)}`
       : `/api/admin/nodes/${encodeURIComponent(targetNode)}/proxies`;
-    await request<AdminProxy>(path, {
-      method: selectedProxy ? "PATCH" : "POST",
-      body: JSON.stringify({
-        ...proxyForm,
-        settings_json: JSON.stringify(proxySettingsPayload(realitySettings))
-      })
-    });
-    setMessage(selectedProxy ? "Proxy saved." : "Proxy created.");
-    await loadProxies();
+    setSavingProxy(true);
+    setMessage("");
+    try {
+      await request<AdminProxy>(path, {
+        method: selectedProxy ? "PATCH" : "POST",
+        body: JSON.stringify({
+          ...proxyForm,
+          settings_json: JSON.stringify(proxySettingsPayload(realitySettings))
+        })
+      });
+      setMessage(selectedProxy ? "Proxy saved." : "Proxy created.");
+      await loadProxies();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "save proxy failed");
+    } finally {
+      setSavingProxy(false);
+    }
   }
 
   async function confirmDeleteProxy() {
@@ -1160,7 +1172,7 @@ export function ProxiesPage({ nodes, request }: { nodes: AdminNode[]; request: R
             </div>
             <DialogFooter>
               {message ? <span className="mr-auto text-xs text-gray-700">{message}</span> : null}
-              <Button size="sm" onClick={() => void saveProxy()}>
+              <Button size="sm" loading={savingProxy} disabled={savingProxy} onClick={() => void saveProxy()}>
                 Save Proxy
               </Button>
             </DialogFooter>

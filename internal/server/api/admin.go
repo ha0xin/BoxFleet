@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -217,6 +219,7 @@ type adminConfigPublishResult struct {
 
 func adminAuthMiddleware(token string, allowInsecure bool) func(http.Handler) http.Handler {
 	token = strings.TrimSpace(token)
+	tokenDigest := sha256.Sum256([]byte(token))
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if token == "" {
@@ -227,7 +230,8 @@ func adminAuthMiddleware(token string, allowInsecure bool) func(http.Handler) ht
 				next.ServeHTTP(w, r)
 				return
 			}
-			if bearerToken(r.Header.Get("Authorization")) != token {
+			presentedDigest := sha256.Sum256([]byte(bearerToken(r.Header.Get("Authorization"))))
+			if subtle.ConstantTimeCompare(presentedDigest[:], tokenDigest[:]) != 1 {
 				http.Error(w, "invalid admin token", http.StatusUnauthorized)
 				return
 			}

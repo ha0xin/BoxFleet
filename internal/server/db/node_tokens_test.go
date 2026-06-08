@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,9 @@ func TestIssueAndVerifyNodeToken(t *testing.T) {
 	}
 	if issued.Token == "" {
 		t.Fatal("token is empty")
+	}
+	if !strings.HasPrefix(issued.Token, "bfnt_") {
+		t.Fatalf("token = %q", issued.Token)
 	}
 	ok, err := store.VerifyNodeToken(ctx, "azus", issued.Token)
 	if err != nil {

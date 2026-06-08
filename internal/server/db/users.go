@@ -30,6 +30,9 @@ func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams)
 	if name == "" {
 		return ProxyUser{}, errors.New("user name is required")
 	}
+	if err := validateNameForAuth(name, "user"); err != nil {
+		return ProxyUser{}, err
+	}
 	multiplier := params.TrafficMultiplier
 	if multiplier == 0 {
 		multiplier = 1.0

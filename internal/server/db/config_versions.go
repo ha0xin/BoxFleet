@@ -48,49 +48,58 @@ func (db *DB) PublishConfig(ctx context.Context, nodeName string, raw []byte) (P
 		return PublishedConfig{}, err
 	}
 	hash := SHA256Hex(raw)
-	existing, err := db.q.GetConfigVersionByHash(ctx, store.GetConfigVersionByHashParams{
-		NodeID:     node.ID,
-		ConfigHash: hash,
-	})
-	if err == nil {
-		if err := db.publishConfigVersion(ctx, node.ID, existing.ID); err != nil {
-			return PublishedConfig{}, err
+	var out PublishedConfig
+	err = db.withTx(ctx, func(q *store.Queries) error {
+		existing, err := q.GetConfigVersionByHash(ctx, store.GetConfigVersionByHashParams{
+			NodeID:     node.ID,
+			ConfigHash: hash,
+		})
+		if err == nil {
+			if err := publishConfigVersion(ctx, q, node.ID, existing.ID); err != nil {
+				return err
+			}
+			version, err := q.GetConfigVersionByID(ctx, existing.ID)
+			if err != nil {
+				return err
+			}
+			out = PublishedConfig{ConfigVersion: version, Created: false}
+			return nil
 		}
-		version, err := db.q.GetConfigVersionByID(ctx, existing.ID)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		next, err := q.NextConfigVersion(ctx, node.ID)
 		if err != nil {
-			return PublishedConfig{}, err
+			return err
 		}
-		return PublishedConfig{ConfigVersion: version, Created: false}, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return PublishedConfig{}, err
-	}
-	next, err := db.q.NextConfigVersion(ctx, node.ID)
+		configID, err := id.New("cfg")
+		if err != nil {
+			return err
+		}
+		if err := q.CreateConfigVersion(ctx, store.CreateConfigVersionParams{
+			ID:         configID,
+			NodeID:     node.ID,
+			Version:    next,
+			Status:     "published",
+			ConfigJson: string(raw),
+			ConfigHash: hash,
+		}); err != nil {
+			return err
+		}
+		if err := publishConfigVersion(ctx, q, node.ID, configID); err != nil {
+			return err
+		}
+		version, err := q.GetConfigVersionByID(ctx, configID)
+		if err != nil {
+			return err
+		}
+		out = PublishedConfig{ConfigVersion: version, Created: true}
+		return nil
+	})
 	if err != nil {
 		return PublishedConfig{}, err
 	}
-	configID, err := id.New("cfg")
-	if err != nil {
-		return PublishedConfig{}, err
-	}
-	if err := db.q.CreateConfigVersion(ctx, store.CreateConfigVersionParams{
-		ID:         configID,
-		NodeID:     node.ID,
-		Version:    next,
-		Status:     "published",
-		ConfigJson: string(raw),
-		ConfigHash: hash,
-	}); err != nil {
-		return PublishedConfig{}, err
-	}
-	if err := db.publishConfigVersion(ctx, node.ID, configID); err != nil {
-		return PublishedConfig{}, err
-	}
-	version, err := db.q.GetConfigVersionByID(ctx, configID)
-	if err != nil {
-		return PublishedConfig{}, err
-	}
-	return PublishedConfig{ConfigVersion: version, Created: true}, nil
+	return out, nil
 }
 
 func (db *DB) GetTargetConfig(ctx context.Context, nodeName string) (ConfigVersion, error) {
@@ -240,16 +249,20 @@ func (db *DB) RecordHeartbeat(ctx context.Context, heartbeat Heartbeat) error {
 }
 
 func (db *DB) publishConfigVersion(ctx context.Context, nodeID, configID string) error {
-	if err := db.q.MarkConfigVersionPublished(ctx, configID); err != nil {
+	return publishConfigVersion(ctx, db.q, nodeID, configID)
+}
+
+func publishConfigVersion(ctx context.Context, q *store.Queries, nodeID, configID string) error {
+	if err := q.MarkConfigVersionPublished(ctx, configID); err != nil {
 		return err
 	}
-	if err := db.q.SupersedePublishedConfigVersions(ctx, store.SupersedePublishedConfigVersionsParams{
+	if err := q.SupersedePublishedConfigVersions(ctx, store.SupersedePublishedConfigVersionsParams{
 		NodeID: nodeID,
 		KeepID: configID,
 	}); err != nil {
 		return err
 	}
-	return db.q.UpsertNodeConfigTarget(ctx, store.UpsertNodeConfigTargetParams{
+	return q.UpsertNodeConfigTarget(ctx, store.UpsertNodeConfigTargetParams{
 		NodeID:                nodeID,
 		TargetConfigVersionID: sql.NullString{String: configID, Valid: true},
 	})

@@ -3,12 +3,16 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteLoadConfigDefaults(t *testing.T) {
@@ -139,6 +143,80 @@ func TestReportLogsStreamsAndSplitsBatches(t *testing.T) {
 	}
 }
 
+func TestExecRunnerStreamLinesDrainsLargeStderr(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var lines int
+	err := (ExecRunner{}).StreamLines(ctx, os.Args[0], []string{"-test.run=TestHelperProcess", "--", "stream-lines-large-stderr"}, func(line string) bool {
+		if line == "stdout-ok" {
+			lines++
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines != 1 {
+		t.Fatalf("lines = %d, want 1", lines)
+	}
+}
+
+func TestOnceRetriesRestartWhenConfigFileMatchesButApplyWasNotSaved(t *testing.T) {
+	t.Parallel()
+	config := []byte(`{"inbounds":[]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/node/config":
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_1")
+			w.Header().Set("X-BoxFleet-Config-SHA256", bytesSHA256Hex(config))
+			_, _ = w.Write(config)
+		case "/api/node/apply-result", "/api/node/heartbeat", "/api/node/traffic", "/api/node/logs", "/api/node/system-logs":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "sing-box.json")
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &restartFailRunner{}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(tmp, "state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = runner
+	if err := a.Once(context.Background()); err == nil {
+		t.Fatal("Once succeeded despite restart failure")
+	}
+	if runner.restarts != 1 {
+		t.Fatalf("restarts = %d, want 1", runner.restarts)
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "--" {
+		return
+	}
+	switch os.Args[len(os.Args)-1] {
+	case "stream-lines-large-stderr":
+		_, _ = io.WriteString(os.Stderr, strings.Repeat("x", 256*1024))
+		_, _ = fmt.Fprintln(os.Stdout, "stdout-ok")
+		os.Exit(0)
+	default:
+		return
+	}
+}
+
 type streamLinesRunner struct {
 	lines []string
 }
@@ -157,5 +235,25 @@ func (r streamLinesRunner) StreamLines(_ context.Context, _ string, _ []string, 
 			return nil
 		}
 	}
+	return nil
+}
+
+type restartFailRunner struct {
+	restarts int
+}
+
+func (r *restartFailRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 && args[0] == "restart" {
+		r.restarts++
+		return errors.New("restart failed")
+	}
+	return nil
+}
+
+func (r *restartFailRunner) Output(context.Context, string, ...string) ([]byte, error) {
+	return []byte("sing-box test"), nil
+}
+
+func (r *restartFailRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
 	return nil
 }

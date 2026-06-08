@@ -25,6 +25,19 @@ type DB struct {
 	q   *store.Queries
 }
 
+func (db *DB) withTx(ctx context.Context, fn func(*store.Queries) error) error {
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	qtx := db.q.WithTx(tx)
+	if err := fn(qtx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 type MigrationStatus struct {
 	CurrentVersion int
 	LatestVersion  int

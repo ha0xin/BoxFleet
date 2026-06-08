@@ -13,6 +13,19 @@ INSERT INTO traffic_reports (
   sqlc.arg(reported_at)
 );
 
+-- name: GetTrafficReportBySequence :one
+SELECT
+  id,
+  node_id,
+  sequence,
+  agent_boot_id,
+  reported_at,
+  created_at
+FROM traffic_reports
+WHERE node_id = sqlc.arg(node_id)
+  AND agent_boot_id = sqlc.arg(agent_boot_id)
+  AND sequence = sqlc.arg(sequence);
+
 -- name: CreateTrafficUsageDelta :exec
 INSERT INTO traffic_usage_deltas (
   id,

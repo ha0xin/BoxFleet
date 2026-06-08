@@ -282,6 +282,9 @@ func normalizeProxyParams(params CreateProxyParams) (Proxy, error) {
 	if name == "" {
 		return Proxy{}, errors.New("proxy name is required")
 	}
+	if err := validateNameForAuth(name, "proxy"); err != nil {
+		return Proxy{}, err
+	}
 	protocol := strings.TrimSpace(params.Protocol)
 	if !validProxyProtocol(protocol) {
 		return Proxy{}, fmt.Errorf("unsupported proxy protocol %q", protocol)

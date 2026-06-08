@@ -116,6 +116,38 @@ func TestIssueVLESSRealityAccess(t *testing.T) {
 	}
 }
 
+func TestAuthNameDelimitersRejected(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice@proxy"}); err == nil {
+		t.Fatal("user name containing @ was accepted")
+	}
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice>>>proxy"}); err == nil {
+		t.Fatal("user name containing stats delimiter was accepted")
+	}
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:   "azus",
+		Name:       "vless@39090",
+		Protocol:   ProtocolVLESSReality,
+		ListenPort: 39090,
+		Enabled:    true,
+	}); err == nil {
+		t.Fatal("proxy name containing @ was accepted")
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:   "azus",
+		Name:       "vless>>>39090",
+		Protocol:   ProtocolVLESSReality,
+		ListenPort: 39090,
+		Enabled:    true,
+	}); err == nil {
+		t.Fatal("proxy name containing stats delimiter was accepted")
+	}
+}
+
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "boxfleet.db"))

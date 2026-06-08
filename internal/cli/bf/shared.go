@@ -36,7 +36,10 @@ func runCommand(cmd *cobra.Command, name string, args ...string) error {
 }
 
 func shellQuote(value string) string {
-	return strconv.Quote(value)
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func formatNullString(value sql.NullString) string {

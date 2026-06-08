@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +40,7 @@ const (
 	journalBatchMaxEntries = 100
 	journalBatchMaxBytes   = 256 * 1024
 	journalMaxBatches      = 8
+	stderrCaptureLimit     = 4096
 )
 
 type Config struct {
@@ -72,15 +75,17 @@ type ConfigResponse struct {
 }
 
 type State struct {
-	BootID              string            `json:"boot_id"`
-	Sequence            int64             `json:"sequence"`
-	LastCounters        map[string]int64  `json:"last_counters"`
-	CounterEpoch        map[string]int64  `json:"counter_epoch"`
-	LastLogLines        map[string]bool   `json:"last_log_lines"`
-	LastLogSince        string            `json:"last_log_since"`
-	LastLogCursor       string            `json:"last_log_cursor"`
-	LastSystemLogCursor map[string]string `json:"last_system_log_cursor"`
-	LastSystemLogSince  map[string]string `json:"last_system_log_since"`
+	BootID              string               `json:"boot_id"`
+	Sequence            int64                `json:"sequence"`
+	LastCounters        map[string]int64     `json:"last_counters"`
+	CounterEpoch        map[string]int64     `json:"counter_epoch"`
+	LastLogLines        map[string]bool      `json:"last_log_lines"`
+	LastLogSince        string               `json:"last_log_since"`
+	LastLogCursor       string               `json:"last_log_cursor"`
+	LastSystemLogCursor map[string]string    `json:"last_system_log_cursor"`
+	LastSystemLogSince  map[string]string    `json:"last_system_log_since"`
+	AppliedConfigHash   string               `json:"applied_config_hash"`
+	PendingTraffic      *model.TrafficReport `json:"pending_traffic,omitempty"`
 }
 
 type Runner interface {
@@ -124,8 +129,22 @@ func (ExecRunner) StreamLines(ctx context.Context, name string, args []string, h
 	}
 	stderrDone := make(chan string, 1)
 	go func() {
-		raw, _ := io.ReadAll(io.LimitReader(stderr, 4096))
-		stderrDone <- strings.TrimSpace(string(raw))
+		var buf bytes.Buffer
+		tmp := make([]byte, 1024)
+		for {
+			n, err := stderr.Read(tmp)
+			if n > 0 && buf.Len() < stderrCaptureLimit {
+				remaining := stderrCaptureLimit - buf.Len()
+				if n > remaining {
+					n = remaining
+				}
+				_, _ = buf.Write(tmp[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+		stderrDone <- strings.TrimSpace(buf.String())
 	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -267,7 +286,9 @@ func (a *Agent) Install(ctx context.Context) error {
 	if err := a.Runner.Run(ctx, "systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	_ = a.Runner.Run(ctx, "systemctl", "enable", a.Config.SingBoxService)
+	if err := a.Runner.Run(ctx, "systemctl", "enable", a.Config.SingBoxService); err != nil {
+		return err
+	}
 	if err := a.Once(ctx); err != nil {
 		return err
 	}
@@ -320,7 +341,24 @@ func (a *Agent) Once(ctx context.Context) error {
 		return err
 	}
 	config := response.Data
+	state, err := a.LoadState()
+	if err != nil {
+		return err
+	}
+	configHash := response.Hash
+	if configHash == "" {
+		configHash = bytesSHA256Hex(config)
+		response.Hash = configHash
+	}
 	if current, err := os.ReadFile(a.Config.SingBoxConfig); err == nil && bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(config)) {
+		if state.AppliedConfigHash == configHash {
+			a.reportRuntimeState(ctx, response)
+			return nil
+		}
+		if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.SingBoxService); err != nil {
+			_ = a.ReportApplyResult(ctx, response, "failed", err.Error())
+			return err
+		}
 		a.reportRuntimeState(ctx, response)
 		return nil
 	}
@@ -359,6 +397,17 @@ func (a *Agent) reportRuntimeState(ctx context.Context, response ConfigResponse)
 			fmt.Fprintf(os.Stderr, "boxfleet-agent report %s failed: %v\n", report.name, err)
 		}
 	}
+	if response.Hash != "" {
+		state, err := a.LoadState()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent load state failed: %v\n", err)
+			return
+		}
+		state.AppliedConfigHash = response.Hash
+		if err := a.SaveState(state); err != nil {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent save applied config state failed: %v\n", err)
+		}
+	}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -384,11 +433,20 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) ReportTraffic(ctx context.Context) error {
-	stats, err := v2raystats.Query(ctx, a.Config.V2RayAPIAddress, []string{"user>>>"}, false)
+	state, err := a.LoadState()
 	if err != nil {
 		return err
 	}
-	state, err := a.LoadState()
+	if state.PendingTraffic != nil {
+		if err := a.postJSON(ctx, "/api/node/traffic", state.PendingTraffic); err != nil {
+			return err
+		}
+		state.PendingTraffic = nil
+		if err := a.SaveState(state); err != nil {
+			return err
+		}
+	}
+	stats, err := v2raystats.Query(ctx, a.Config.V2RayAPIAddress, []string{"user>>>"}, false)
 	if err != nil {
 		return err
 	}
@@ -430,9 +488,14 @@ func (a *Agent) ReportTraffic(ctx context.Context) error {
 		ReportedAt:  now,
 		Deltas:      deltas,
 	}
+	state.PendingTraffic = &payload
+	if err := a.SaveState(state); err != nil {
+		return err
+	}
 	if err := a.postJSON(ctx, "/api/node/traffic", payload); err != nil {
 		return err
 	}
+	state.PendingTraffic = nil
 	return a.SaveState(state)
 }
 
@@ -743,6 +806,9 @@ func (a *Agent) LoadState() (State, error) {
 	if state.CounterEpoch == nil {
 		state.CounterEpoch = make(map[string]int64)
 	}
+	if state.LastLogLines == nil {
+		state.LastLogLines = make(map[string]bool)
+	}
 	if state.LastSystemLogCursor == nil {
 		state.LastSystemLogCursor = make(map[string]string)
 	}
@@ -890,6 +956,11 @@ func firstLine(value string) string {
 		return value[:idx]
 	}
 	return value
+}
+
+func bytesSHA256Hex(data []byte) string {
+	sum := sha256.Sum256(bytes.TrimSpace(data))
+	return hex.EncodeToString(sum[:])
 }
 
 func parseUserTrafficStat(name string) (authName, direction string, ok bool) {

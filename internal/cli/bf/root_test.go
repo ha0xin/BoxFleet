@@ -40,7 +40,7 @@ func TestCredentialAndConfigCommands(t *testing.T) {
 		t.Fatalf("server inbound = %#v", inbound)
 	}
 
-	nodeInfo := runBF(t, dbPath, "user", "node-info", "alice", "--node", "azus", "--format", "json")
+	nodeInfo := runBF(t, dbPath, "user", "node-info", "alice", "--node", "azus")
 	var info map[string]any
 	if err := json.Unmarshal([]byte(nodeInfo), &info); err != nil {
 		t.Fatalf("node info is not json: %v\n%s", err, nodeInfo)
@@ -75,6 +75,16 @@ func TestCredentialAndConfigCommands(t *testing.T) {
 	}
 	runBF(t, dbPath, "user", "delete", "alice")
 	runBF(t, dbPath, "node", "delete", "azus")
+}
+
+func TestShellQuote(t *testing.T) {
+	quoted := shellQuote(`/tmp/box$fleet/'$(touch pwn)'`)
+	if quoted != `'/tmp/box$fleet/'\''$(touch pwn)'\'''` {
+		t.Fatalf("quoted = %q", quoted)
+	}
+	if shellQuote("") != "''" {
+		t.Fatalf("empty quote = %q", shellQuote(""))
+	}
 }
 
 func runBF(t *testing.T, dbPath string, args ...string) string {

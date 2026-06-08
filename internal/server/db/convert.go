@@ -10,6 +10,13 @@ func normalizeName(name string) string {
 	return strings.TrimSpace(name)
 }
 
+func validateNameForAuth(name, resource string) error {
+	if strings.Contains(name, "@") || strings.Contains(name, ">>>") {
+		return fmt.Errorf("%s name must not contain @ or >>>", resource)
+	}
+	return nil
+}
+
 func nullableTrimmedString(value string) sql.NullString {
 	value = strings.TrimSpace(value)
 	if value == "" {

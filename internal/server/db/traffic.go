@@ -11,6 +11,7 @@ import (
 	"github.com/haoxin/boxfleet/internal/id"
 	"github.com/haoxin/boxfleet/internal/model"
 	store "github.com/haoxin/boxfleet/internal/server/store/sqlc"
+	"github.com/mattn/go-sqlite3"
 )
 
 type TrafficReport = model.TrafficReport
@@ -36,60 +37,79 @@ func (db *DB) RecordTrafficReport(ctx context.Context, report TrafficReport) err
 	if err != nil {
 		return err
 	}
-	if err := db.q.CreateTrafficReport(ctx, store.CreateTrafficReportParams{
-		ID:          reportID,
-		NodeID:      node.ID,
-		Sequence:    report.Sequence,
-		AgentBootID: report.AgentBootID,
-		ReportedAt:  reportedAt,
-	}); err != nil {
-		return err
-	}
-	for _, delta := range report.Deltas {
-		if delta.RawBytesDelta <= 0 {
-			continue
-		}
-		if delta.Direction != "uplink" && delta.Direction != "downlink" {
-			return fmt.Errorf("unsupported traffic direction %q", delta.Direction)
-		}
-		credential, err := db.q.GetTrafficCredentialByNodeAuthName(ctx, store.GetTrafficCredentialByNodeAuthNameParams{
-			NodeName: node.Name,
-			AuthName: delta.AuthName,
-		})
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("auth name %q not found on node %q", delta.AuthName, node.Name)
+	return db.withTx(ctx, func(q *store.Queries) error {
+		if err := q.CreateTrafficReport(ctx, store.CreateTrafficReportParams{
+			ID:          reportID,
+			NodeID:      node.ID,
+			Sequence:    report.Sequence,
+			AgentBootID: report.AgentBootID,
+			ReportedAt:  reportedAt,
+		}); err != nil {
+			if isSQLiteUniqueConstraint(err) {
+				if _, existingErr := q.GetTrafficReportBySequence(ctx, store.GetTrafficReportBySequenceParams{
+					NodeID:      node.ID,
+					AgentBootID: report.AgentBootID,
+					Sequence:    report.Sequence,
+				}); existingErr == nil {
+					return nil
+				}
 			}
 			return err
 		}
-		observedAt := delta.ObservedAt
-		if observedAt == "" {
-			observedAt = reportedAt
+		for _, delta := range report.Deltas {
+			if delta.RawBytesDelta <= 0 {
+				continue
+			}
+			if delta.Direction != "uplink" && delta.Direction != "downlink" {
+				return fmt.Errorf("unsupported traffic direction %q", delta.Direction)
+			}
+			credential, err := q.GetTrafficCredentialByNodeAuthName(ctx, store.GetTrafficCredentialByNodeAuthNameParams{
+				NodeName: node.Name,
+				AuthName: delta.AuthName,
+			})
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					continue
+				}
+				return err
+			}
+			observedAt := delta.ObservedAt
+			if observedAt == "" {
+				observedAt = reportedAt
+			}
+			deltaID, err := id.New("td")
+			if err != nil {
+				return err
+			}
+			billable := int64(math.Ceil(float64(delta.RawBytesDelta) * credential.EffectiveMultiplier))
+			if err := q.CreateTrafficUsageDelta(ctx, store.CreateTrafficUsageDeltaParams{
+				ID:                  deltaID,
+				ReportID:            reportID,
+				NodeID:              node.ID,
+				ProxyUserID:         credential.ProxyUserID,
+				ProxyID:             sql.NullString{String: credential.ProxyID, Valid: true},
+				AuthName:            delta.AuthName,
+				Direction:           delta.Direction,
+				RawBytesDelta:       delta.RawBytesDelta,
+				EffectiveMultiplier: credential.EffectiveMultiplier,
+				BillableBytesDelta:  billable,
+				CounterValue:        delta.CounterValue,
+				CounterEpoch:        delta.CounterEpoch,
+				ObservedAt:          observedAt,
+			}); err != nil {
+				return err
+			}
 		}
-		deltaID, err := id.New("td")
-		if err != nil {
-			return err
-		}
-		billable := int64(math.Ceil(float64(delta.RawBytesDelta) * credential.EffectiveMultiplier))
-		if err := db.q.CreateTrafficUsageDelta(ctx, store.CreateTrafficUsageDeltaParams{
-			ID:                  deltaID,
-			ReportID:            reportID,
-			NodeID:              node.ID,
-			ProxyUserID:         credential.ProxyUserID,
-			ProxyID:             sql.NullString{String: credential.ProxyID, Valid: true},
-			AuthName:            delta.AuthName,
-			Direction:           delta.Direction,
-			RawBytesDelta:       delta.RawBytesDelta,
-			EffectiveMultiplier: credential.EffectiveMultiplier,
-			BillableBytesDelta:  billable,
-			CounterValue:        delta.CounterValue,
-			CounterEpoch:        delta.CounterEpoch,
-			ObservedAt:          observedAt,
-		}); err != nil {
-			return err
-		}
+		return nil
+	})
+}
+
+func isSQLiteUniqueConstraint(err error) bool {
+	var sqliteErr sqlite3.Error
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique || sqliteErr.Code == sqlite3.ErrConstraint
 	}
-	return nil
+	return false
 }
 
 func (db *DB) SumTrafficByUser(ctx context.Context, userName string) ([]TrafficSummary, error) {
