@@ -1,12 +1,14 @@
 import { Check, LogOut, RefreshCw, Settings2 } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Sidebar } from "@cloudflare/kumo";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LoadingDots } from "@/components/ui/loading-dots";
 import { Note } from "@/components/ui/note";
+import { PageHeader } from "@/components/ui/page-header/page-header";
 
 import { adminBasename, pages } from "./navigation";
 import type { Overview, SystemLogsResponse } from "./types";
@@ -35,6 +37,7 @@ function adminRequestPath(path: string): string {
 function App() {
   const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const [activeToken, setActiveToken] = useState(() => localStorage.getItem("boxfleet.adminToken") ?? "");
   const [tokenInput, setTokenInput] = useState(activeToken);
   const [authVersion, setAuthVersion] = useState(0);
@@ -99,43 +102,38 @@ function App() {
   const currentPage = pages.find((item) => item.path === location.pathname) ?? pages[0];
 
   return (
-    <div className="grid min-h-screen grid-cols-1 bg-background-200 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="flex flex-col gap-5 border-r border-gray-alpha-400 bg-background-100 px-3 py-4">
-        <div className="flex items-center gap-2.5 px-2 py-1">
-          <Settings2 size={22} className="text-teal-700" />
-          <div className="flex flex-col">
-            <strong className="text-base font-semibold text-gray-1000">BoxFleet</strong>
-            <span className="text-xs text-gray-700">Admin</span>
+    <Sidebar.Provider collapsible="none">
+      <Sidebar>
+        <Sidebar.Header>
+          <div className="flex items-center gap-2.5 px-1 py-1">
+            <Settings2 size={22} className="text-gray-1000" />
+            <div className="flex flex-col">
+              <strong className="text-base font-semibold text-gray-1000">BoxFleet</strong>
+              <span className="text-xs text-gray-700">Admin</span>
+            </div>
           </div>
-        </div>
-        <nav className="flex flex-col gap-1">
-          {pages.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
+        </Sidebar.Header>
+        <Sidebar.Content>
+          <Sidebar.Menu>
+            {pages.map((item) => (
+              <Sidebar.MenuButton
                 key={item.id}
-                to={item.path}
-                end={item.path === "/"}
-                className={({ isActive }) => `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                  isActive
-                    ? "bg-gray-alpha-200 font-semibold text-gray-1000"
-                    : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000"
-                }`}
+                icon={item.icon}
+                active={
+                  item.path === "/"
+                    ? location.pathname === "/"
+                    : location.pathname.startsWith(item.path)
+                }
+                onClick={() => navigate(item.path)}
               >
-                <Icon size={16} />
-                <span>{item.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
-      </aside>
-      <main className="min-w-0 px-6 py-5">
-        <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-1000">
-            {currentPage.label}
-          </h1>
+                {item.label}
+              </Sidebar.MenuButton>
+            ))}
+          </Sidebar.Menu>
+        </Sidebar.Content>
+        <Sidebar.Footer>
           <form
-            className="flex flex-wrap items-center gap-2"
+            className="flex flex-col gap-2 px-1 py-1"
             onSubmit={(event) => {
               event.preventDefault();
               applyToken();
@@ -147,35 +145,41 @@ function App() {
               placeholder="Admin token"
               value={tokenInput}
               onChange={(event) => setTokenInput(event.target.value)}
-              containerClassName="w-[220px]"
+              containerClassName="w-full"
             />
-            <Button
-              type="submit"
-              size="sm"
-              variant="secondary"
-              disabled={tokenInput.trim() === activeToken.trim()}
-              prefix={<Check size={14} />}
-            >
-              Apply
-            </Button>
-            {activeToken ? (
-              <Button type="button" size="sm" variant="tertiary" prefix={<LogOut size={14} />} onClick={logout}>
-                Logout
+            <div className="flex items-center gap-2">
+              <Button
+                type="submit"
+                size="sm"
+                variant="secondary"
+                disabled={tokenInput.trim() === activeToken.trim()}
+                prefix={<Check size={14} />}
+              >
+                Apply
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={adminFetching}
-              svgOnly
-              onClick={() => void refresh()}
-              title="Refresh"
-            >
-              <RefreshCw size={14} className={adminFetching ? "animate-spin" : ""} />
-            </Button>
+              {activeToken ? (
+                <Button type="button" size="sm" variant="tertiary" prefix={<LogOut size={14} />} onClick={logout}>
+                  Logout
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={adminFetching}
+                svgOnly
+                onClick={() => void refresh()}
+                title="Refresh"
+                className="ml-auto"
+              >
+                <RefreshCw size={14} className={adminFetching ? "animate-spin" : ""} />
+              </Button>
+            </div>
           </form>
-        </header>
+        </Sidebar.Footer>
+      </Sidebar>
+      <main className="min-w-0 flex-1 px-6 py-5">
+        <PageHeader title={currentPage.label} className="mb-5" />
         {error ? (
           <div className="mb-4">
             <Note variant="error" size="md">{error instanceof Error ? error.message : "request failed"}</Note>
@@ -222,7 +226,7 @@ function App() {
           </section>
         )}
       </main>
-    </div>
+    </Sidebar.Provider>
   );
 }
 

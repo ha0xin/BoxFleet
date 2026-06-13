@@ -1,37 +1,13 @@
 import * as React from "react";
-import { Slot } from "@radix-ui/react-slot";
-import { cva, type VariantProps } from "class-variance-authority";
+import { Button as KumoButton, buttonVariants as kumoButtonVariants } from "@cloudflare/kumo/components/button";
 
 import { cn } from "@/lib/utils";
-import { Spinner } from "./spinner";
 
-const buttonVariants = cva(
-  "transition-colors select-none font-medium border border-transparent inline-flex justify-center items-center gap-0.5 max-w-full disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-400 disabled:cursor-not-allowed",
-  {
-    variants: {
-      variant: {
-        default: "bg-gray-1000 text-background-100 hover:bg-gray-900",
-        secondary:
-          "bg-background-100 border-gray-alpha-400 text-gray-1000 hover:bg-gray-alpha-200",
-        tertiary:
-          "bg-transparent border-transparent text-gray-1000 hover:bg-gray-alpha-200",
-        error: "bg-red-800 border-red-800 text-white hover:bg-red-900 hover:border-red-900",
-        warning: "bg-amber-800 border-amber-800 text-[#0a0a0a] hover:bg-amber-900 hover:border-amber-900"
-      },
-      size: {
-        tiny: "h-6 px-1.5 rounded text-xs leading-4",
-        sm: "h-8 px-2 rounded-md text-sm leading-5",
-        md: "h-10 px-3 rounded-md text-sm leading-5",
-        lg: "h-12 px-3.5 rounded-lg text-base leading-6"
-      }
-    },
-    defaultVariants: { variant: "default", size: "md" }
-  }
-);
+type LegacyButtonVariant = "default" | "secondary" | "tertiary" | "error" | "warning";
+type LegacyButtonSize = "tiny" | "sm" | "md" | "lg";
 
 export interface ButtonProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "prefix">,
-    VariantProps<typeof buttonVariants> {
+  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "prefix"> {
   asChild?: boolean;
   shape?: "square" | "circle" | "rounded";
   svgOnly?: boolean;
@@ -39,35 +15,92 @@ export interface ButtonProps
   suffix?: React.ReactNode;
   shadow?: boolean;
   loading?: boolean;
+  variant?: LegacyButtonVariant | null;
+  size?: LegacyButtonSize | null;
 }
+
+const variantMap = {
+  default: "primary",
+  secondary: "secondary",
+  tertiary: "ghost",
+  error: "destructive",
+  warning: "secondary"
+} as const;
+
+const sizeMap = {
+  tiny: "xs",
+  sm: "sm",
+  md: "base",
+  lg: "lg"
+} as const;
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     { className, variant, size, asChild, shape, svgOnly, prefix, suffix, shadow, loading, children, disabled, ...props },
     ref
   ) => {
-    const Comp: any = asChild ? Slot : "button";
-    return (
-      <Comp
-        ref={ref}
-        disabled={disabled || loading}
-        className={cn(
+    if (asChild && React.isValidElement(children)) {
+      const child = children as React.ReactElement<{ className?: string }>;
+      return React.cloneElement(children, {
+        ...props,
+        ref,
+        className: cn(
           buttonVariants({ variant, size }),
           (shape === "square" || shape === "circle") && "aspect-square h-[unset] p-0",
           (shape === "rounded" || shape === "circle") && "rounded-full",
           svgOnly && "aspect-square px-0",
-          shadow && "shadow-small",
-          className
-        )}
+          shadow && "shadow-sm",
+          className,
+          child.props.className
+        )
+      } as React.HTMLAttributes<HTMLElement> & { ref: React.Ref<HTMLButtonElement> });
+    }
+
+    const kumoSize = sizeMap[size ?? "md"];
+    const buttonClassName = cn(
+      kumoButtonVariants({
+        variant: variantMap[variant ?? "default"],
+        size: kumoSize,
+        shape: shape === "circle" ? "circle" : shape === "square" || svgOnly ? "square" : "base"
+      }),
+      variant === "warning" && "!bg-kumo-warning !text-black hover:!bg-kumo-warning/80",
+      shape === "rounded" && "rounded-full",
+      svgOnly && "aspect-square px-0",
+      shadow && "shadow-sm",
+      className
+    );
+    return (
+      <KumoButton
+        ref={ref}
+        icon={loading ? undefined : prefix}
+        loading={loading}
+        disabled={disabled || loading}
+        className={buttonClassName}
         {...props}
       >
-        {loading ? <Spinner size={size === "lg" ? 22 : 14} /> : prefix}
-        {children ? <span className="px-1">{children}</span> : null}
+        {children}
         {loading ? null : suffix}
-      </Comp>
+      </KumoButton>
     );
   }
 );
 Button.displayName = "Button";
 
-export { buttonVariants };
+export function buttonVariants({
+  variant,
+  size,
+  shape
+}: {
+  variant?: LegacyButtonVariant | null;
+  size?: LegacyButtonSize | null;
+  shape?: ButtonProps["shape"];
+} = {}) {
+  return cn(
+    kumoButtonVariants({
+      variant: variantMap[variant ?? "default"],
+      size: sizeMap[size ?? "md"],
+      shape: shape === "circle" ? "circle" : shape === "square" ? "square" : "base"
+    }),
+    variant === "warning" && "!bg-kumo-warning !text-black hover:!bg-kumo-warning/80"
+  );
+}

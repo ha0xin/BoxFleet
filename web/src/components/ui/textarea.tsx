@@ -1,17 +1,17 @@
 import * as React from "react";
+import {
+  Textarea as KumoTextarea,
+  type InputAreaProps
+} from "@cloudflare/kumo/components/input";
 
 import { cn } from "@/lib/utils";
 
-export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+export const Textarea = React.forwardRef<HTMLTextAreaElement, InputAreaProps>(
   ({ className, ...props }, ref) => (
-    <textarea
+    <KumoTextarea
       ref={ref}
-      className={cn(
-        "flex w-full rounded-md border border-gray-alpha-400 bg-background-100 px-3 py-2 text-sm text-gray-1000 transition-shadow duration-150",
-        "placeholder:text-gray-700 focus:outline-none focus-visible:shadow-input-ring",
-        "disabled:cursor-not-allowed disabled:bg-background-200 disabled:text-gray-700",
-        className
-      )}
+      className={cn("w-full", className)}
+      aria-label={props["aria-label"] ?? props.placeholder ?? "Text area"}
       {...props}
     />
   )

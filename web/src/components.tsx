@@ -2,13 +2,9 @@ import { Link, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Note } from "@/components/ui/note";
 import { StatusDot, type StatusTone } from "@/components/ui/status-dot";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -34,35 +30,34 @@ function ActionsCell({
   return (
     <TableCell className="w-10 text-right">
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={`Actions for ${label}`}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-700 transition-colors hover:bg-gray-alpha-200 hover:text-gray-1000 focus:outline-none"
-          >
-            <MoreHorizontal size={16} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenu.Trigger
+          render={
+            <button
+              type="button"
+              aria-label={`Actions for ${label}`}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-700 transition-colors hover:bg-gray-alpha-200 hover:text-gray-1000 focus:outline-none"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          }
+        />
+        <DropdownMenu.Content align="end">
           {onEdit ? (
-            <DropdownMenuItem onSelect={onEdit}>
-              <Pencil />
-              <span>{editLabel}</span>
-            </DropdownMenuItem>
+            <DropdownMenu.Item icon={<Pencil className="h-4 w-4" />} onClick={onEdit}>
+              {editLabel}
+            </DropdownMenu.Item>
           ) : null}
           {onConnectionInfo ? (
-            <DropdownMenuItem onSelect={onConnectionInfo}>
-              <Link />
-              <span>Connection Info</span>
-            </DropdownMenuItem>
+            <DropdownMenu.Item icon={<Link className="h-4 w-4" />} onClick={onConnectionInfo}>
+              Connection Info
+            </DropdownMenu.Item>
           ) : null}
           {onDelete ? (
-            <DropdownMenuItem destructive onSelect={onDelete}>
-              <Trash2 />
-              <span>{deleteLabel}</span>
-            </DropdownMenuItem>
+            <DropdownMenu.Item icon={<Trash2 className="h-4 w-4" />} variant="danger" onClick={onDelete}>
+              {deleteLabel}
+            </DropdownMenu.Item>
           ) : null}
-        </DropdownMenuContent>
+        </DropdownMenu.Content>
       </DropdownMenu>
     </TableCell>
   );

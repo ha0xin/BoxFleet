@@ -67,8 +67,8 @@ implementations:
 - chi for HTTP routing.
 - zerolog for structured logging.
 - bcrypt for token hashes.
-- React, TypeScript, Vite, Tailwind, shadcn/Radix primitives, and lucide-react
-  for the embedded Web UI.
+- React, TypeScript, Vite, Tailwind v4, Cloudflare Kumo, and
+  @phosphor-icons/react for the embedded Web UI.
 - TanStack Query for frontend request state and cache invalidation.
 - TanStack Table for filterable/paginated admin data tables.
 - react-hook-form and zod for frontend form state and validation.

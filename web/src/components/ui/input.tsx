@@ -1,84 +1,91 @@
 import * as React from "react";
-import { cva, type VariantProps } from "class-variance-authority";
+import {
+  Input as KumoInput,
+  InputGroup,
+  type InputProps as KumoInputProps
+} from "@cloudflare/kumo/components/input";
 
 import { cn } from "@/lib/utils";
 
-const inputVariants = cva(
-  "flex border border-gray-alpha-400 overflow-hidden bg-background-100 relative focus-within:shadow-input-ring transition-shadow duration-150",
-  {
-    variants: {
-      size: {
-        sm: "h-8 text-sm rounded-md [--icon-size:14px]",
-        md: "h-10 text-sm rounded-md [--icon-size:16px]",
-        lg: "h-12 text-base rounded-lg [--icon-size:18px]"
-      }
-    },
-    defaultVariants: { size: "md" }
-  }
-);
+type LegacyInputSize = "sm" | "md" | "lg";
 
-export interface InputProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "size" | "prefix">,
-    VariantProps<typeof inputVariants> {
+export interface InputProps extends Omit<KumoInputProps, "size" | "prefix"> {
   prefix?: React.ReactNode;
   suffix?: React.ReactNode;
   prefixStyling?: boolean;
   suffixStyling?: boolean;
   label?: string;
   containerClassName?: string;
+  size?: LegacyInputSize | null;
 }
+
+const sizeMap = {
+  sm: "sm",
+  md: "base",
+  lg: "lg"
+} as const;
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   (
-    { className, containerClassName, type, size, label, suffix, prefix, prefixStyling = true, suffixStyling = true, id, ...props },
+    {
+      className,
+      containerClassName,
+      size,
+      label,
+      suffix,
+      prefix,
+      prefixStyling = true,
+      suffixStyling = true,
+      "aria-label": ariaLabel,
+      ...props
+    },
     ref
   ) => {
-    const autoId = React.useId();
-    const inputId = id ?? autoId;
+    const kumoSize = sizeMap[size ?? "md"];
+    const accessibleName = ariaLabel ?? (typeof label === "string" ? label : props.placeholder);
 
-    const field = (
-      <div className={cn(inputVariants({ size }), containerClassName)}>
-        {prefix ? (
-          <span
-            className={cn(
-              "flex shrink-0 items-center px-3 text-gray-700 [&>svg]:h-[var(--icon-size)] [&>svg]:w-[var(--icon-size)]",
-              prefixStyling && "bg-background-200"
-            )}
-          >
-            {prefix}
-          </span>
-        ) : null}
-        <input
-          id={inputId}
-          type={type}
-          ref={ref}
-          className={cn(
-            "w-full bg-transparent outline-none placeholder:text-gray-700 disabled:cursor-not-allowed disabled:bg-background-200 disabled:text-gray-700 disabled:placeholder:text-gray-500",
-            (!prefix || prefixStyling) && "pl-3",
-            (!suffix || suffixStyling) && "pr-3",
-            className
-          )}
-          {...props}
-        />
-        {suffix ? (
-          <span
-            className={cn(
-              "flex shrink-0 items-center px-3 text-gray-700 [&>svg]:h-[var(--icon-size)] [&>svg]:w-[var(--icon-size)]",
-              suffixStyling && "bg-background-200"
-            )}
-          >
-            {suffix}
-          </span>
-        ) : null}
-      </div>
-    );
+    if (prefix || suffix) {
+      return (
+        <InputGroup
+          label={label}
+          size={kumoSize}
+          className={cn("w-full", containerClassName)}
+          disabled={props.disabled}
+        >
+          {prefix ? (
+            <InputGroup.Addon
+              align="start"
+              className={cn(!prefixStyling && "bg-transparent")}
+            >
+              {prefix}
+            </InputGroup.Addon>
+          ) : null}
+          <InputGroup.Input
+            ref={ref}
+            className={className}
+            aria-label={accessibleName}
+            {...props}
+          />
+          {suffix ? (
+            suffixStyling ? (
+              <InputGroup.Suffix>{suffix}</InputGroup.Suffix>
+            ) : (
+              <InputGroup.Addon align="end">{suffix}</InputGroup.Addon>
+            )
+          ) : null}
+        </InputGroup>
+      );
+    }
 
-    if (!label) return field;
     return (
-      <label htmlFor={inputId} className="block">
-        <div className="mb-2 text-xs text-gray-900">{label}</div>
-        {field}
-      </label>
+      <KumoInput
+        ref={ref}
+        label={label}
+        size={kumoSize}
+        aria-label={accessibleName}
+        className={cn("w-full", className, containerClassName)}
+        {...props}
+      />
     );
   }
 );
