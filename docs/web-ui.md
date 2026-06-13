@@ -60,7 +60,7 @@ npx kumo add <Block>        # copy a block (e.g. PageHeader) into the project
 
 `kumo add` reads the block source from the installed package (offline), rewrites
 its relative imports to `@cloudflare/kumo`, and writes it into the `blocksDir`
-configured in `web/kumo.json` (currently `src/components/ui`). Blocks are
+configured in `web/kumo.json` (the Kumo default, `src/components/kumo`). Blocks are
 **vendored source you then adapt**, not imported dependencies — adapt the copy to
 fit BoxFleet (e.g. the `PageHeader` block was adapted to make breadcrumbs
 optional and render actions without a tabs row).

@@ -108,7 +108,7 @@ main                    PageHeader (title + actions) + page content
 - Navigation pages are defined in `web/src/navigation.ts`. Add a page there
   first, then add its `<Route>` in `App.tsx`.
 - Page titles + page-level action buttons use the vendored, adapted `PageHeader`
-  block (`web/src/components/ui/page-header/page-header.tsx`). Render it inside
+  block (`web/src/components/kumo/page-header/page-header.tsx`). Render it inside
   each page so the page owns its title and actions.
 
 ## Component usage rules

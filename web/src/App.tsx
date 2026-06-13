@@ -1,27 +1,15 @@
-import { Check, LogOut, RefreshCw, Settings2 } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { GearSix } from "@phosphor-icons/react";
+import { useState } from "react";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Sidebar } from "@cloudflare/kumo";
+import { Banner, Loader, Sidebar, Text, useSidebar } from "@cloudflare/kumo";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { LoadingDots } from "@/components/ui/loading-dots";
-import { Note } from "@/components/ui/note";
-import { PageHeader } from "@/components/ui/page-header/page-header";
-
-import { adminBasename, pages } from "./navigation";
-import type { Overview, SystemLogsResponse } from "./types";
-
-const NetworkEventsPage = lazy(() => import("./pages").then((module) => ({ default: module.NetworkEventsPage })));
-const NodesPage = lazy(() => import("./pages").then((module) => ({ default: module.NodesPage })));
-const OverviewPage = lazy(() => import("./pages").then((module) => ({ default: module.OverviewPage })));
-const ProxiesPage = lazy(() => import("./pages").then((module) => ({ default: module.ProxiesPage })));
-const SystemLogsPage = lazy(() => import("./pages").then((module) => ({ default: module.SystemLogsPage })));
-const TrafficPage = lazy(() => import("./pages").then((module) => ({ default: module.TrafficPage })));
-const UsersPage = lazy(() => import("./pages").then((module) => ({ default: module.UsersPage })));
-
-type Requester = <T>(path: string, init?: RequestInit) => Promise<T>;
+import { AppPageHeader } from "@/components/app-page-header";
+import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
+import type { NavItem } from "./navigation";
+import { OverviewPage } from "./pages/overview";
+import { SettingsPage } from "./pages/settings";
+import type { Overview } from "./types";
 
 function adminRequestPath(path: string): string {
   if (!path.startsWith("/api/admin")) {
@@ -36,8 +24,6 @@ function adminRequestPath(path: string): string {
 
 function App() {
   const queryClient = useQueryClient();
-  const location = useLocation();
-  const navigate = useNavigate();
   const [activeToken, setActiveToken] = useState(() => localStorage.getItem("boxfleet.adminToken") ?? "");
   const [tokenInput, setTokenInput] = useState(activeToken);
   const [authVersion, setAuthVersion] = useState(0);
@@ -95,165 +81,117 @@ function App() {
   const loading = overviewQuery.isLoading;
   const error = overviewQuery.error;
 
-  const trafficRows = overview?.traffic ?? [];
-  const totalTraffic = useMemo(() => trafficRows.reduce((sum, row) => sum + row.billable_bytes, 0), [trafficRows]);
-  const activeNodes = overview?.nodes.filter((node) => node.status === "active").length ?? 0;
-  const activeUsers = overview?.users.filter((user) => user.status === "active").length ?? 0;
-  const currentPage = pages.find((item) => item.path === location.pathname) ?? pages[0];
-
   return (
-    <Sidebar.Provider collapsible="none">
-      <Sidebar>
-        <Sidebar.Header>
-          <div className="flex items-center gap-2.5 px-1 py-1">
-            <Settings2 size={22} className="text-gray-1000" />
-            <div className="flex flex-col">
-              <strong className="text-base font-semibold text-gray-1000">BoxFleet</strong>
-              <span className="text-xs text-gray-700">Admin</span>
-            </div>
-          </div>
-        </Sidebar.Header>
-        <Sidebar.Content>
-          <Sidebar.Menu>
-            {pages.map((item) => (
-              <Sidebar.MenuButton
-                key={item.id}
-                icon={item.icon}
-                active={
-                  item.path === "/"
-                    ? location.pathname === "/"
-                    : location.pathname.startsWith(item.path)
-                }
-                onClick={() => navigate(item.path)}
-              >
-                {item.label}
-              </Sidebar.MenuButton>
-            ))}
-          </Sidebar.Menu>
-        </Sidebar.Content>
-        <Sidebar.Footer>
-          <form
-            className="flex flex-col gap-2 px-1 py-1"
-            onSubmit={(event) => {
-              event.preventDefault();
-              applyToken();
-            }}
-          >
-            <Input
-              type="password"
-              size="sm"
-              placeholder="Admin token"
-              value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
-              containerClassName="w-full"
-            />
-            <div className="flex items-center gap-2">
-              <Button
-                type="submit"
-                size="sm"
-                variant="secondary"
-                disabled={tokenInput.trim() === activeToken.trim()}
-                prefix={<Check size={14} />}
-              >
-                Apply
-              </Button>
-              {activeToken ? (
-                <Button type="button" size="sm" variant="tertiary" prefix={<LogOut size={14} />} onClick={logout}>
-                  Logout
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={adminFetching}
-                svgOnly
-                onClick={() => void refresh()}
-                title="Refresh"
-                className="ml-auto"
-              >
-                <RefreshCw size={14} className={adminFetching ? "animate-spin" : ""} />
-              </Button>
-            </div>
-          </form>
-        </Sidebar.Footer>
-      </Sidebar>
-      <main className="min-w-0 flex-1 px-6 py-5">
-        <PageHeader title={currentPage.label} className="mb-5" />
+    <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
+      <AppSidebar />
+
+      <main className="min-w-0 flex-1 overflow-y-auto">
         {error ? (
-          <div className="mb-4">
-            <Note variant="error" size="md">{error instanceof Error ? error.message : "request failed"}</Note>
+          <div className="px-6 pt-6">
+            <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} />
           </div>
         ) : null}
+
         {loading && !overview ? (
-          <div className="flex items-center justify-center py-12">
-            <LoadingDots size={6}>Loading BoxFleet data</LoadingDots>
+          <div className="flex items-center justify-center py-16">
+            <Loader size={20} />
           </div>
         ) : (
-          <section className="flex flex-col gap-4">
-            <Suspense fallback={<RouteLoading />}>
-              <Routes>
-                <Route
-                  path="/"
-                  element={
-                    <OverviewPage
-                      activeNodes={activeNodes}
-                      activeUsers={activeUsers}
-                      overview={overview}
-                      trafficRows={trafficRows}
-                      totalTraffic={totalTraffic}
-                    />
-                  }
+          <Routes>
+            <Route path="/" element={<OverviewPage overview={overview} />} />
+            <Route path="/nodes" element={<ComingSoon />} />
+            <Route path="/proxies" element={<ComingSoon />} />
+            <Route path="/users" element={<ComingSoon />} />
+            <Route path="/traffic" element={<ComingSoon />} />
+            <Route path="/network-events" element={<ComingSoon />} />
+            <Route path="/system-logs" element={<ComingSoon />} />
+            <Route
+              path="/settings"
+              element={
+                <SettingsPage
+                  tokenInput={tokenInput}
+                  setTokenInput={setTokenInput}
+                  activeToken={activeToken}
+                  applyToken={applyToken}
+                  logout={logout}
+                  refresh={() => void refresh()}
+                  refreshing={adminFetching}
                 />
-                <Route path="/nodes" element={<NodesPage nodes={overview?.nodes ?? []} request={request} refresh={refresh} />} />
-                <Route path="/proxies" element={<ProxiesPage nodes={overview?.nodes ?? []} request={request} />} />
-                <Route path="/users" element={<UsersPage refresh={refresh} request={request} users={overview?.users ?? []} />} />
-                <Route path="/traffic" element={<TrafficPage rows={trafficRows} />} />
-                <Route
-                  path="/network-events"
-                  element={
-                    <NetworkEventsPage
-                      nodes={overview?.nodes ?? []}
-                      request={request}
-                      users={overview?.users ?? []}
-                    />
-                  }
-                />
-                <Route path="/system-logs" element={<SystemLogsRoute authVersion={authVersion} request={request} />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-          </section>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         )}
       </main>
     </Sidebar.Provider>
   );
 }
 
-function RouteLoading() {
+function AppSidebar() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { open } = useSidebar();
+
+  const renderItem = (item: NavItem) => (
+    <Sidebar.MenuButton
+      key={item.id}
+      icon={item.icon}
+      tooltip={item.label}
+      active={item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)}
+      onClick={() => navigate(item.path)}
+    >
+      {item.label}
+    </Sidebar.MenuButton>
+  );
+
   return (
-    <div className="flex items-center justify-center py-10">
-      <LoadingDots size={6}>Loading page</LoadingDots>
-    </div>
+    <Sidebar>
+      <Sidebar.Header>
+        <div className="flex items-center gap-2.5 py-1">
+          <GearSix size={22} weight="duotone" className="shrink-0 text-kumo-default" />
+          {open ? (
+            <div className="flex min-w-0 flex-col">
+              <Text bold as="span" truncate>
+                BoxFleet
+              </Text>
+              <Text variant="secondary" size="xs" as="span" truncate>
+                Admin
+              </Text>
+            </div>
+          ) : null}
+        </div>
+      </Sidebar.Header>
+
+      <Sidebar.Content>
+        {navGroups.map((group, index) => (
+          <Sidebar.Group key={group.label ?? `group-${index}`}>
+            {group.label ? <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel> : null}
+            <Sidebar.Menu>{group.items.map(renderItem)}</Sidebar.Menu>
+          </Sidebar.Group>
+        ))}
+
+        <Sidebar.Separator />
+
+        <Sidebar.Group>
+          <Sidebar.Menu>{renderItem(settingsNav)}</Sidebar.Menu>
+        </Sidebar.Group>
+      </Sidebar.Content>
+
+      <Sidebar.Footer>
+        <Sidebar.Trigger />
+      </Sidebar.Footer>
+    </Sidebar>
   );
 }
 
-function SystemLogsRoute({ authVersion, request }: { authVersion: number; request: Requester }) {
-  const systemLogsQuery = useQuery({
-    queryKey: ["admin", "system-logs", authVersion],
-    queryFn: () => request<SystemLogsResponse>("/api/admin/system-logs?limit=100")
-  });
-  if (systemLogsQuery.isLoading) {
-    return <RouteLoading />;
-  }
-  if (systemLogsQuery.error) {
-    return (
-      <Note variant="error" size="md">
-        {systemLogsQuery.error instanceof Error ? systemLogsQuery.error.message : "load system logs failed"}
-      </Note>
-    );
-  }
-  return <SystemLogsPage response={systemLogsQuery.data ?? { logs: [], note: "" }} />;
+function ComingSoon() {
+  const location = useLocation();
+  const page = pages.find((item) => item.path === location.pathname);
+  return (
+    <AppPageHeader title={page?.label ?? "Page"} description="This page is being rewritten on native Kumo.">
+      <Text variant="secondary">Coming soon.</Text>
+    </AppPageHeader>
+  );
 }
 
 export default App;
