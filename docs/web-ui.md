@@ -19,7 +19,7 @@ The UI uses React, TypeScript, Vite, Tailwind v4, and Cloudflare Kumo. Build app
 UI directly on **native Kumo components** imported from `@cloudflare/kumo`, not on
 native browser controls. The earlier shadcn-shaped compatibility wrappers under
 `web/src/components/ui/` and the Geist `--ds-*` token overrides in `globals.css`
-are being retired in favour of native Kumo + semantic tokens.
+have been removed in favour of native Kumo + semantic tokens.
 
 See `docs/design-system.md` for the visual conventions (semantic tokens, brand
 accent, status tones, app-shell layout, typography).
@@ -51,23 +51,61 @@ Kumo ships a CLI that is both the API reference and the block-vendoring tool.
 Use it instead of guessing component shapes:
 
 ```bash
-npx kumo ls                 # list all components with categories
-npx kumo doc <Component>    # full prop/variant reference for one component
-npx kumo ai                 # the AI usage guide (tokens, rules, patterns)
-npx kumo blocks             # list installable page-level blocks
-npx kumo add <Block>        # copy a block (e.g. PageHeader) into the project
+cd web
+npx kumo ai                  # AI usage guide: tokens, rules, patterns
+npx kumo doc <Component>     # full prop/variant reference for one component
+npx kumo ls                  # list all components with categories
+npx kumo blocks              # list installable page-level blocks
+npx kumo add <Block>         # copy a block (e.g. PageHeader) into the project
 ```
 
 `kumo add` reads the block source from the installed package (offline), rewrites
 its relative imports to `@cloudflare/kumo`, and writes it into the `blocksDir`
 configured in `web/kumo.json` (the Kumo default, `src/components/kumo`). Blocks are
 **vendored source you then adapt**, not imported dependencies — adapt the copy to
-fit BoxFleet (e.g. the `PageHeader` block was adapted to make breadcrumbs
-optional and render actions without a tabs row).
+fit BoxFleet.
+
+When a Kumo API or layout behavior is unfamiliar, run `npx kumo ai` and
+`npx kumo docs <Component>` from `web/` before editing. Do not infer compound
+component names, prop names, variants, or accessibility requirements from memory.
+For examples beyond CLI docs, consult the local Kumo demo site source in
+`refs/kumo/packages/kumo-docs-astro/`; for implementation details, consult
+`refs/kumo/packages/kumo/src/`. The `refs/` tree is reference-only.
 
 The two authoritative conventions from `kumo ai`: **semantic tokens only**
 (`bg-kumo-base`, `text-kumo-default`, …; never raw Tailwind colors) and **no
 `dark:` variants** (light/dark is handled automatically via `light-dark()`).
+
+## Current Shell Checkpoint
+
+The active native-Kumo shell was checkpointed after the rewrite:
+
+- `web/src/App.tsx` uses Kumo `Sidebar.Provider`, `Sidebar`, grouped nav items,
+  and a bottom `Sidebar.Trigger`.
+- `web/src/components/app-page-header.tsx` is the active page header. Its top
+  breadcrumb/action bar is `h-[58px]` to align with Kumo `Sidebar.Header`.
+- `web/src/pages/overview.tsx` and `web/src/pages/settings.tsx` are implemented
+  on native Kumo. Other pages are placeholders until rewritten.
+- `web/src/components/kumo/page-header/page-header.tsx` is a vendored Kumo block
+  reference, not the active header.
+
+Future page-header work should use the existing `actions` slot for review/publish
+controls and should preserve the 58px top-bar alignment. Pending/unpublished
+configuration state may tint or otherwise alter the header, but it must keep
+semantic Kumo tokens and avoid raw color utilities.
+
+## Visual Verification
+
+Use Playwright for layout-sensitive UI checks. Launch system Chrome directly:
+
+```ts
+chromium.launch({ executablePath: "/usr/bin/google-chrome-stable" })
+```
+
+This avoids relying on a user's default Chrome profile. If comparing with a
+running Cloudflare UI or a local dev server, measure actual DOM geometry and
+computed styles rather than eyeballing. The 58px header/sidebar alignment was
+verified this way by comparing the two elements' bounding boxes.
 
 ## Navigation
 
