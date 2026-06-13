@@ -124,7 +124,7 @@ Manual UI smoke for the current MVP:
 - Open Nodes, click a node, and confirm node edit plus render/publish controls
   are present. Proxy editing should not live under the Node modal.
 - Open Network Events.
-- Confirm Node, User, and Page Size are Radix/shadcn selects, not native browser
+- Confirm Node, User, and Page Size are Kumo selects, not native browser
   selects.
 - Pick a date range, set start/end local times, apply filters, and confirm the
   table updates with server-side pagination.

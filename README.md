@@ -65,7 +65,7 @@ byte units:       github.com/dustin/go-humanize
 HTTP router:      github.com/go-chi/chi/v5
 logging:          github.com/rs/zerolog
 token hashes:     golang.org/x/crypto/bcrypt
-Web UI:           React + TypeScript + Vite + Tailwind + shadcn/Radix + lucide-react
+Web UI:           React + TypeScript + Vite + Tailwind v4 + Cloudflare Kumo + @phosphor-icons/react
 frontend data:    TanStack Query + TanStack Table
 frontend forms:   react-hook-form + zod
 frontend dates:   date-fns + react-day-picker

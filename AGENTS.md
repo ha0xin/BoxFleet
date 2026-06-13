@@ -90,16 +90,19 @@ Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the cli
 
 ### Web UI
 
-`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. UI is split into `types.ts`, `navigation.ts`, `pages.tsx`, `components.tsx`, `utils.ts`, and shadcn-style primitives under `components/ui/`. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
+`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is being rewritten directly on **native Cloudflare Kumo** components — the previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` are being retired. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
 
-Use the established frontend stack instead of hand-rolling UI behavior:
+Use the established frontend stack instead of hand-rolling UI behavior. See `docs/design-system.md` for visual conventions and `docs/web-ui.md` for the Kumo CLI workflow.
 
-- shadcn/Radix primitives for dialogs, dropdowns, popovers, selects, switches, tabs, labels, and other interactive controls. Do not use native `<select>` for app controls when a Radix/shadcn primitive exists.
+- Cloudflare Kumo for all app UI: dialogs, dropdowns, popovers, selects, switches, tables, labels, buttons, inputs, banners, badges, surfaces, grids, and other interactive controls. Import native components from `@cloudflare/kumo` directly; use Base UI primitives re-exported by `@cloudflare/kumo/primitives/*` only when a styled Kumo component is not available.
+- **Semantic tokens only** — `bg-kumo-base`, `text-kumo-default`, `bg-kumo-canvas`, `kumo-hairline`, etc. Never raw Tailwind colors and never `dark:` variants (Kumo handles light/dark via `light-dark()`).
+- Kumo's CLI is the source of truth and the vendoring mechanism: `npx kumo ls` / `kumo doc <Component>` for APIs, `kumo ai` for the usage guide, and `kumo add <Block>` to copy a block (e.g. `PageHeader`) into `blocksDir` from `kumo.json`. Blocks are vendored, not imported.
+- Tailwind v4 is wired through `@tailwindcss/vite`; `web/src/styles/globals.css` keeps `@source` then `@cloudflare/kumo/styles` then `tailwindcss` in that order.
 - TanStack Query for API request state, caching, refresh, and invalidation.
 - TanStack Table for non-trivial tables, especially paginated/filterable admin data.
 - react-hook-form plus zod for form state and validation.
 - date-fns plus react-day-picker for date/time formatting, duration math, and date/range picking.
-- lucide-react for icons.
+- `@phosphor-icons/react` for app icons (Kumo's own components use Phosphor internally, so the app matches).
 
 Network Events is the reference implementation for this stack: the page uses server-side pagination/filtering, URL-synced filters, TanStack Query, TanStack Table, react-hook-form/zod filters, and a react-day-picker date range. Time inputs are interpreted in the browser's local timezone and sent to the server as RFC3339 UTC query parameters. Structured network events are retained for `network_event_retention_days` from `settings` (default 90); raw network log rows are not retained.
 
@@ -111,7 +114,7 @@ Admin pages use client-side routes under the admin mount. Keep sidebar tabs link
 
 ## Library policy
 
-Use the established libraries listed in README (`cobra`, `viper`, `chi`, `goose`, `sqlc`, `zerolog`, `go-pretty/table`, `humanize`, `lucide-react`, etc.). Do not hand-roll command parsing, UUID generation, migration execution, SQL scanning, token hashing, routing, logging, byte-unit parsing, CLI table rendering, or protocol clients.
+Use the established libraries listed in README (`cobra`, `viper`, `chi`, `goose`, `sqlc`, `zerolog`, `go-pretty/table`, `humanize`, `@cloudflare/kumo`, `@phosphor-icons/react`, etc.). Do not hand-roll command parsing, UUID generation, migration execution, SQL scanning, token hashing, routing, logging, byte-unit parsing, CLI table rendering, app UI primitives, or protocol clients.
 
 ## Tests
 
@@ -122,5 +125,5 @@ Most coverage lives in `internal/agent`, `internal/cli/bf`, `internal/server/{ap
 - `docs/deployment.md` — artifact-based server and node deployment flow.
 - `docs/testing.md` — current layer-by-layer test strategy and the gap list.
 - `docs/mvp-decisions.md` — why SQLite, why `bf`, why split binaries.
-- `docs/cli.md`, `docs/config-generation.md`, `docs/web-ui.md`, `docs/db-schema.md`, `docs/architecture.md` — topic-specific design notes.
+- `docs/cli.md`, `docs/config-generation.md`, `docs/web-ui.md`, `docs/design-system.md`, `docs/db-schema.md`, `docs/architecture.md` — topic-specific design notes.
 - `deploy/sing-box/README.md` — sing-box config layout and reality key handling.
