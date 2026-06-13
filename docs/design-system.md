@@ -3,7 +3,7 @@
 Visual and layout conventions for the BoxFleet admin UI. The UI is built on
 **native Cloudflare Kumo** components and Kumo's **semantic tokens**. When in
 doubt, consult the source of truth: `npx kumo ai` (usage guide) and
-`npx kumo doc <Component>` (per-component props).
+`npx kumo docs <Component>` or `npx kumo doc <Component>` (per-component props).
 
 ## Foundation
 
@@ -24,9 +24,9 @@ Two hard rules from `kumo ai`:
 2. **No `dark:` variant.** Light/dark is handled automatically via CSS
    `light-dark()`. Never add `dark:` prefixes.
 
-> The legacy Geist `--ds-*` palette that earlier versions defined in
-> `globals.css` is being removed. Do not add new `--ds-*` or `gray-1000` /
-> `blue-700` style classes — they are not Kumo semantic tokens.
+> The legacy Geist `--ds-*` palette and shadcn-shaped `components/ui/`
+> compatibility layer have been removed. Do not add new `--ds-*`, `gray-1000`,
+> `blue-700`, or raw color utility classes — they are not Kumo semantic tokens.
 
 ## Color (semantic tokens)
 
@@ -87,7 +87,7 @@ hand-styled headings.
 
 | Use             | Approach |
 |-----------------|----------|
-| Page title      | Kumo `PageHeader` block `title` (or `Text variant="heading1"`) |
+| Page title      | `AppPageHeader` title (or Kumo `Text variant="heading1"` inside content) |
 | Section heading | `Text variant="heading3"` / `heading2` |
 | Body            | `Text variant="body"` (`text-kumo-default`) |
 | Caption / label | `Text variant="secondary" size="sm"` (`text-kumo-subtle`) |
@@ -101,15 +101,23 @@ Sidebar.Provider
 └─ Sidebar
    ├─ Sidebar.Header   app name + logo icon
    ├─ Sidebar.Content  Sidebar.Menu / Sidebar.MenuButton (active = current route)
-   └─ Sidebar.Footer   admin token input + Apply / Logout / Refresh
-main                    PageHeader (title + actions) + page content
+   └─ Sidebar.Footer   Sidebar.Trigger
+main                    AppPageHeader (breadcrumbs + actions + title) + page content
 ```
 
 - Navigation pages are defined in `web/src/navigation.ts`. Add a page there
   first, then add its `<Route>` in `App.tsx`.
-- Page titles + page-level action buttons use the vendored, adapted `PageHeader`
-  block (`web/src/components/kumo/page-header/page-header.tsx`). Render it inside
-  each page so the page owns its title and actions.
+- Page titles + page-level action buttons use `AppPageHeader`
+  (`web/src/components/app-page-header.tsx`). Render it inside each page so the
+  page owns its title and actions.
+- The `AppPageHeader` top breadcrumb/action bar is intentionally `h-[58px]` with
+  `border-b border-kumo-line` so it aligns with Kumo's `Sidebar.Header`
+  (`h-[58px]` in the upstream Sidebar source). Preserve that alignment; it makes
+  the sidebar/header divider read as one continuous line.
+- The shell uses `Sidebar.Provider className="h-svh bg-kumo-canvas"` and
+  `<main className="min-w-0 flex-1 overflow-y-auto">`. Do not replace this with
+  `min-h-svh` + child `h-full`; percentage heights do not resolve against
+  min-height and the sidebar footer/trigger will drift.
 
 ## Component usage rules
 
@@ -128,6 +136,44 @@ main                    PageHeader (title + actions) + page content
    not mix `lucide-react` into new code.
 6. **Tokens & shadows**: semantic tokens only (see Color). Use Kumo's own shadow
    utilities, not arbitrary `shadow-*` values. No `dark:` variants.
+
+## Kumo implementation notes
+
+- Kumo blocks are vendored source, not importable dependencies. `kumo add` writes
+  blocks under `web/kumo.json`'s `blocksDir` (`src/components/kumo`), after which
+  BoxFleet may adapt the copied source.
+- The vendored `web/src/components/kumo/page-header/page-header.tsx` is a
+  reference copy of Kumo's `PageHeader` block. The active app header is
+  `AppPageHeader`, because BoxFleet needs the 58px sidebar-aligned top bar and a
+  stable right-side actions slot for future review/publish controls.
+- Use `@phosphor-icons/react`; Kumo uses Phosphor internally.
+- Inter is loaded through `@fontsource-variable/inter` and `--font-sans:
+  "Inter Variable", ...` in `globals.css`. Kumo's compact line heights assume
+  Inter; falling back to a different system font can clip descenders such as `g`
+  and `y`.
+- Kumo `Text` is a discriminated TypeScript union. `mono-*` variants do not accept
+  every `size` accepted by body text; check `npx kumo docs Text` before changing
+  text variants.
+- Kumo square icon buttons require an accessible label. When using square
+  buttons, include `aria-label`.
+- Avoid `Sidebar.Rail` unless a current Kumo example specifically calls for it;
+  the app currently uses a bottom `Sidebar.Trigger`, matching the desired
+  Cloudflare-style collapsed sidebar.
+
+## Visual verification
+
+For layout-sensitive changes, inspect the rendered UI with Playwright and system
+Chrome:
+
+```ts
+chromium.launch({ executablePath: "/usr/bin/google-chrome-stable" })
+```
+
+Prefer measuring actual DOM rectangles and computed styles over judging from
+memory. Useful checks include page-header/sidebar-header height and border
+alignment, font loading via `document.fonts.check(...)`, and mobile/desktop
+overflow. Cloudflare Kumo examples live in `refs/kumo/packages/kumo-docs-astro/`;
+component source lives in `refs/kumo/packages/kumo/src/`.
 
 ## UX preferences (durable, from prior review)
 

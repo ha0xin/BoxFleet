@@ -90,19 +90,21 @@ Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the cli
 
 ### Web UI
 
-`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is being rewritten directly on **native Cloudflare Kumo** components — the previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` are being retired. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
+`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is built directly on **native Cloudflare Kumo** components. The previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` have been removed. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
 
 Use the established frontend stack instead of hand-rolling UI behavior. See `docs/design-system.md` for visual conventions and `docs/web-ui.md` for the Kumo CLI workflow.
 
 - Cloudflare Kumo for all app UI: dialogs, dropdowns, popovers, selects, switches, tables, labels, buttons, inputs, banners, badges, surfaces, grids, and other interactive controls. Import native components from `@cloudflare/kumo` directly; use Base UI primitives re-exported by `@cloudflare/kumo/primitives/*` only when a styled Kumo component is not available.
 - **Semantic tokens only** — `bg-kumo-base`, `text-kumo-default`, `bg-kumo-canvas`, `kumo-hairline`, etc. Never raw Tailwind colors and never `dark:` variants (Kumo handles light/dark via `light-dark()`).
-- Kumo's CLI is the source of truth and the vendoring mechanism: `npx kumo ls` / `kumo doc <Component>` for APIs, `kumo ai` for the usage guide, and `kumo add <Block>` to copy a block (e.g. `PageHeader`) into `blocksDir` from `kumo.json`. Blocks are vendored, not imported.
+- Kumo's CLI is the source of truth and the vendoring mechanism. When unfamiliar with a component or pattern, first run commands from the `web/` directory: `npx kumo ai` for the usage guide, `npx kumo docs <Component>` (or `npx kumo doc <Component>`) for component props/examples, `npx kumo ls` for the catalog, and `npx kumo add <Block>` to copy a block (e.g. `PageHeader`) into `blocksDir` from `kumo.json`. Do not guess Kumo APIs from memory.
 - Tailwind v4 is wired through `@tailwindcss/vite`; `web/src/styles/globals.css` keeps `@source` then `@cloudflare/kumo/styles` then `tailwindcss` in that order.
 - TanStack Query for API request state, caching, refresh, and invalidation.
 - TanStack Table for non-trivial tables, especially paginated/filterable admin data.
 - react-hook-form plus zod for form state and validation.
 - date-fns plus react-day-picker for date/time formatting, duration math, and date/range picking.
 - `@phosphor-icons/react` for app icons (Kumo's own components use Phosphor internally, so the app matches).
+
+For visual checks, use Playwright with system Chrome (`/usr/bin/google-chrome-stable`) and inspect rendered geometry/computed styles directly. `refs/kumo/` is a local checkout of Cloudflare Kumo for reference only: use `refs/kumo/packages/kumo-docs-astro/` for demo usage patterns and `refs/kumo/packages/kumo/src/` for component source; do not import from `refs/`.
 
 Network Events is the reference implementation for this stack: the page uses server-side pagination/filtering, URL-synced filters, TanStack Query, TanStack Table, react-hook-form/zod filters, and a react-day-picker date range. Time inputs are interpreted in the browser's local timezone and sent to the server as RFC3339 UTC query parameters. Structured network events are retained for `network_event_retention_days` from `settings` (default 90); raw network log rows are not retained.
 
