@@ -146,4 +146,4 @@ export type SystemLogsResponse = {
   note: string;
 };
 
-export type Page = "overview" | "nodes" | "proxies" | "users" | "traffic" | "network-events" | "system-logs";
+export type Page = "overview" | "nodes" | "proxies" | "users" | "traffic" | "network-events" | "system-logs" | "settings";
