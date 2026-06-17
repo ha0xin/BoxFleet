@@ -132,11 +132,13 @@ global user defaults
   -> generated sing-box config for that node
 ```
 
-Users can also have billing controls at two levels:
+Users can also have billing controls at multiple non-user-default levels:
 
-- Global quota and global traffic multiplier on the proxy user.
+- Global quota on the proxy user.
 - Per-node quota and optional per-node traffic multiplier override on the
   user-node binding.
+- Optional per-access or proxy traffic multiplier overrides for listener- or
+  credential-specific billing.
 
 Raw bytes and billable bytes must be stored separately. Changing a multiplier
 later must not rewrite historical usage rows.

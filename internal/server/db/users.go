@@ -18,11 +18,10 @@ type ProxyUserWithProxyCount struct {
 }
 
 type CreateProxyUserParams struct {
-	Name              string
-	DisplayName       string
-	GlobalQuotaBytes  int64
-	TrafficMultiplier float64
-	ExpireAt          string
+	Name             string
+	DisplayName      string
+	GlobalQuotaBytes int64
+	ExpireAt         string
 }
 
 func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams) (ProxyUser, error) {
@@ -33,24 +32,16 @@ func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams)
 	if err := validateNameForAuth(name, "user"); err != nil {
 		return ProxyUser{}, err
 	}
-	multiplier := params.TrafficMultiplier
-	if multiplier == 0 {
-		multiplier = 1.0
-	}
-	if multiplier < 0 {
-		return ProxyUser{}, errors.New("traffic multiplier must be non-negative")
-	}
 	userID, err := id.New("usr")
 	if err != nil {
 		return ProxyUser{}, err
 	}
 	err = db.q.CreateProxyUser(ctx, store.CreateProxyUserParams{
-		ID:                userID,
-		Name:              name,
-		DisplayName:       params.DisplayName,
-		GlobalQuotaBytes:  params.GlobalQuotaBytes,
-		TrafficMultiplier: multiplier,
-		ExpireAt:          nullableTrimmedString(params.ExpireAt),
+		ID:               userID,
+		Name:             name,
+		DisplayName:      params.DisplayName,
+		GlobalQuotaBytes: params.GlobalQuotaBytes,
+		ExpireAt:         nullableTrimmedString(params.ExpireAt),
 	})
 	if err != nil {
 		return ProxyUser{}, err
@@ -71,15 +62,14 @@ func (db *DB) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ProxyUserWit
 	for _, row := range rows {
 		out = append(out, ProxyUserWithProxyCount{
 			ProxyUser: ProxyUser{
-				ID:                row.ID,
-				Name:              row.Name,
-				DisplayName:       row.DisplayName,
-				Status:            row.Status,
-				GlobalQuotaBytes:  row.GlobalQuotaBytes,
-				TrafficMultiplier: row.TrafficMultiplier,
-				ExpireAt:          row.ExpireAt,
-				CreatedAt:         row.CreatedAt,
-				UpdatedAt:         row.UpdatedAt,
+				ID:               row.ID,
+				Name:             row.Name,
+				DisplayName:      row.DisplayName,
+				Status:           row.Status,
+				GlobalQuotaBytes: row.GlobalQuotaBytes,
+				ExpireAt:         row.ExpireAt,
+				CreatedAt:        row.CreatedAt,
+				UpdatedAt:        row.UpdatedAt,
 			},
 			ProxyCount: row.ProxyCount,
 		})
@@ -123,20 +113,6 @@ func (db *DB) SetProxyUserQuota(ctx context.Context, name string, quotaBytes int
 	affected, err := db.q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{
 		GlobalQuotaBytes: quotaBytes,
 		Name:             normalizeName(name),
-	})
-	if err != nil {
-		return err
-	}
-	return requireAffected(affected, "proxy user", name)
-}
-
-func (db *DB) SetProxyUserMultiplier(ctx context.Context, name string, multiplier float64) error {
-	if multiplier < 0 {
-		return errors.New("traffic multiplier must be non-negative")
-	}
-	affected, err := db.q.SetProxyUserMultiplier(ctx, store.SetProxyUserMultiplierParams{
-		TrafficMultiplier: multiplier,
-		Name:              normalizeName(name),
 	})
 	if err != nil {
 		return err

@@ -1,0 +1,336 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  CheckCircleIcon,
+  DotsThreeIcon,
+  FunnelIcon,
+  PathIcon,
+  PlusIcon,
+  SortAscendingIcon,
+  SortDescendingIcon,
+  XCircleIcon
+} from "@phosphor-icons/react";
+import { Button, DropdownMenu, Input, Link, LinkButton, Loader, Pagination, Table } from "@cloudflare/kumo";
+
+import type { AdminProxy, AdminProxiesResponse } from "../types";
+import { adminPath, formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName } from "./operations-common";
+
+type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+type ProxyFilter = "all" | "enabled" | "disabled";
+type ProxySort = "node_name" | "name" | "protocol" | "listen_port" | "enabled" | "traffic_multiplier" | "updated_at";
+type SortDirection = "asc" | "desc";
+
+function queryString(params: Record<string, string | number | undefined>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") continue;
+    query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : "";
+}
+
+function proxyEnabledFilter(filter: ProxyFilter): string | undefined {
+  if (filter === "enabled") return "true";
+  if (filter === "disabled") return "false";
+  return undefined;
+}
+
+function proxyStatus(proxy: AdminProxy) {
+  if (!proxy.enabled) {
+    return { label: "Disabled", icon: XCircleIcon, className: "text-kumo-subtle" };
+  }
+  return { label: "Enabled", icon: CheckCircleIcon, className: "text-kumo-success" };
+}
+
+function endpoint(proxy: AdminProxy): string {
+  const listen = proxy.listen === "::" || proxy.listen === "0.0.0.0" ? "*" : proxy.listen;
+  return `${listen}:${proxy.listen_port}`;
+}
+
+function multiplier(value: number): string {
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}x`;
+}
+
+function SortHead({
+  label,
+  column,
+  sort,
+  direction,
+  setSort,
+  className
+}: {
+  label: string;
+  column: ProxySort;
+  sort: ProxySort;
+  direction: SortDirection;
+  setSort: (column: ProxySort) => void;
+  className?: string;
+}) {
+  const active = sort === column;
+  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
+  return (
+    <Table.Head className={className}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong"
+        onClick={() => setSort(column)}
+      >
+        {label}
+        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
+      </button>
+    </Table.Head>
+  );
+}
+
+function TableEmpty({ children }: { children: string }) {
+  return (
+    <Table.Row>
+      <Table.Cell colSpan={10}>
+        <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
+      </Table.Cell>
+    </Table.Row>
+  );
+}
+
+export function ProxiesPage({ request }: { request: AdminRequest }) {
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
+  const [filter, setFilter] = useState<ProxyFilter>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [sort, setSortValue] = useState<ProxySort>("node_name");
+  const [direction, setDirection] = useState<SortDirection>("asc");
+
+  function setSort(column: ProxySort) {
+    setPage(1);
+    if (sort === column) {
+      setDirection((value) => (value === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortValue(column);
+    setDirection(column === "updated_at" ? "desc" : "asc");
+  }
+
+  function setFilterValue(value: ProxyFilter) {
+    setFilter(value);
+    setPage(1);
+  }
+
+  function setPageSize(value: number) {
+    setPerPage(value);
+    setPage(1);
+  }
+
+  const offset = (page - 1) * perPage;
+  const path =
+    "/api/admin/proxies" +
+    queryString({
+      limit: perPage,
+      offset,
+      search,
+      enabled: proxyEnabledFilter(filter),
+      sort,
+      direction
+    });
+  const proxiesQuery = useQuery({
+    queryKey: ["admin", "proxies-page", perPage, offset, search, filter, sort, direction],
+    queryFn: () => request<AdminProxiesResponse>(path),
+    placeholderData: (previous) => previous
+  });
+  const pageData = proxiesQuery.data;
+  const proxies = pageData?.proxies ?? [];
+  const total = pageData?.total ?? 0;
+  const error = proxiesQuery.error instanceof Error ? proxiesQuery.error.message : "Request failed.";
+
+  return (
+    <div className="flex min-h-full flex-col bg-kumo-canvas">
+      <PageTopBar current="Proxies" />
+      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
+        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
+      </div>
+      <main className="w-full grow bg-kumo-canvas">
+        <PageHeader
+          title="Proxies"
+          description="Review VLESS-Reality inbounds, ports, routing rules, and node placement."
+          actions={
+            <>
+              <Button variant="secondary" shape="square" aria-label="Proxy actions">
+                <DotsThreeIcon />
+              </Button>
+              <LinkButton href={adminPath("/proxies?create=1")} variant="primary" icon={PlusIcon}>
+                Create
+              </LinkButton>
+            </>
+          }
+        />
+
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+          <section className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-kumo-default">Proxy inventory</h2>
+                <p className="text-sm text-kumo-subtle">
+                  {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No proxies"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <form
+                className="flex min-w-0 flex-1 gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setSearch(searchInput.trim());
+                  setPage(1);
+                }}
+              >
+                <Input
+                  placeholder="Search by proxy, node, protocol, or port"
+                  aria-label="Search proxies"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  className="min-w-0 flex-1"
+                />
+                <Button type="submit" variant="secondary">
+                  Search
+                </Button>
+              </form>
+              <DropdownMenu>
+                <DropdownMenu.Trigger
+                  render={
+                    <Button variant="secondary" icon={FunnelIcon}>
+                      Filter
+                    </Button>
+                  }
+                />
+                <DropdownMenu.Content>
+                  <DropdownMenu.Group>
+                    <DropdownMenu.Label>Status</DropdownMenu.Label>
+                    <DropdownMenu.RadioGroup
+                      value={filter}
+                      onValueChange={(value) => setFilterValue(value as ProxyFilter)}
+                    >
+                      <DropdownMenu.RadioItem value="all">
+                        All
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
+                      <DropdownMenu.RadioItem value="enabled">
+                        Enabled
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
+                      <DropdownMenu.RadioItem value="disabled">
+                        Disabled
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
+                    </DropdownMenu.RadioGroup>
+                  </DropdownMenu.Group>
+                </DropdownMenu.Content>
+              </DropdownMenu>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
+              <div className="overflow-x-auto">
+                <Table>
+                  <Table.Header variant="compact">
+                    <Table.Row>
+                      <SortHead label="Proxy" column="name" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Node" column="node_name" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Status" column="enabled" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Protocol" column="protocol" sort={sort} direction={direction} setSort={setSort} />
+                      <Table.Head>Listen</Table.Head>
+                      <SortHead label="Port" column="listen_port" sort={sort} direction={direction} setSort={setSort} />
+                      <Table.Head>Transport</Table.Head>
+                      <SortHead label="Multiplier" column="traffic_multiplier" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Updated" column="updated_at" sort={sort} direction={direction} setSort={setSort} />
+                      <Table.Head className="text-right">
+                        <span className="sr-only">Actions</span>
+                      </Table.Head>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {proxiesQuery.error ? (
+                      <TableEmpty>{error}</TableEmpty>
+                    ) : proxiesQuery.isLoading ? (
+                      <Table.Row>
+                        <Table.Cell colSpan={10}>
+                          <div className="flex min-h-32 items-center justify-center">
+                            <Loader size={20} />
+                          </div>
+                        </Table.Cell>
+                      </Table.Row>
+                    ) : proxies.length > 0 ? (
+                      proxies.map((proxy) => {
+                        const status = proxyStatus(proxy);
+                        const StatusIcon = status.icon;
+                        return (
+                          <Table.Row key={proxy.id}>
+                            <Table.Cell>
+                              <div className="flex min-w-48 items-center gap-2">
+                                <PathIcon className="size-4 shrink-0 text-kumo-subtle" />
+                                <Link href={adminPath(`/proxies?proxy=${encodeURIComponent(proxy.name)}`)} variant="current" className={rowLinkClassName}>
+                                  <span className="truncate">{proxy.name}</span>
+                                </Link>
+                              </div>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{proxy.node_name}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${status.className}`}>
+                                <StatusIcon className="size-4 shrink-0" />
+                                {status.label}
+                              </span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{proxy.protocol}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{endpoint(proxy)}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{proxy.listen_port}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{proxy.transport}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{multiplier(proxy.traffic_multiplier)}</span>
+                            </Table.Cell>
+                            <Table.Cell>
+                              <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(proxy.updated_at)}</span>
+                            </Table.Cell>
+                            <Table.Cell className="text-right">
+                              <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${proxy.name}`}>
+                                <DotsThreeIcon className="size-4" />
+                              </Button>
+                            </Table.Cell>
+                          </Table.Row>
+                        );
+                      })
+                    ) : (
+                      <TableEmpty>No proxies match this filter.</TableEmpty>
+                    )}
+                  </Table.Body>
+                </Table>
+              </div>
+            </div>
+
+            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
+              <Pagination.Info>
+                {({ pageShowingRange, totalCount }) => (
+                  <span>
+                    <strong>{pageShowingRange}</strong> of {totalCount} items
+                  </span>
+                )}
+              </Pagination.Info>
+              <Pagination.Separator />
+              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
+              <Pagination.Controls controls="simple" />
+            </Pagination>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}

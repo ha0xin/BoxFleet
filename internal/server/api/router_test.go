@@ -210,6 +210,19 @@ func TestAdminNetworkEventsPaginationAndFilters(t *testing.T) {
 		t.Fatalf("event = %#v", page.Events[0])
 	}
 
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/network-events?limit=10&action=connect&search=three.example", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Events) != 1 || page.Events[0].TargetHost != "three.example" {
+		t.Fatalf("search page = %#v", page)
+	}
+
 	req = adminJSONRequest(t, http.MethodGet, "/api/admin/network-events?start=bad", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -505,6 +518,68 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 	}
 	if proxy.ListenPort != 39091 || proxy.Enabled || proxy.TrafficMultiplier != 1.5 {
 		t.Fatalf("proxy = %#v", proxy)
+	}
+}
+
+func TestAdminNodeAndProxyPagination(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	if _, err := store.CreateNode(ctx, "beta", "198.51.100.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{
+		NodeName:     "beta",
+		Name:         "vless-443",
+		Protocol:     db.ProtocolVLESSReality,
+		Listen:       "::",
+		ListenPort:   443,
+		Transport:    db.TransportTCP,
+		Enabled:      true,
+		SettingsJSON: `{"server_name":"www.amazon.com","reality_private_key":"private","reality_public_key":"public","short_id":"01234567","handshake_server":"www.amazon.com","handshake_port":443}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/nodes?limit=1&offset=1&sort=name", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("nodes page status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var nodesPage struct {
+		Nodes  []adminNode `json:"nodes"`
+		Total  int64       `json:"total"`
+		Limit  int64       `json:"limit"`
+		Offset int64       `json:"offset"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&nodesPage); err != nil {
+		t.Fatal(err)
+	}
+	if nodesPage.Total != 2 || nodesPage.Limit != 1 || nodesPage.Offset != 1 || len(nodesPage.Nodes) != 1 || nodesPage.Nodes[0].Name != "beta" {
+		t.Fatalf("nodes page = %#v", nodesPage)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/admin/proxies?limit=1&offset=1&sort=name", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proxies page status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var proxiesPage struct {
+		Proxies []adminProxy `json:"proxies"`
+		Total   int64        `json:"total"`
+		Limit   int64        `json:"limit"`
+		Offset  int64        `json:"offset"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&proxiesPage); err != nil {
+		t.Fatal(err)
+	}
+	if proxiesPage.Total != 2 || proxiesPage.Limit != 1 || proxiesPage.Offset != 1 || len(proxiesPage.Proxies) != 1 || proxiesPage.Proxies[0].Name != "vless-443" {
+		t.Fatalf("proxies page = %#v", proxiesPage)
 	}
 }
 

@@ -181,15 +181,14 @@ type ProxyDetail struct {
 }
 
 type ProxyUser struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	DisplayName       string         `json:"display_name"`
-	Status            string         `json:"status"`
-	GlobalQuotaBytes  int64          `json:"global_quota_bytes"`
-	TrafficMultiplier float64        `json:"traffic_multiplier"`
-	ExpireAt          sql.NullString `json:"expire_at"`
-	CreatedAt         string         `json:"created_at"`
-	UpdatedAt         string         `json:"updated_at"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"display_name"`
+	Status           string         `json:"status"`
+	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
+	ExpireAt         sql.NullString `json:"expire_at"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
 }
 
 type RawLogEntry struct {

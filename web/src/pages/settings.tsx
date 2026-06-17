@@ -1,4 +1,4 @@
-import { ArrowsClockwise, Check, SignOut } from "@phosphor-icons/react";
+import { ArrowsClockwiseIcon, CheckIcon, SignOutIcon } from "@phosphor-icons/react";
 import { Button, Grid, SensitiveInput, Surface, Text } from "@cloudflare/kumo";
 
 import { AppPageHeader } from "@/components/app-page-header";
@@ -48,11 +48,11 @@ export function SettingsPage({
               onChange={(event) => setTokenInput(event.target.value)}
             />
             <div className="flex items-center gap-2">
-              <Button type="submit" variant="primary" icon={<Check />} disabled={unchanged}>
+              <Button type="submit" variant="primary" icon={<CheckIcon />} disabled={unchanged}>
                 Apply
               </Button>
               {activeToken ? (
-                <Button type="button" variant="secondary-destructive" icon={<SignOut />} onClick={logout}>
+                <Button type="button" variant="secondary-destructive" icon={<SignOutIcon />} onClick={logout}>
                   Sign out
                 </Button>
               ) : null}
@@ -72,7 +72,7 @@ export function SettingsPage({
           <div className="mt-4">
             <Button
               variant="secondary"
-              icon={<ArrowsClockwise />}
+              icon={<ArrowsClockwiseIcon />}
               loading={refreshing}
               onClick={() => refresh()}
             >

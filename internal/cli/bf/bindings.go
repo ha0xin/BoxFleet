@@ -127,7 +127,7 @@ func bindSetMultiplierCommand() *cobra.Command {
 	var nodeName string
 	cmd := &cobra.Command{
 		Use:   "set-multiplier <user> <ratio|inherit>",
-		Short: "Set user traffic multiplier on a node",
+		Short: "Set per-node traffic multiplier for a user binding",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			multiplier := sql.NullFloat64{}

@@ -30,7 +30,6 @@ bf user show <name>
 bf user disable <name>
 bf user enable <name>
 bf user set-quota <name> <bytes|gb>
-bf user set-multiplier <name> <ratio>
 bf user set-expire <name> <date>
 bf user node-info <name>
 bf user node-info <name> --node <node>

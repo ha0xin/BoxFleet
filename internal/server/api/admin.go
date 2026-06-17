@@ -30,6 +30,20 @@ type adminOverview struct {
 	Release       adminRelease       `json:"release"`
 }
 
+type adminNodesPage struct {
+	Nodes  []adminNode `json:"nodes"`
+	Total  int64       `json:"total"`
+	Limit  int64       `json:"limit"`
+	Offset int64       `json:"offset"`
+}
+
+type adminProxiesPage struct {
+	Proxies []adminProxy `json:"proxies"`
+	Total   int64        `json:"total"`
+	Limit   int64        `json:"limit"`
+	Offset  int64        `json:"offset"`
+}
+
 type adminRelease struct {
 	Repo            string `json:"repo"`
 	BoxFleetVersion string `json:"boxfleet_version"`
@@ -71,14 +85,13 @@ type adminProxy struct {
 }
 
 type adminUser struct {
-	ID                string  `json:"id"`
-	Name              string  `json:"name"`
-	DisplayName       string  `json:"display_name"`
-	Status            string  `json:"status"`
-	GlobalQuotaBytes  int64   `json:"global_quota_bytes"`
-	TrafficMultiplier float64 `json:"traffic_multiplier"`
-	ExpireAt          string  `json:"expire_at"`
-	ProxyCount        int     `json:"proxy_count"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	DisplayName      string `json:"display_name"`
+	Status           string `json:"status"`
+	GlobalQuotaBytes int64  `json:"global_quota_bytes"`
+	ExpireAt         string `json:"expire_at"`
+	ProxyCount       int    `json:"proxy_count"`
 }
 
 type adminProxyAccess struct {
@@ -188,11 +201,10 @@ type adminProxyPayload struct {
 }
 
 type adminUserPayload struct {
-	Name              string   `json:"name"`
-	DisplayName       string   `json:"display_name"`
-	GlobalQuotaBytes  *int64   `json:"global_quota_bytes"`
-	TrafficMultiplier *float64 `json:"traffic_multiplier"`
-	ExpireAt          string   `json:"expire_at"`
+	Name             string `json:"name"`
+	DisplayName      string `json:"display_name"`
+	GlobalQuotaBytes *int64 `json:"global_quota_bytes"`
+	ExpireAt         string `json:"expire_at"`
 }
 
 type adminIssueAccessPayload struct {
@@ -279,6 +291,32 @@ func adminOverviewHandler(store *db.DB, options Options) http.HandlerFunc {
 
 func adminNodesHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if adminPageRequested(r) {
+			page, err := store.ListNodesPage(r.Context(), db.NodeFilter{
+				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+				Status:    strings.TrimSpace(r.URL.Query().Get("status")),
+				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
+				Limit:     queryLimit(r, 50),
+				Offset:    queryOffset(r),
+			})
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			nodes, err := adminNodesFromDB(r.Context(), store, page.Nodes)
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			writeJSON(w, adminNodesPage{
+				Nodes:  nodes,
+				Total:  page.Total,
+				Limit:  page.Limit,
+				Offset: page.Offset,
+			})
+			return
+		}
 		nodes, err := listAdminNodes(r, store)
 		if err != nil {
 			writeAdminError(w, err)
@@ -458,6 +496,28 @@ func adminNodeStatusHandler(store *db.DB) http.HandlerFunc {
 
 func adminProxiesHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if adminPageRequested(r) {
+			page, err := store.ListProxiesPage(r.Context(), db.ProxyFilter{
+				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+				NodeName:  strings.TrimSpace(r.URL.Query().Get("node")),
+				Enabled:   strings.TrimSpace(r.URL.Query().Get("enabled")),
+				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
+				Limit:     queryLimit(r, 50),
+				Offset:    queryOffset(r),
+			})
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			writeJSON(w, adminProxiesPage{
+				Proxies: adminProxies(page.Proxies),
+				Total:   page.Total,
+				Limit:   page.Limit,
+				Offset:  page.Offset,
+			})
+			return
+		}
 		proxies, err := store.ListProxies(r.Context(), "")
 		if err != nil {
 			writeAdminError(w, err)
@@ -469,6 +529,28 @@ func adminProxiesHandler(store *db.DB) http.HandlerFunc {
 
 func adminNodeProxiesHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if adminPageRequested(r) {
+			page, err := store.ListProxiesPage(r.Context(), db.ProxyFilter{
+				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+				NodeName:  chi.URLParam(r, "node"),
+				Enabled:   strings.TrimSpace(r.URL.Query().Get("enabled")),
+				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
+				Limit:     queryLimit(r, 50),
+				Offset:    queryOffset(r),
+			})
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			writeJSON(w, adminProxiesPage{
+				Proxies: adminProxies(page.Proxies),
+				Total:   page.Total,
+				Limit:   page.Limit,
+				Offset:  page.Offset,
+			})
+			return
+		}
 		proxies, err := store.ListProxies(r.Context(), chi.URLParam(r, "node"))
 		if err != nil {
 			writeAdminError(w, err)
@@ -620,30 +702,24 @@ func adminCreateUserHandler(store *db.DB) http.HandlerFunc {
 		if payload.GlobalQuotaBytes != nil {
 			quota = *payload.GlobalQuotaBytes
 		}
-		multiplier := 1.0
-		if payload.TrafficMultiplier != nil {
-			multiplier = *payload.TrafficMultiplier
-		}
 		user, err := store.CreateProxyUser(r.Context(), db.CreateProxyUserParams{
-			Name:              payload.Name,
-			DisplayName:       payload.DisplayName,
-			GlobalQuotaBytes:  quota,
-			TrafficMultiplier: multiplier,
-			ExpireAt:          payload.ExpireAt,
+			Name:             payload.Name,
+			DisplayName:      payload.DisplayName,
+			GlobalQuotaBytes: quota,
+			ExpireAt:         payload.ExpireAt,
 		})
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
 		writeJSON(w, adminUser{
-			ID:                user.ID,
-			Name:              user.Name,
-			DisplayName:       user.DisplayName,
-			Status:            user.Status,
-			GlobalQuotaBytes:  user.GlobalQuotaBytes,
-			TrafficMultiplier: user.TrafficMultiplier,
-			ExpireAt:          nullString(user.ExpireAt),
-			ProxyCount:        0,
+			ID:               user.ID,
+			Name:             user.Name,
+			DisplayName:      user.DisplayName,
+			Status:           user.Status,
+			GlobalQuotaBytes: user.GlobalQuotaBytes,
+			ExpireAt:         nullString(user.ExpireAt),
+			ProxyCount:       0,
 		})
 	}
 }
@@ -656,13 +732,12 @@ func adminDeleteUserHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, adminUser{
-			ID:                user.ID,
-			Name:              user.Name,
-			DisplayName:       user.DisplayName,
-			Status:            user.Status,
-			GlobalQuotaBytes:  user.GlobalQuotaBytes,
-			TrafficMultiplier: user.TrafficMultiplier,
-			ExpireAt:          nullString(user.ExpireAt),
+			ID:               user.ID,
+			Name:             user.Name,
+			DisplayName:      user.DisplayName,
+			Status:           user.Status,
+			GlobalQuotaBytes: user.GlobalQuotaBytes,
+			ExpireAt:         nullString(user.ExpireAt),
 		})
 	}
 }
@@ -796,6 +871,8 @@ func adminNetworkEventsHandler(store *db.DB) http.HandlerFunc {
 		page, err := store.ListLogEventsPage(r.Context(), db.LogEventFilter{
 			NodeName: strings.TrimSpace(r.URL.Query().Get("node")),
 			UserName: strings.TrimSpace(r.URL.Query().Get("user")),
+			Action:   strings.TrimSpace(r.URL.Query().Get("action")),
+			Search:   strings.TrimSpace(r.URL.Query().Get("search")),
 			Start:    start,
 			End:      end,
 			Limit:    queryLimit(r, 100),
@@ -1023,7 +1100,11 @@ func listAdminNodes(r *http.Request, store *db.DB) ([]adminNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	statuses, err := store.ListNodeConfigStatuses(r.Context())
+	return adminNodesFromDB(r.Context(), store, nodes)
+}
+
+func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adminNode, error) {
+	statuses, err := store.ListNodeConfigStatuses(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1077,14 +1158,13 @@ func listAdminUsers(r *http.Request, store *db.DB) ([]adminUser, error) {
 	out := make([]adminUser, 0, len(users))
 	for _, user := range users {
 		out = append(out, adminUser{
-			ID:                user.ID,
-			Name:              user.Name,
-			DisplayName:       user.DisplayName,
-			Status:            user.Status,
-			GlobalQuotaBytes:  user.GlobalQuotaBytes,
-			TrafficMultiplier: user.TrafficMultiplier,
-			ExpireAt:          nullString(user.ExpireAt),
-			ProxyCount:        int(user.ProxyCount),
+			ID:               user.ID,
+			Name:             user.Name,
+			DisplayName:      user.DisplayName,
+			Status:           user.Status,
+			GlobalQuotaBytes: user.GlobalQuotaBytes,
+			ExpireAt:         nullString(user.ExpireAt),
+			ProxyCount:       int(user.ProxyCount),
 		})
 	}
 	return out, nil
@@ -1331,6 +1411,16 @@ func queryLimit(r *http.Request, fallback int64) int64 {
 		return 500
 	}
 	return value
+}
+
+func adminPageRequested(r *http.Request) bool {
+	query := r.URL.Query()
+	for _, key := range []string{"limit", "offset", "search", "status", "enabled", "node", "sort", "direction"} {
+		if strings.TrimSpace(query.Get(key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func queryOffset(r *http.Request) int64 {
