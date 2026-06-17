@@ -1,14 +1,19 @@
-import { GearSix } from "@phosphor-icons/react";
+import { GearSixIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Banner, Loader, Sidebar, Text, useSidebar } from "@cloudflare/kumo";
+import { Banner, Loader, Sidebar, Text } from "@cloudflare/kumo";
 
 import { AppPageHeader } from "@/components/app-page-header";
 import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
+import { NetworkEventsPage } from "./pages/network-events";
+import { NodesPage } from "./pages/nodes";
 import { OverviewPage } from "./pages/overview";
+import { ProxiesPage } from "./pages/proxies";
 import { SettingsPage } from "./pages/settings";
+import { SystemLogsPage } from "./pages/system-logs";
+import { UsersPage } from "./pages/users";
 import type { Overview } from "./types";
 
 function adminRequestPath(path: string): string {
@@ -99,12 +104,12 @@ function App() {
         ) : (
           <Routes>
             <Route path="/" element={<OverviewPage overview={overview} />} />
-            <Route path="/nodes" element={<ComingSoon />} />
-            <Route path="/proxies" element={<ComingSoon />} />
-            <Route path="/users" element={<ComingSoon />} />
+            <Route path="/nodes" element={<NodesPage request={request} />} />
+            <Route path="/proxies" element={<ProxiesPage request={request} />} />
+            <Route path="/users" element={<UsersPage request={request} />} />
             <Route path="/traffic" element={<ComingSoon />} />
-            <Route path="/network-events" element={<ComingSoon />} />
-            <Route path="/system-logs" element={<ComingSoon />} />
+            <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
+            <Route path="/system-logs" element={<SystemLogsPage request={request} />} />
             <Route
               path="/settings"
               element={
@@ -130,7 +135,6 @@ function App() {
 function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { open } = useSidebar();
 
   const renderItem = (item: NavItem) => (
     <Sidebar.MenuButton
@@ -147,18 +151,13 @@ function AppSidebar() {
   return (
     <Sidebar>
       <Sidebar.Header>
-        <div className="flex items-center gap-2.5 py-1">
-          <GearSix size={22} weight="duotone" className="shrink-0 text-kumo-default" />
-          {open ? (
-            <div className="flex min-w-0 flex-col">
-              <Text bold as="span" truncate>
-                BoxFleet
-              </Text>
-              <Text variant="secondary" size="xs" as="span" truncate>
-                Admin
-              </Text>
-            </div>
-          ) : null}
+        <div className="flex min-w-0 translate-x-[11px] items-center gap-2.5 py-1 transition-transform duration-(--sidebar-animation-duration) ease-(--sidebar-easing) motion-reduce:transition-none group-data-[state=collapsed]/sidebar:translate-x-[5.5px]">
+          <GearSixIcon size={22} weight="duotone" className="shrink-0 text-kumo-default" />
+          <div className="flex min-w-0 transition-[opacity,transform] duration-(--sidebar-animation-duration) ease-(--sidebar-easing) motion-reduce:transition-none group-data-[state=collapsed]/sidebar:translate-x-2 group-data-[state=collapsed]/sidebar:opacity-0">
+            <Text bold as="span" truncate>
+              BoxFleet Admin
+            </Text>
+          </div>
         </div>
       </Sidebar.Header>
 

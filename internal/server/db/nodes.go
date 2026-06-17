@@ -30,6 +30,22 @@ type UpdateNodeParams struct {
 	Status     string
 }
 
+type NodeFilter struct {
+	Search    string
+	Status    string
+	Sort      string
+	Direction string
+	Limit     int64
+	Offset    int64
+}
+
+type NodePage struct {
+	Nodes  []Node
+	Total  int64
+	Limit  int64
+	Offset int64
+}
+
 func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL string) (Node, error) {
 	name = normalizeName(name)
 	publicHost = strings.TrimSpace(publicHost)
@@ -93,6 +109,110 @@ func (db *DB) ListNodes(ctx context.Context) ([]Node, error) {
 		nodes = append(nodes, mapNode(row))
 	}
 	return nodes, nil
+}
+
+func (db *DB) ListNodesPage(ctx context.Context, filter NodeFilter) (NodePage, error) {
+	limit := pageLimit(filter.Limit, 50)
+	offset := pageOffset(filter.Offset)
+	where, args := nodePageWhere(filter)
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	countQuery := `
+SELECT COUNT(*)
+FROM nodes n
+WHERE ` + whereSQL
+	if err := db.sql.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return NodePage{}, err
+	}
+	sortSQL := nodePageSort(filter.Sort, filter.Direction)
+	listArgs := append([]any{}, args...)
+	listArgs = append(listArgs, limit, offset)
+	listQuery := `
+SELECT
+  n.id,
+  n.name,
+  n.public_host,
+  n.api_base_url,
+  n.status,
+  n.sing_box_version,
+  n.last_seen_at,
+  n.created_at,
+  n.updated_at
+FROM nodes n
+WHERE ` + whereSQL + `
+ORDER BY ` + sortSQL + `
+LIMIT ?
+OFFSET ?`
+	rows, err := db.sql.QueryContext(ctx, listQuery, listArgs...)
+	if err != nil {
+		return NodePage{}, err
+	}
+	defer rows.Close()
+	nodes := make([]Node, 0)
+	for rows.Next() {
+		var node Node
+		if err := rows.Scan(
+			&node.ID,
+			&node.Name,
+			&node.PublicHost,
+			&node.APIBaseURL,
+			&node.Status,
+			&node.SingBoxVersion,
+			&node.LastSeenAt,
+			&node.CreatedAt,
+			&node.UpdatedAt,
+		); err != nil {
+			return NodePage{}, err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return NodePage{}, err
+	}
+	return NodePage{
+		Nodes:  nodes,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	}, nil
+}
+
+func nodePageWhere(filter NodeFilter) ([]string, []any) {
+	where := []string{"1 = 1"}
+	args := make([]any, 0, 2)
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		where = append(where, "n.status = ?")
+		args = append(args, status)
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		where = append(where, `(LOWER(n.name) LIKE ? OR LOWER(n.public_host) LIKE ? OR LOWER(n.api_base_url) LIKE ? OR LOWER(n.status) LIKE ? OR LOWER(n.sing_box_version) LIKE ?)`)
+		args = append(args, like, like, like, like, like)
+	}
+	return where, args
+}
+
+func nodePageSort(sort, direction string) string {
+	dir := "ASC"
+	if strings.EqualFold(direction, "desc") {
+		dir = "DESC"
+	}
+	sortColumn := "n.name"
+	switch strings.TrimSpace(sort) {
+	case "status":
+		sortColumn = "n.status"
+	case "public_host":
+		sortColumn = "n.public_host"
+	case "last_seen_at":
+		sortColumn = "COALESCE(n.last_seen_at, '')"
+	case "sing_box_version":
+		sortColumn = "n.sing_box_version"
+	case "created_at":
+		sortColumn = "n.created_at"
+	case "updated_at":
+		sortColumn = "n.updated_at"
+	}
+	return sortColumn + " " + dir + ", n.name ASC"
 }
 
 func (db *DB) GetNode(ctx context.Context, name string) (Node, error) {

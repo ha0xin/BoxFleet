@@ -25,6 +25,8 @@ type LogEventInput = model.LogEventInput
 type LogEventFilter struct {
 	NodeName string
 	UserName string
+	Action   string
+	Search   string
 	Start    string
 	End      string
 	Limit    int64
@@ -55,6 +57,17 @@ type LogEventDetail struct {
 	WindowStart  string
 	WindowEnd    string
 	CreatedAt    string
+}
+
+type logEventsPageParams struct {
+	NodeName  string
+	UserName  string
+	Action    string
+	Search    string
+	StartTime string
+	EndTime   string
+	Limit     int64
+	Offset    int64
 }
 
 type parsedLogEvent struct {
@@ -226,9 +239,11 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 	if offset < 0 {
 		offset = 0
 	}
-	params := store.ListLogEventsPageParams{
+	params := logEventsPageParams{
 		NodeName:  normalizeName(filter.NodeName),
 		UserName:  normalizeName(filter.UserName),
+		Action:    strings.TrimSpace(filter.Action),
+		Search:    strings.TrimSpace(filter.Search),
 		StartTime: strings.TrimSpace(filter.Start),
 		EndTime:   strings.TrimSpace(filter.End),
 		Offset:    offset,
@@ -267,7 +282,7 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 	}, nil
 }
 
-func (db *DB) queryLogEventsPage(ctx context.Context, params store.ListLogEventsPageParams) (int64, []store.ListLogEventsPageRow, error) {
+func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams) (int64, []store.ListLogEventsPageRow, error) {
 	where := []string{"e.proxy_user_id IS NOT NULL"}
 	args := make([]any, 0, 4)
 	if params.NodeName != "" {
@@ -277,6 +292,15 @@ func (db *DB) queryLogEventsPage(ctx context.Context, params store.ListLogEvents
 	if params.UserName != "" {
 		where = append(where, "u.name = ?")
 		args = append(args, params.UserName)
+	}
+	if params.Action != "" {
+		where = append(where, "LOWER(e.action) = LOWER(?)")
+		args = append(args, params.Action)
+	}
+	if params.Search != "" {
+		where = append(where, `(LOWER(n.name) LIKE ? OR LOWER(u.name) LIKE ? OR LOWER(e.auth_name) LIKE ? OR LOWER(e.source_ip) LIKE ? OR LOWER(e.target_host) LIKE ? OR CAST(e.target_port AS TEXT) LIKE ? OR LOWER(e.action) LIKE ? OR LOWER(e.raw_message) LIKE ?)`)
+		pattern := "%" + strings.ToLower(params.Search) + "%"
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	if params.StartTime != "" {
 		where = append(where, "e.window_end >= ?")

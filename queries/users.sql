@@ -4,14 +4,12 @@ INSERT INTO proxy_users (
   name,
   display_name,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at
 ) VALUES (
   sqlc.arg(id),
   sqlc.arg(name),
   sqlc.arg(display_name),
   sqlc.arg(global_quota_bytes),
-  sqlc.arg(traffic_multiplier),
   sqlc.narg(expire_at)
 );
 
@@ -22,7 +20,6 @@ SELECT
   display_name,
   status,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at,
   created_at,
   updated_at
@@ -36,7 +33,6 @@ SELECT
   u.display_name,
   u.status,
   u.global_quota_bytes,
-  u.traffic_multiplier,
   u.expire_at,
   u.created_at,
   u.updated_at,
@@ -49,7 +45,6 @@ GROUP BY
   u.display_name,
   u.status,
   u.global_quota_bytes,
-  u.traffic_multiplier,
   u.expire_at,
   u.created_at,
   u.updated_at
@@ -62,7 +57,6 @@ SELECT
   display_name,
   status,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at,
   created_at,
   updated_at
@@ -80,13 +74,6 @@ WHERE name = sqlc.arg(name);
 UPDATE proxy_users
 SET
   global_quota_bytes = sqlc.arg(global_quota_bytes),
-  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name);
-
--- name: SetProxyUserMultiplier :execrows
-UPDATE proxy_users
-SET
-  traffic_multiplier = sqlc.arg(traffic_multiplier),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = sqlc.arg(name);
 

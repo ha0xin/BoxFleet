@@ -36,6 +36,26 @@ func int64ToBool(value int64) bool {
 	return value != 0
 }
 
+func pageLimit(value, fallback int64) int64 {
+	if fallback <= 0 {
+		fallback = 50
+	}
+	if value <= 0 {
+		value = fallback
+	}
+	if value > 500 {
+		return 500
+	}
+	return value
+}
+
+func pageOffset(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
 func requireAffected(affected int64, resource, name string) error {
 	if affected == 0 {
 		return fmt.Errorf("%s %q not found", resource, name)

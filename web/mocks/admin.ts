@@ -3,8 +3,10 @@ import type { Connect, Plugin } from "vite";
 import type {
   AdminNode,
   AdminNodeBootstrap,
+  AdminNodesResponse,
   AdminProxy,
   AdminProxyAccess,
+  AdminProxiesResponse,
   AdminSettings,
   AdminUser,
   NetworkEvent,
@@ -33,7 +35,7 @@ const nodes: AdminNode[] = [
     name: "tokyo",
     public_host: "203.0.113.10",
     api_base_url: "https://203.0.113.10:18080",
-    status: "online",
+    status: "active",
     sing_box_version: "1.9.3",
     last_seen_at: iso(20_000),
     target_version: "v12",
@@ -47,7 +49,7 @@ const nodes: AdminNode[] = [
     name: "frankfurt",
     public_host: "198.51.100.22",
     api_base_url: "https://198.51.100.22:18080",
-    status: "online",
+    status: "active",
     sing_box_version: "1.9.3",
     last_seen_at: iso(45_000),
     target_version: "v12",
@@ -61,12 +63,12 @@ const nodes: AdminNode[] = [
     name: "singapore",
     public_host: "192.0.2.31",
     api_base_url: "https://192.0.2.31:18080",
-    status: "offline",
+    status: "degraded",
     sing_box_version: "1.9.1",
     last_seen_at: iso(3 * HOUR),
     target_version: "v12",
     current_version: "v10",
-    apply_status: "error",
+    apply_status: "failed",
     apply_error: "sing-box check failed: timeout dialing reality handshake",
     latest_heartbeat: iso(3 * HOUR),
     agent_version: "0.3.9"
@@ -80,7 +82,6 @@ const users: AdminUser[] = [
     display_name: "Alice Zhang",
     status: "active",
     global_quota_bytes: 500 * GiB,
-    traffic_multiplier: 1,
     expire_at: iso(-30 * DAY),
     proxy_count: 3
   },
@@ -90,7 +91,6 @@ const users: AdminUser[] = [
     display_name: "Bob Lee",
     status: "active",
     global_quota_bytes: 200 * GiB,
-    traffic_multiplier: 1.5,
     expire_at: iso(-7 * DAY),
     proxy_count: 2
   },
@@ -100,7 +100,6 @@ const users: AdminUser[] = [
     display_name: "Carol Wu",
     status: "disabled",
     global_quota_bytes: 100 * GiB,
-    traffic_multiplier: 1,
     expire_at: iso(2 * DAY),
     proxy_count: 1
   }
@@ -115,32 +114,66 @@ const traffic: TrafficRow[] = [
   { user_name: "carol", direction: "downlink", raw_bytes: 9 * GiB, billable_bytes: 9 * GiB }
 ];
 
-const systemLogs: SystemLog[] = [
+const systemLogTemplates = [
   {
     node: "tokyo",
     service: "sing-box",
     level: "info",
-    message: "inbound/vless[reality-in]: tcp connection from 100.64.2.5:51234",
-    observed_at: iso(2 * MIN),
-    ingested_at: iso(90_000)
+    message: "inbound/vless[reality-in]: tcp connection from 100.64.2.5:51234"
   },
   {
     node: "frankfurt",
     service: "boxfleet-agent",
     level: "warn",
-    message: "config apply pending: waiting for next pull cycle",
-    observed_at: iso(5 * MIN),
-    ingested_at: iso(4 * MIN)
+    message: "config apply pending: waiting for next pull cycle"
   },
   {
     node: "singapore",
     service: "boxfleet-agent",
     level: "error",
-    message: "heartbeat failed: dial tcp 192.0.2.31:18080: i/o timeout",
-    observed_at: iso(3 * HOUR),
-    ingested_at: iso(3 * HOUR)
+    message: "heartbeat failed: dial tcp 192.0.2.31:18080: i/o timeout"
+  },
+  {
+    node: "tokyo",
+    service: "systemd",
+    level: "info",
+    message: "Started sing-box.service - sing-box proxy service."
+  },
+  {
+    node: "frankfurt",
+    service: "sing-box",
+    level: "debug",
+    message: "router: matched outbound direct for tcp 172.66.40.248:443"
+  },
+  {
+    node: "singapore",
+    service: "sing-box",
+    level: "warn",
+    message: "reality handshake retry after upstream timeout"
+  },
+  {
+    node: "tokyo",
+    service: "boxfleet-agent",
+    level: "info",
+    message: "reported heartbeat with config version v12"
+  },
+  {
+    node: "frankfurt",
+    service: "systemd",
+    level: "error",
+    message: "sing-box.service: Main process exited, code=exited, status=1/FAILURE"
   }
-];
+] satisfies Array<Pick<SystemLog, "node" | "service" | "level" | "message">>;
+
+const systemLogs: SystemLog[] = Array.from({ length: 36 }, (_, index) => {
+  const template = systemLogTemplates[index % systemLogTemplates.length];
+  const observed = (index + 1) * (index % 6 === 0 ? 2 * MIN : 7 * MIN);
+  return {
+    ...template,
+    observed_at: iso(observed),
+    ingested_at: iso(Math.max(30_000, observed - 45_000))
+  };
+});
 
 const overview: Overview = {
   nodes,
@@ -201,7 +234,7 @@ const proxyAccessFor = (userName: string): AdminProxyAccess[] =>
 const connectionInfoFor = (userName: string): UserConnectionInfo => ({
   user: userName,
   nodes: nodes
-    .filter((n) => n.status === "online")
+    .filter((n) => n.status === "active")
     .map((n) => ({
       user: userName,
       node: n.name,
@@ -221,22 +254,37 @@ const connectionInfoFor = (userName: string): UserConnectionInfo => ({
     }))
 });
 
-const networkEvents: NetworkEvent[] = Array.from({ length: 24 }, (_, i) => {
+const networkTargets = [
+  "api.github.com",
+  "youtube.com",
+  "registry.npmjs.org",
+  "x.com",
+  "speed.cloudflare.com",
+  "developer.apple.com",
+  "cloudflare.com",
+  "go.dev"
+];
+
+const networkActions = ["connect", "outbound_connect", "invalid_connection", "reject"] as const;
+
+const networkEvents: NetworkEvent[] = Array.from({ length: 96 }, (_, i) => {
   const u = users[i % users.length];
   const n = nodes[i % nodes.length];
+  const action = networkActions[i % networkActions.length];
+  const target = networkTargets[i % networkTargets.length];
   return {
     node_name: n.name,
     user_name: u.name,
     auth_name: `${u.name}@${n.name}`,
-    source_ip: `100.64.${i % 4}.${(i * 7) % 254}`,
-    target_host: ["api.github.com", "youtube.com", "registry.npmjs.org", "x.com"][i % 4],
-    target_port: i % 4 === 0 ? 80 : 443,
-    action: i % 9 === 0 ? "reject" : "accept",
-    raw_message: "sing-box route: connection matched default outbound",
+    source_ip: `100.64.${i % 12}.${((i + 1) * 7) % 254}`,
+    target_host: target,
+    target_port: i % 8 === 0 ? 80 : 443,
+    action,
+    raw_message: `${action}: ${u.name}@${n.name} -> ${target}`,
     count: 1 + (i % 5),
-    window_start: iso((i + 1) * 10 * MIN),
-    window_end: iso(i * 10 * MIN),
-    created_at: iso(i * 10 * MIN)
+    window_start: iso((i + 1) * 15 * MIN),
+    window_end: iso(i * 15 * MIN),
+    created_at: iso(i * 15 * MIN)
   };
 });
 
@@ -255,24 +303,142 @@ const configChanges = {
   ]
 };
 
+function pageParams(query: URLSearchParams) {
+  const limit = Math.max(1, Math.min(Number(query.get("limit") ?? 50) || 50, 500));
+  const offset = Math.max(0, Number(query.get("offset") ?? 0) || 0);
+  return { limit, offset };
+}
+
+function sortDirection(query: URLSearchParams) {
+  return query.get("direction") === "desc" ? -1 : 1;
+}
+
+function compareText(left: string | number | boolean | undefined, right: string | number | boolean | undefined, direction: number) {
+  return String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true }) * direction;
+}
+
+function nodesPage(query: URLSearchParams): AdminNodesResponse {
+  const search = (query.get("search") ?? "").trim().toLowerCase();
+  const status = (query.get("status") ?? "").trim();
+  const sort = query.get("sort") ?? "name";
+  const direction = sortDirection(query);
+  const { limit, offset } = pageParams(query);
+  const filtered = nodes
+    .filter((node) => !status || node.status === status)
+    .filter((node) => {
+      if (!search) return true;
+      return [node.name, node.public_host, node.api_base_url, node.status, node.sing_box_version, node.agent_version]
+        .some((value) => value?.toLowerCase().includes(search));
+    })
+    .sort((a, b) => {
+      switch (sort) {
+        case "status":
+          return compareText(a.status, b.status, direction) || compareText(a.name, b.name, 1);
+        case "public_host":
+          return compareText(a.public_host, b.public_host, direction) || compareText(a.name, b.name, 1);
+        case "last_seen_at":
+          return compareText(a.latest_heartbeat || a.last_seen_at, b.latest_heartbeat || b.last_seen_at, direction) || compareText(a.name, b.name, 1);
+        case "sing_box_version":
+          return compareText(a.sing_box_version, b.sing_box_version, direction) || compareText(a.name, b.name, 1);
+        default:
+          return compareText(a.name, b.name, direction);
+      }
+    });
+  return { nodes: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
+}
+
+function proxiesPage(query: URLSearchParams): AdminProxiesResponse {
+  const search = (query.get("search") ?? "").trim().toLowerCase();
+  const enabled = (query.get("enabled") ?? "").trim();
+  const nodeName = (query.get("node") ?? "").trim();
+  const sort = query.get("sort") ?? "node_name";
+  const direction = sortDirection(query);
+  const { limit, offset } = pageParams(query);
+  const filtered = proxies
+    .filter((proxy) => !nodeName || proxy.node_name === nodeName)
+    .filter((proxy) => {
+      if (enabled === "true") return proxy.enabled;
+      if (enabled === "false") return !proxy.enabled;
+      return true;
+    })
+    .filter((proxy) => {
+      if (!search) return true;
+      return [proxy.name, proxy.node_name, proxy.protocol, proxy.listen, String(proxy.listen_port), proxy.transport]
+        .some((value) => value?.toLowerCase().includes(search));
+    })
+    .sort((a, b) => {
+      switch (sort) {
+        case "name":
+          return compareText(a.name, b.name, direction);
+        case "protocol":
+          return compareText(a.protocol, b.protocol, direction) || compareText(a.name, b.name, 1);
+        case "listen_port":
+          return compareText(a.listen_port, b.listen_port, direction) || compareText(a.name, b.name, 1);
+        case "enabled":
+          return compareText(a.enabled, b.enabled, direction) || compareText(a.name, b.name, 1);
+        case "traffic_multiplier":
+          return compareText(a.traffic_multiplier, b.traffic_multiplier, direction) || compareText(a.name, b.name, 1);
+        case "updated_at":
+          return compareText(a.updated_at, b.updated_at, direction) || compareText(a.name, b.name, 1);
+        default:
+          return compareText(a.node_name, b.node_name, direction) || compareText(a.listen_port, b.listen_port, 1) || compareText(a.name, b.name, 1);
+      }
+    });
+  return { proxies: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
+}
+
+function systemLogsResponse(query: URLSearchParams): SystemLogsResponse {
+  const { limit } = pageParams(query);
+  const nodeName = (query.get("node") ?? "").trim();
+  const logs = systemLogs.filter((log) => !nodeName || log.node === nodeName).slice(0, limit);
+  return { logs, note: overview.system_log_note };
+}
+
 type Handler = (ctx: { req: Connect.IncomingMessage; match: RegExpMatchArray | null; query: URLSearchParams }) => unknown;
 type Route = { method: string; pattern: RegExp; handler: Handler };
 
 const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/admin\/overview$/, handler: () => overview },
-  { method: "GET", pattern: /^\/api\/admin\/system-logs$/, handler: (): SystemLogsResponse => ({ logs: systemLogs, note: overview.system_log_note }) },
+  { method: "GET", pattern: /^\/api\/admin\/system-logs$/, handler: ({ query }) => systemLogsResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/config\/changes$/, handler: () => configChanges },
   { method: "POST", pattern: /^\/api\/admin\/config\/publish$/, handler: () => ({ published: configChanges.changed.map((c) => ({ node: c.node, version: c.target_version })) }) },
-  { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: () => proxies },
+  { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies },
+  { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes },
+  { method: "GET", pattern: /^\/api\/admin\/users$/, handler: () => users },
+  { method: "GET", pattern: /^\/api\/admin\/traffic\/users$/, handler: () => traffic },
   { method: "GET", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
   { method: "PUT", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
   {
     method: "GET",
     pattern: /^\/api\/admin\/network-events$/,
     handler: ({ query }): NetworkEventsResponse => {
-      const limit = Number(query.get("limit") ?? 20) || 20;
-      const offset = Number(query.get("offset") ?? 0) || 0;
-      return { events: networkEvents.slice(offset, offset + limit), total: networkEvents.length, limit, offset };
+      const { limit, offset } = pageParams(query);
+      const search = (query.get("search") ?? "").trim().toLowerCase();
+      const action = (query.get("action") ?? "").trim().toLowerCase();
+      const nodeName = (query.get("node") ?? "").trim();
+      const userName = (query.get("user") ?? "").trim();
+      const start = Date.parse(query.get("start") ?? "");
+      const end = Date.parse(query.get("end") ?? "");
+      const filtered = networkEvents
+        .filter((event) => !nodeName || event.node_name === nodeName)
+        .filter((event) => !userName || event.user_name === userName)
+        .filter((event) => !action || event.action.toLowerCase() === action)
+        .filter((event) => !Number.isFinite(start) || Date.parse(event.window_end) >= start)
+        .filter((event) => !Number.isFinite(end) || Date.parse(event.window_start) <= end)
+        .filter((event) => {
+          if (!search) return true;
+          return [
+            event.node_name,
+            event.user_name,
+            event.auth_name,
+            event.source_ip,
+            event.target_host,
+            String(event.target_port),
+            event.action,
+            event.raw_message
+          ].some((value) => value.toLowerCase().includes(search));
+        });
+      return { events: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
     }
   },
   { method: "GET", pattern: /^\/api\/admin\/nodes\/([^/]+)\/status$/, handler: ({ match }) => nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? "")) ?? nodes[0] },

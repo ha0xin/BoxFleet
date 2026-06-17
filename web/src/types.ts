@@ -1,14 +1,17 @@
+export type AdminNodeStatus = "pending" | "active" | "disabled" | "degraded";
+export type AdminNodeApplyStatus = "pending" | "applied" | "failed" | "rolled_back";
+
 export type AdminNode = {
   id: string;
   name: string;
   public_host: string;
   api_base_url: string;
-  status: string;
+  status: AdminNodeStatus;
   sing_box_version: string;
   last_seen_at: string;
   target_version?: string;
   current_version?: string;
-  apply_status?: string;
+  apply_status?: AdminNodeApplyStatus;
   apply_error?: string;
   latest_heartbeat?: string;
   agent_version?: string;
@@ -18,6 +21,13 @@ export type AdminNodeBootstrap = {
   node: AdminNode;
   bootstrap_string: string;
   install_script_url: string;
+};
+
+export type AdminNodesResponse = {
+  nodes: AdminNode[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 export type AdminProxy = {
@@ -38,13 +48,19 @@ export type AdminProxy = {
   updated_at: string;
 };
 
+export type AdminProxiesResponse = {
+  proxies: AdminProxy[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type AdminUser = {
   id: string;
   name: string;
   display_name: string;
   status: string;
   global_quota_bytes: number;
-  traffic_multiplier: number;
   expire_at: string;
   proxy_count: number;
 };

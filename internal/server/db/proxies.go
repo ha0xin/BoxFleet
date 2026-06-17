@@ -71,6 +71,23 @@ type UpdateProxyParams struct {
 	RouteRulesJSON    string
 }
 
+type ProxyFilter struct {
+	Search    string
+	NodeName  string
+	Enabled   string
+	Sort      string
+	Direction string
+	Limit     int64
+	Offset    int64
+}
+
+type ProxyPage struct {
+	Proxies []Proxy
+	Total   int64
+	Limit   int64
+	Offset  int64
+}
+
 func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy, error) {
 	node, err := db.GetNode(ctx, params.NodeName)
 	if err != nil {
@@ -238,6 +255,136 @@ func (db *DB) ListProxies(ctx context.Context, nodeName string) ([]Proxy, error)
 		out = append(out, proxyFromDetail(row))
 	}
 	return out, nil
+}
+
+func (db *DB) ListProxiesPage(ctx context.Context, filter ProxyFilter) (ProxyPage, error) {
+	limit := pageLimit(filter.Limit, 50)
+	offset := pageOffset(filter.Offset)
+	where, args := proxyPageWhere(filter)
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	countQuery := `
+SELECT COUNT(*)
+FROM proxy_details p
+WHERE ` + whereSQL
+	if err := db.sql.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return ProxyPage{}, err
+	}
+	sortSQL := proxyPageSort(filter.Sort, filter.Direction)
+	listArgs := append([]any{}, args...)
+	listArgs = append(listArgs, limit, offset)
+	listQuery := `
+SELECT
+  p.id,
+  p.node_id,
+  p.node_name,
+  p.node_public_host,
+  p.name,
+  p.protocol,
+  p.listen,
+  p.listen_port,
+  p.transport,
+  p.enabled,
+  p.traffic_multiplier,
+  p.settings_json,
+  p.inbound_rules_json,
+  p.outbound_rules_json,
+  p.route_rules_json,
+  p.created_at,
+  p.updated_at
+FROM proxy_details p
+WHERE ` + whereSQL + `
+ORDER BY ` + sortSQL + `
+LIMIT ?
+OFFSET ?`
+	rows, err := db.sql.QueryContext(ctx, listQuery, listArgs...)
+	if err != nil {
+		return ProxyPage{}, err
+	}
+	defer rows.Close()
+	proxies := make([]Proxy, 0)
+	for rows.Next() {
+		var proxy Proxy
+		var enabled int64
+		if err := rows.Scan(
+			&proxy.ID,
+			&proxy.NodeID,
+			&proxy.NodeName,
+			&proxy.NodePublicHost,
+			&proxy.Name,
+			&proxy.Protocol,
+			&proxy.Listen,
+			&proxy.ListenPort,
+			&proxy.Transport,
+			&enabled,
+			&proxy.TrafficMultiplier,
+			&proxy.SettingsJSON,
+			&proxy.InboundRulesJSON,
+			&proxy.OutboundRulesJSON,
+			&proxy.RouteRulesJSON,
+			&proxy.CreatedAt,
+			&proxy.UpdatedAt,
+		); err != nil {
+			return ProxyPage{}, err
+		}
+		proxy.Enabled = int64ToBool(enabled)
+		proxies = append(proxies, proxy)
+	}
+	if err := rows.Err(); err != nil {
+		return ProxyPage{}, err
+	}
+	return ProxyPage{
+		Proxies: proxies,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	}, nil
+}
+
+func proxyPageWhere(filter ProxyFilter) ([]string, []any) {
+	where := []string{"1 = 1"}
+	args := make([]any, 0, 3)
+	if nodeName := normalizeName(filter.NodeName); nodeName != "" {
+		where = append(where, "p.node_name = ?")
+		args = append(args, nodeName)
+	}
+	switch strings.TrimSpace(filter.Enabled) {
+	case "true", "1", "enabled":
+		where = append(where, "p.enabled = 1")
+	case "false", "0", "disabled":
+		where = append(where, "p.enabled = 0")
+	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		where = append(where, `(LOWER(p.name) LIKE ? OR LOWER(p.node_name) LIKE ? OR LOWER(p.protocol) LIKE ? OR LOWER(p.listen) LIKE ? OR CAST(p.listen_port AS TEXT) LIKE ? OR LOWER(p.transport) LIKE ?)`)
+		args = append(args, like, like, like, like, like, like)
+	}
+	return where, args
+}
+
+func proxyPageSort(sort, direction string) string {
+	dir := "ASC"
+	if strings.EqualFold(direction, "desc") {
+		dir = "DESC"
+	}
+	sortColumn := "p.node_name"
+	switch strings.TrimSpace(sort) {
+	case "name":
+		sortColumn = "p.name"
+	case "protocol":
+		sortColumn = "p.protocol"
+	case "listen_port":
+		sortColumn = "p.listen_port"
+	case "enabled":
+		sortColumn = "p.enabled"
+	case "traffic_multiplier":
+		sortColumn = "p.traffic_multiplier"
+	case "created_at":
+		sortColumn = "p.created_at"
+	case "updated_at":
+		sortColumn = "p.updated_at"
+	}
+	return sortColumn + " " + dir + ", p.node_name ASC, p.listen_port ASC, p.name ASC"
 }
 
 func (db *DB) GetProxy(ctx context.Context, nodeName, name string) (Proxy, error) {

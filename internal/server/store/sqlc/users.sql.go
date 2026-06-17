@@ -16,25 +16,22 @@ INSERT INTO proxy_users (
   name,
   display_name,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at
 ) VALUES (
   ?1,
   ?2,
   ?3,
   ?4,
-  ?5,
-  ?6
+  ?5
 )
 `
 
 type CreateProxyUserParams struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	DisplayName       string         `json:"display_name"`
-	GlobalQuotaBytes  int64          `json:"global_quota_bytes"`
-	TrafficMultiplier float64        `json:"traffic_multiplier"`
-	ExpireAt          sql.NullString `json:"expire_at"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"display_name"`
+	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
+	ExpireAt         sql.NullString `json:"expire_at"`
 }
 
 func (q *Queries) CreateProxyUser(ctx context.Context, arg CreateProxyUserParams) error {
@@ -43,7 +40,6 @@ func (q *Queries) CreateProxyUser(ctx context.Context, arg CreateProxyUserParams
 		arg.Name,
 		arg.DisplayName,
 		arg.GlobalQuotaBytes,
-		arg.TrafficMultiplier,
 		arg.ExpireAt,
 	)
 	return err
@@ -56,7 +52,6 @@ SELECT
   display_name,
   status,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at,
   created_at,
   updated_at
@@ -73,7 +68,6 @@ func (q *Queries) GetProxyUserByName(ctx context.Context, name string) (ProxyUse
 		&i.DisplayName,
 		&i.Status,
 		&i.GlobalQuotaBytes,
-		&i.TrafficMultiplier,
 		&i.ExpireAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -88,7 +82,6 @@ SELECT
   display_name,
   status,
   global_quota_bytes,
-  traffic_multiplier,
   expire_at,
   created_at,
   updated_at
@@ -111,7 +104,6 @@ func (q *Queries) ListProxyUsers(ctx context.Context) ([]ProxyUser, error) {
 			&i.DisplayName,
 			&i.Status,
 			&i.GlobalQuotaBytes,
-			&i.TrafficMultiplier,
 			&i.ExpireAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -136,7 +128,6 @@ SELECT
   u.display_name,
   u.status,
   u.global_quota_bytes,
-  u.traffic_multiplier,
   u.expire_at,
   u.created_at,
   u.updated_at,
@@ -149,7 +140,6 @@ GROUP BY
   u.display_name,
   u.status,
   u.global_quota_bytes,
-  u.traffic_multiplier,
   u.expire_at,
   u.created_at,
   u.updated_at
@@ -157,16 +147,15 @@ ORDER BY u.name
 `
 
 type ListProxyUsersWithProxyCountsRow struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	DisplayName       string         `json:"display_name"`
-	Status            string         `json:"status"`
-	GlobalQuotaBytes  int64          `json:"global_quota_bytes"`
-	TrafficMultiplier float64        `json:"traffic_multiplier"`
-	ExpireAt          sql.NullString `json:"expire_at"`
-	CreatedAt         string         `json:"created_at"`
-	UpdatedAt         string         `json:"updated_at"`
-	ProxyCount        int64          `json:"proxy_count"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"display_name"`
+	Status           string         `json:"status"`
+	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
+	ExpireAt         sql.NullString `json:"expire_at"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	ProxyCount       int64          `json:"proxy_count"`
 }
 
 func (q *Queries) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ListProxyUsersWithProxyCountsRow, error) {
@@ -184,7 +173,6 @@ func (q *Queries) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ListProx
 			&i.DisplayName,
 			&i.Status,
 			&i.GlobalQuotaBytes,
-			&i.TrafficMultiplier,
 			&i.ExpireAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -218,27 +206,6 @@ type SetProxyUserExpireParams struct {
 
 func (q *Queries) SetProxyUserExpire(ctx context.Context, arg SetProxyUserExpireParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProxyUserExpire, arg.ExpireAt, arg.Name)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const setProxyUserMultiplier = `-- name: SetProxyUserMultiplier :execrows
-UPDATE proxy_users
-SET
-  traffic_multiplier = ?1,
-  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
-`
-
-type SetProxyUserMultiplierParams struct {
-	TrafficMultiplier float64 `json:"traffic_multiplier"`
-	Name              string  `json:"name"`
-}
-
-func (q *Queries) SetProxyUserMultiplier(ctx context.Context, arg SetProxyUserMultiplierParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setProxyUserMultiplier, arg.TrafficMultiplier, arg.Name)
 	if err != nil {
 		return 0, err
 	}

@@ -3,7 +3,6 @@ package bf
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
 	configrender "github.com/haoxin/boxfleet/internal/server/render"
@@ -16,7 +15,6 @@ func userCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "user", Short: "Manage proxy users"}
 
 	var displayName, quota, expire string
-	var multiplier float64
 	create := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a proxy user",
@@ -28,11 +26,10 @@ func userCommand() *cobra.Command {
 			}
 			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
 				user, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{
-					Name:              args[0],
-					DisplayName:       displayName,
-					GlobalQuotaBytes:  quotaBytes,
-					TrafficMultiplier: multiplier,
-					ExpireAt:          expire,
+					Name:             args[0],
+					DisplayName:      displayName,
+					GlobalQuotaBytes: quotaBytes,
+					ExpireAt:         expire,
 				})
 				if err != nil {
 					return err
@@ -44,7 +41,6 @@ func userCommand() *cobra.Command {
 	}
 	create.Flags().StringVar(&displayName, "display-name", "", "display name")
 	create.Flags().StringVar(&quota, "quota", "0", "global quota, e.g. 50GiB or 0")
-	create.Flags().Float64Var(&multiplier, "multiplier", 1.0, "traffic multiplier")
 	create.Flags().StringVar(&expire, "expire", "", "expiration date, e.g. 2026-12-31")
 	cmd.AddCommand(create)
 
@@ -67,11 +63,10 @@ func userCommand() *cobra.Command {
 						user.Name,
 						user.Status,
 						units.FormatBytes(user.GlobalQuotaBytes),
-						fmt.Sprintf("%.3g", user.TrafficMultiplier),
 						expire,
 					})
 				}
-				renderTable(cmd, table.Row{"NAME", "STATUS", "QUOTA", "MULT", "EXPIRE"}, rows)
+				renderTable(cmd, table.Row{"NAME", "STATUS", "QUOTA", "EXPIRE"}, rows)
 				return nil
 			})
 		},
@@ -95,7 +90,6 @@ func userCommand() *cobra.Command {
 	cmd.AddCommand(userStatusCommand("disable", "disabled"))
 	cmd.AddCommand(userStatusCommand("delete", "disabled"))
 	cmd.AddCommand(userSetQuotaCommand())
-	cmd.AddCommand(userSetMultiplierCommand())
 	cmd.AddCommand(userSetExpireCommand())
 	cmd.AddCommand(userNodeInfoCommand())
 	return cmd
@@ -159,27 +153,6 @@ func userSetQuotaCommand() *cobra.Command {
 					return err
 				}
 				okText.Fprintf(cmd.OutOrStdout(), "user %s quota: %s\n", args[0], units.FormatBytes(quota))
-				return nil
-			})
-		},
-	}
-}
-
-func userSetMultiplierCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "set-multiplier <name> <ratio>",
-		Short: "Set global user traffic multiplier",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			multiplier, err := strconv.ParseFloat(args[1], 64)
-			if err != nil {
-				return err
-			}
-			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
-				if err := store.SetProxyUserMultiplier(ctx, args[0], multiplier); err != nil {
-					return err
-				}
-				okText.Fprintf(cmd.OutOrStdout(), "user %s multiplier: %.3g\n", args[0], multiplier)
 				return nil
 			})
 		},

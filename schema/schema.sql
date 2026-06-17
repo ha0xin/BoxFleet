@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS proxy_users (
     CHECK (status IN ('active', 'disabled', 'expired', 'quota_exceeded')),
   global_quota_bytes INTEGER NOT NULL DEFAULT 0
     CHECK (global_quota_bytes >= 0),
-  traffic_multiplier REAL NOT NULL DEFAULT 1.0
-    CHECK (traffic_multiplier >= 0),
   expire_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

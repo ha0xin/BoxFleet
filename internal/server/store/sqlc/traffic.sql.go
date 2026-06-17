@@ -116,11 +116,10 @@ const getTrafficCredentialByNodeAuthName = `-- name: GetTrafficCredentialByNodeA
 SELECT
   c.proxy_user_id,
   c.proxy_id,
-  COALESCE(c.traffic_multiplier, p.traffic_multiplier, b.traffic_multiplier, u.traffic_multiplier) AS effective_multiplier
+  COALESCE(c.traffic_multiplier, b.traffic_multiplier, p.traffic_multiplier, 1.0) AS effective_multiplier
 FROM proxy_accesses c
 JOIN proxies p ON p.id = c.proxy_id
 JOIN nodes n ON n.id = p.node_id
-JOIN proxy_users u ON u.id = c.proxy_user_id
 JOIN user_node_bindings b ON b.proxy_user_id = c.proxy_user_id AND b.node_id = n.id
 WHERE n.name = ?1
   AND c.auth_name = ?2

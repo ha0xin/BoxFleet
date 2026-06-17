@@ -1,4 +1,13 @@
-import { Broadcast, FileText, GearSix, Gauge, HardDrives, Path, Pulse, Users } from "@phosphor-icons/react";
+import {
+  BroadcastIcon,
+  FileTextIcon,
+  GaugeIcon,
+  GearSixIcon,
+  HardDrivesIcon,
+  PathIcon,
+  PulseIcon,
+  UsersIcon
+} from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 
 import type { Page } from "./types";
@@ -6,14 +15,14 @@ import type { Page } from "./types";
 export type NavItem = { id: Page; label: string; icon: Icon; path: string };
 
 export const pages: NavItem[] = [
-  { id: "overview", label: "Overview", icon: Pulse, path: "/" },
-  { id: "nodes", label: "Nodes", icon: HardDrives, path: "/nodes" },
-  { id: "proxies", label: "Proxies", icon: Path, path: "/proxies" },
-  { id: "users", label: "Users", icon: Users, path: "/users" },
-  { id: "traffic", label: "Traffic", icon: Gauge, path: "/traffic" },
-  { id: "network-events", label: "Network Events", icon: Broadcast, path: "/network-events" },
-  { id: "system-logs", label: "System Logs", icon: FileText, path: "/system-logs" },
-  { id: "settings", label: "Settings", icon: GearSix, path: "/settings" }
+  { id: "overview", label: "Overview", icon: PulseIcon, path: "/" },
+  { id: "nodes", label: "Nodes", icon: HardDrivesIcon, path: "/nodes" },
+  { id: "proxies", label: "Proxies", icon: PathIcon, path: "/proxies" },
+  { id: "users", label: "Users", icon: UsersIcon, path: "/users" },
+  { id: "traffic", label: "Traffic", icon: GaugeIcon, path: "/traffic" },
+  { id: "network-events", label: "Network Events", icon: BroadcastIcon, path: "/network-events" },
+  { id: "system-logs", label: "System Logs", icon: FileTextIcon, path: "/system-logs" },
+  { id: "settings", label: "Settings", icon: GearSixIcon, path: "/settings" }
 ];
 
 const byId = (id: Page): NavItem => pages.find((page) => page.id === id)!;

@@ -3,8 +3,9 @@
 BoxFleet MVP uses SQLite with WAL mode, `synchronous=NORMAL`, a busy timeout,
 and one open connection per process.
 
-The schema separates raw traffic from billable traffic so global quota, traffic
-multiplier, and per-node quota can be handled consistently.
+The schema separates raw traffic from billable traffic so global quota,
+per-node quota, and non-user traffic multiplier overrides can be handled
+consistently.
 
 The executable draft lives in:
 
@@ -24,14 +25,10 @@ name                      unique, stable CLI name
 display_name
 status                    active | disabled | expired | quota_exceeded
 global_quota_bytes        0 means unlimited
-traffic_multiplier        default 1.0
 expire_at                 nullable
 created_at
 updated_at
 ```
-
-`traffic_multiplier` is the user's default billing multiplier. For example, a
-raw 1 GB transfer with multiplier `2.0` counts as 2 billable GB.
 
 ### nodes
 
@@ -165,7 +162,7 @@ proxy_user_id
 node_id
 enabled
 node_quota_bytes          0 means unlimited
-traffic_multiplier        nullable; overrides proxy_users.traffic_multiplier
+traffic_multiplier        nullable; per-node billing override
 route_profile_id          nullable
 created_at
 updated_at
@@ -175,8 +172,9 @@ Billing multiplier resolution:
 
 ```text
 effective_multiplier =
-  user_node_bindings.traffic_multiplier
-  ?? proxy_users.traffic_multiplier
+  proxy_accesses.traffic_multiplier
+  ?? user_node_bindings.traffic_multiplier
+  ?? proxies.traffic_multiplier
   ?? 1.0
 ```
 

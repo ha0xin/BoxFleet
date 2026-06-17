@@ -19,7 +19,6 @@ func printProxyUser(cmd *cobra.Command, user db.ProxyUser) {
 	fmt.Fprintf(cmd.OutOrStdout(), "display_name: %s\n", user.DisplayName)
 	fmt.Fprintf(cmd.OutOrStdout(), "status: %s\n", user.Status)
 	fmt.Fprintf(cmd.OutOrStdout(), "global_quota: %s\n", units.FormatBytes(user.GlobalQuotaBytes))
-	fmt.Fprintf(cmd.OutOrStdout(), "traffic_multiplier: %.3g\n", user.TrafficMultiplier)
 	fmt.Fprintf(cmd.OutOrStdout(), "expire_at: %s\n", expire)
 }
 
