@@ -141,6 +141,12 @@ has `with_v2ray_api`, installs systemd units, pulls config, and starts
 `sing_box_url` for custom installs, but the Web UI's default flow relies on the
 server install script instead.
 
+A bootstrapped node starts in `pending` status and is excluded from rendering
+and publishing until its agent checks in. The agent's first authenticated
+heartbeat promotes it to `active`. After that, `bf node disable` pauses a node
+(the agent stops `sing-box` but the daemon keeps reporting and the node can be
+re-enabled), while `bf node delete` decommissions it (revokes its tokens).
+
 ## Config Flow
 
 The operator edits nodes, proxies, users, and access grants through `bf` and

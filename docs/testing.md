@@ -114,15 +114,21 @@ Manual UI smoke for the current MVP:
 
 - Open `/admin`.
 - Confirm the sidebar has Overview, Nodes, Proxies, Users, Traffic, Network
-  Events, and System Logs.
+  Events, System Logs, and Settings.
 - Open Proxies.
-- Click Add Proxy, select a node, create a VLESS Reality proxy without a
+- Click Create, select a node, create a VLESS Reality proxy without a
   transport field.
 - Confirm the created proxy appears in the list with read-only transport.
-- Click the proxy and confirm Node, Name, and Protocol are fixed while
-  listen/port/enabled/multiplier/settings/rules remain editable.
-- Open Nodes, click a node, and confirm node edit plus render/publish controls
-  are present. Proxy editing should not live under the Node modal.
+- Edit the proxy and confirm Node, Name, and Protocol are fixed while
+  listen/port/enabled/multiplier/SNI remain editable; saving an edit must keep
+  the existing Reality keys (only the SNI changes).
+- Open Users, edit a user (display name / status / quota / expiry), and use
+  Manage access to issue and revoke a proxy grant.
+- Open Nodes, edit a node (public host / API URL), pause/resume it, and confirm a
+  decommissioned node offers re-enroll rather than Enable. Proxy editing should
+  not live under the Node modal.
+- Make any change that alters the rendered config and confirm the top publish bar
+  lights up; Review & apply, and watch it converge to green.
 - Open Network Events.
 - Confirm Node, User, and Page Size are Kumo selects, not native browser
   selects.

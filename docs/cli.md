@@ -9,17 +9,14 @@ The node binary is `boxfleet-agent` and only exposes local maintenance commands.
 ### Database
 
 ```text
-bf db init
-bf db migrate
+bf db init          # alias: bf db migrate
 bf db status
 ```
 
-### Server
-
-```text
-bf server run
-bf server check
-```
+Interactive day-to-day CRUD (users, nodes, proxies, access) is also available in
+the admin Web UI, which is now the primary surface for it. `bf` remains the
+local/offline tool for database setup, config render/publish, node enrollment,
+and diagnostics.
 
 ### Users
 
@@ -29,8 +26,9 @@ bf user list
 bf user show <name>
 bf user disable <name>
 bf user enable <name>
+bf user delete <name>
 bf user set-quota <name> <bytes|gb>
-bf user set-expire <name> <date>
+bf user set-expire <name> <date|none>
 bf user node-info <name>
 bf user node-info <name> --node <node>
 bf user node-info <name> --format json
@@ -42,11 +40,18 @@ bf user node-info <name> --format json
 bf node create <name> --host <host>
 bf node list
 bf node show <name>
-bf node disable <name>
+bf node disable <name>          # pause: agent stops sing-box, keeps reporting; token intact
 bf node enable <name>
+bf node delete <name>           # decommission: disable + revoke the node's tokens
 bf node token issue <name>
+bf node token delete <name>
 bf node bootstrap <name> --ssh <ssh-target> --server-url <url> --agent-bin <path> --sing-box-url <url>
 ```
+
+`bf node delete` is a soft decommission: it sets the node disabled and revokes its
+tokens (the record is kept). `bf node disable` is a reversible pause that leaves
+the token valid so the node can be re-enabled later. See "Node lifecycle" in
+`docs/architecture.md`.
 
 The Web UI's Nodes page also has a simplified Add Node flow. Enter a node name,
 copy the generated command, and run it on the node:
@@ -72,6 +77,7 @@ bf proxy list --node <node>
 bf proxy show <name> --node <node>
 bf proxy disable <name> --node <node>
 bf proxy enable <name> --node <node>
+bf proxy delete <name> --node <node>
 ```
 
 `bf proxy create` does not ask for transport. BoxFleet derives it from the
@@ -88,17 +94,20 @@ and client information still need implementation.
 ```text
 bf access issue <user> --node <node> --proxy <proxy>
 bf access show <user> --node <node> --proxy <proxy>
+bf access revoke <user> --node <node> --proxy <proxy>
+bf access delete <user> --node <node> --proxy <proxy>   # alias of revoke
 ```
 
 ### User Node Binding
 
 ```text
 bf bind user <user> --node <node>
+bf bind list
 bf bind disable <user> --node <node>
 bf bind enable <user> --node <node>
+bf bind delete <user> --node <node>
 bf bind set-quota <user> --node <node> <bytes|gb>
-bf bind set-multiplier <user> --node <node> <ratio>
-bf bind set-route <user> --node <node> <route-profile>
+bf bind set-multiplier <user> --node <node> <ratio|inherit>
 ```
 
 ### Config
@@ -106,10 +115,8 @@ bf bind set-route <user> --node <node> <route-profile>
 ```text
 bf config render --node <node>
 bf config render-client <user> --node <node> --proxy <proxy>
-bf config diff --node <node>
 bf config publish --node <node>
 bf config status --node <node>
-bf config rollback --node <node>
 ```
 
 `bf config publish` renders the desired `sing-box` config, stores it as a
@@ -125,9 +132,6 @@ status, last apply error, last heartbeat, and reported agent/sing-box versions.
 ```text
 bf stats user <name>
 bf stats user <name> --node <node>
-bf stats node <node>
-bf stats top users
-bf stats top nodes
 bf stats v2ray --addr 127.0.0.1:18082 --pattern 'user>>>vless-39090@alice' --format json
 ```
 

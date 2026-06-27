@@ -96,6 +96,10 @@ days.
 - Validate config with `sing-box check`.
 - Apply config with rollback on failure.
 - Reload or restart `sing-box`.
+- Honour the `X-BoxFleet-Node-State: disabled` response header by stopping
+  `sing-box` while the daemon keeps polling and heartbeating (see "Node
+  lifecycle"). The stop decision reads actual `ActiveState`, not a persisted
+  marker, so a reboot-restarted unit is re-stopped.
 - Read `sing-box` V2Ray API counters and report traffic deltas.
 - Treat the first V2Ray counter read after a fresh state as baseline, then
   report only positive deltas.
@@ -104,6 +108,28 @@ days.
 - Avoid public management surfaces by default. A future node maintenance port
   should bind to localhost or a private interface such as Tailscale, not the
   public internet.
+
+## Node Lifecycle
+
+Node status flows through four states:
+
+- **pending** — created by the bootstrap/enroll flow. Excluded from rendering
+  and publishing until the agent checks in. The first authenticated heartbeat
+  (`RecordHeartbeat`) promotes it to `active`.
+- **active** — the agent has authenticated and reported in; the node is rendered
+  and eligible for publishing.
+- **disabled** — administratively off. Two distinct paths land here:
+  - **Pause** (`PATCH /nodes/{node}` status, or `bf node disable`): the token
+    stays valid. `GET /api/node/config` returns `X-BoxFleet-Node-State: disabled`
+    plus a valid no-inbound config; the agent stops `sing-box` but its daemon
+    keeps polling, so the node stays visible and can be re-enabled. Token
+    verification no longer filters on node status — a paused node still
+    authenticates; the kill switch is token revocation, not the status.
+  - **Decommission** (`DELETE /nodes/{node}`, or `bf node delete`): also revokes
+    the node's tokens, cutting the daemon off entirely. The record is retained.
+    The UI distinguishes the two via `has_active_token` and does not offer Enable
+    for a decommissioned node.
+- **degraded** — reserved for operational degradation; still rendered/served.
 
 ## Node Constraints
 

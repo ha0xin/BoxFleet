@@ -7,11 +7,11 @@ The schema separates raw traffic from billable traffic so global quota,
 per-node quota, and non-user traffic multiplier overrides can be handled
 consistently.
 
-The executable draft lives in:
-
-```text
-migrations/010_init.sql
-```
+The executable draft lives in `migrations/`. `010_init.sql` is the public
+baseline; later migrations are append-only (e.g.
+`012_remove_proxy_user_traffic_multiplier.sql`). Recent feature work changed only
+query text (`queries/*.sql`), not the schema, so no new migration was needed —
+regenerate sqlc after editing queries.
 
 ## Core Tables
 
@@ -43,6 +43,21 @@ last_seen_at
 created_at
 updated_at
 ```
+
+Status semantics (see "Node Lifecycle" in `docs/architecture.md`):
+
+- `pending` — enrolled via bootstrap, awaiting the first authenticated heartbeat,
+  which promotes it to `active` (`RecordHeartbeat`). Note `CreateNode` inserts
+  `active`; the bootstrap handler then sets `pending`.
+- `active` — agent has checked in; rendered and publishable.
+- `disabled` — paused (token intact, reversible) or decommissioned (tokens
+  revoked). The `has_active_token` field on the admin node response (from
+  `ListNodeNamesWithActiveTokens`) distinguishes the two for the UI.
+- `degraded` — reserved.
+
+Node token verification (`GetActiveNodeTokenByDigest` /
+`ListActiveNodeTokensByNodeName`) no longer filters on node status, so a disabled
+node still authenticates; revoking the token (`revoked_at`) is the real cutoff.
 
 ### node_tokens
 

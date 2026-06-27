@@ -146,10 +146,20 @@ admin paths so browser refresh and copied links keep working.
 The Nodes page is for node inventory and node-level operations:
 
 - list nodes
-- add a node
-- edit public host, API base URL, and status
+- enroll a node (creates it `pending`; the agent's first authenticated heartbeat
+  promotes it to `active`)
+- edit public host and API base URL (status is not in the edit form — see below)
+- pause (Disable) or resume (Enable) a node
+- decommission a node (revokes its agent tokens; kept distinct from a pause)
 - render the current generated sing-box config
 - publish the generated config version for the agent to pull
+
+Status is managed by the row actions, not the edit form: **Disable/Enable** is a
+reversible pause (the agent stops sing-box but keeps reporting; token stays
+valid), while **Decommission** also revokes the node's tokens. A decommissioned
+node (disabled with no active token) is not offered Enable — it shows
+`Decommissioned — re-enroll to restore`. The menu distinguishes the two via the
+`has_active_token` field on the node.
 
 Proxy editing does not live in the Node modal.
 
@@ -192,11 +202,15 @@ listener conflict errors, but users should not have to choose it.
 ## Access And User Node Information
 
 The Users page lists proxy users and can render shareable node information for a
-selected user and node. The first UI does not yet manage proxy access grants;
-use CLI for that:
+selected user and node. It also manages proxy access grants directly: the
+**Manage access** dialog (in `user-dialogs.tsx`) issues
+(`POST /api/admin/users/{user}/proxies`) and revokes
+(`DELETE /api/admin/users/{user}/proxies/{node}/{proxy}`) access, filtering out
+proxies the user already has. The equivalent CLI is still available:
 
 ```bash
 bf access issue <user> --node <node> --proxy <proxy>
+bf access revoke <user> --node <node> --proxy <proxy>
 ```
 
 ## Network Events
