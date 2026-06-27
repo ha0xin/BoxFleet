@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  CheckCircleIcon,
   DotsThreeIcon,
   FunnelIcon,
   HardDrivesIcon,
+  PencilSimpleIcon,
+  PlugsIcon,
   PlusIcon,
+  ProhibitIcon,
   SortAscendingIcon,
-  SortDescendingIcon
+  SortDescendingIcon,
+  WarningCircleIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Link, LinkButton, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodesResponse } from "../types";
 import {
@@ -20,6 +25,9 @@ import {
   PageTopBar,
   rowLinkClassName
 } from "./operations-common";
+import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog } from "./node-dialogs";
+import type { NodeDialogState } from "./node-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type NodeFilter = "all" | "active" | "disabled" | "degraded";
@@ -93,6 +101,14 @@ export function NodesPage({ request }: { request: AdminRequest }) {
   const [search, setSearch] = useState("");
   const [sort, setSortValue] = useState<NodeSort>("name");
   const [direction, setDirection] = useState<SortDirection>("asc");
+  const [dialog, setDialog] = useState<NodeDialogState>(null);
+
+  const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
+    req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: node.name, status: node.status === "disabled" ? "active" : "disabled" })
+    })
+  );
 
   function setSort(column: NodeSort) {
     setPage(1);
@@ -146,14 +162,9 @@ export function NodesPage({ request }: { request: AdminRequest }) {
           title="Nodes"
           description="Operate edge nodes, config versions, heartbeats, and proxy placement."
           actions={
-            <>
-              <Button variant="secondary" shape="square" aria-label="Node actions">
-                <DotsThreeIcon />
-              </Button>
-              <LinkButton href={adminPath("/nodes?create=1")} variant="primary" icon={PlusIcon}>
-                Enroll
-              </LinkButton>
-            </>
+            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "enroll" })}>
+              Enroll
+            </Button>
           }
         />
 
@@ -290,9 +301,40 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                               <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
                             </Table.Cell>
                             <Table.Cell className="text-right">
-                              <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${node.name}`}>
-                                <DotsThreeIcon className="size-4" />
-                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenu.Trigger
+                                  render={
+                                    <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${node.name}`}>
+                                      <DotsThreeIcon className="size-4" />
+                                    </Button>
+                                  }
+                                />
+                                <DropdownMenu.Content>
+                                  <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", node })}>
+                                    Edit
+                                  </DropdownMenu.Item>
+                                  {node.status === "disabled" && node.has_active_token === false ? (
+                                    // Decommissioned: tokens were revoked, so Enable would yield an
+                                    // active node whose agent can never authenticate. Re-enroll instead.
+                                    <DropdownMenu.Item icon={WarningCircleIcon} disabled>
+                                      Decommissioned — re-enroll to restore
+                                    </DropdownMenu.Item>
+                                  ) : (
+                                    <>
+                                      <DropdownMenu.Item
+                                        icon={node.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                        onClick={() => toggleStatus.mutate(node)}
+                                      >
+                                        {node.status === "disabled" ? "Enable" : "Disable"}
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Separator />
+                                      <DropdownMenu.Item variant="danger" icon={PlugsIcon} onClick={() => setDialog({ mode: "delete", node })}>
+                                        Decommission
+                                      </DropdownMenu.Item>
+                                    </>
+                                  )}
+                                </DropdownMenu.Content>
+                              </DropdownMenu>
                             </Table.Cell>
                           </Table.Row>
                         );
@@ -320,6 +362,16 @@ export function NodesPage({ request }: { request: AdminRequest }) {
           </section>
         </div>
       </main>
+
+      {dialog?.mode === "enroll" ? (
+        <EnrollNodeDialog request={request} onClose={() => setDialog(null)} />
+      ) : null}
+      {dialog?.mode === "edit" ? (
+        <EditNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
+      ) : null}
+      {dialog?.mode === "delete" ? (
+        <DeleteNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
+      ) : null}
     </div>
   );
 }

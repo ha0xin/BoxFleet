@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { Breadcrumbs } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
+import { usePublishStatus } from "@/publish/publish-status";
+import { PublishStrip, publishBarToneClass } from "@/publish/publish-strip";
 
 /**
  * App page header. The top breadcrumb bar is exactly `h-[58px]` with a bottom
@@ -23,15 +25,21 @@ export function AppPageHeader({
   actions?: ReactNode;
   children?: ReactNode;
 }) {
+  const { status } = usePublishStatus();
   return (
     <div className="flex flex-col">
-      <div className="flex h-[58px] shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">
+      <div
+        className={`flex h-[58px] shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6 transition-colors duration-300 ${publishBarToneClass(status)}`}
+      >
         <Breadcrumbs size="sm">
           <Breadcrumbs.Link href={`${adminBasename()}/`}>BoxFleet</Breadcrumbs.Link>
           <Breadcrumbs.Separator />
           <Breadcrumbs.Current>{title}</Breadcrumbs.Current>
         </Breadcrumbs>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        <div className="flex items-center gap-3">
+          <PublishStrip />
+          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 px-6 py-6">

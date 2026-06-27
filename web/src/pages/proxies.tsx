@@ -5,15 +5,20 @@ import {
   DotsThreeIcon,
   FunnelIcon,
   PathIcon,
+  PencilSimpleIcon,
   PlusIcon,
+  ProhibitIcon,
   SortAscendingIcon,
   SortDescendingIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Link, LinkButton, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 import type { AdminProxy, AdminProxiesResponse } from "../types";
 import { adminPath, formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName } from "./operations-common";
+import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { ProxyFormDialog } from "./proxy-dialogs";
+import type { ProxyDialogState } from "./proxy-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type ProxyFilter = "all" | "enabled" | "disabled";
@@ -101,6 +106,14 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
   const [search, setSearch] = useState("");
   const [sort, setSortValue] = useState<ProxySort>("node_name");
   const [direction, setDirection] = useState<SortDirection>("asc");
+  const [dialog, setDialog] = useState<ProxyDialogState>(null);
+
+  const toggleEnabled = useAdminMutation<AdminProxy>(request, (req, proxy) =>
+    req(`/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: !proxy.enabled })
+    })
+  );
 
   function setSort(column: ProxySort) {
     setPage(1);
@@ -154,14 +167,9 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
           title="Proxies"
           description="Review VLESS-Reality inbounds, ports, routing rules, and node placement."
           actions={
-            <>
-              <Button variant="secondary" shape="square" aria-label="Proxy actions">
-                <DotsThreeIcon />
-              </Button>
-              <LinkButton href={adminPath("/proxies?create=1")} variant="primary" icon={PlusIcon}>
-                Create
-              </LinkButton>
-            </>
+            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "create" })}>
+              Create
+            </Button>
           }
         />
 
@@ -301,9 +309,26 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
                               <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(proxy.updated_at)}</span>
                             </Table.Cell>
                             <Table.Cell className="text-right">
-                              <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${proxy.name}`}>
-                                <DotsThreeIcon className="size-4" />
-                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenu.Trigger
+                                  render={
+                                    <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${proxy.name}`}>
+                                      <DotsThreeIcon className="size-4" />
+                                    </Button>
+                                  }
+                                />
+                                <DropdownMenu.Content>
+                                  <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", proxy })}>
+                                    Edit
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Item
+                                    icon={proxy.enabled ? ProhibitIcon : CheckCircleIcon}
+                                    onClick={() => toggleEnabled.mutate(proxy)}
+                                  >
+                                    {proxy.enabled ? "Disable" : "Enable"}
+                                  </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                              </DropdownMenu>
                             </Table.Cell>
                           </Table.Row>
                         );
@@ -331,6 +356,10 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
           </section>
         </div>
       </main>
+
+      {dialog?.mode === "create" || dialog?.mode === "edit" ? (
+        <ProxyFormDialog request={request} state={dialog} onClose={() => setDialog(null)} />
+      ) : null}
     </div>
   );
 }

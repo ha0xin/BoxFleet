@@ -6,18 +6,24 @@ import {
   CheckCircleIcon,
   DotsThreeIcon,
   FunnelIcon,
+  KeyIcon,
+  PencilSimpleIcon,
   PlusIcon,
+  ProhibitIcon,
   SortAscendingIcon,
   SortDescendingIcon,
   UserIcon,
   WarningCircleIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, LinkButton, Loader, Meter, Pagination, Table } from "@cloudflare/kumo";
+import { Button, DropdownMenu, Input, Loader, Meter, Pagination, Table } from "@cloudflare/kumo";
 
 import type { AdminUser, TrafficRow } from "../types";
 import { formatBytes } from "../utils";
-import { adminPath, PageHeader, PageTopBar } from "./operations-common";
+import { PageHeader, PageTopBar } from "./operations-common";
+import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { ManageAccessDialog, UserFormDialog } from "./user-dialogs";
+import type { UserDialogState } from "./user-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded";
@@ -217,6 +223,14 @@ export function UsersPage({ request }: { request: AdminRequest }) {
   const [search, setSearch] = useState("");
   const [sort, setSortValue] = useState<UserSort>("name");
   const [direction, setDirection] = useState<SortDirection>("asc");
+  const [dialog, setDialog] = useState<UserDialogState>(null);
+
+  const toggleStatus = useAdminMutation<AdminUser>(request, (req, user) =>
+    req(`/api/admin/users/${encodeURIComponent(user.name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: user.status === "disabled" ? "active" : "disabled" })
+    })
+  );
 
   const usersQuery = useQuery({
     queryKey: ["admin", "users"],
@@ -288,14 +302,9 @@ export function UsersPage({ request }: { request: AdminRequest }) {
           title="Users"
           description="Manage proxy users, quotas, access counts, expiration, and traffic usage."
           actions={
-            <>
-              <Button variant="secondary" shape="square" aria-label="User actions">
-                <DotsThreeIcon />
-              </Button>
-              <LinkButton href={adminPath("/users?create=1")} variant="primary" icon={PlusIcon}>
-                Create
-              </LinkButton>
-            </>
+            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "create" })}>
+              Create
+            </Button>
           }
         />
 
@@ -445,9 +454,29 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                               </span>
                             </Table.Cell>
                             <Table.Cell className="text-right">
-                              <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${row.user.name}`}>
-                                <DotsThreeIcon className="size-4" />
-                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenu.Trigger
+                                  render={
+                                    <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${row.user.name}`}>
+                                      <DotsThreeIcon className="size-4" />
+                                    </Button>
+                                  }
+                                />
+                                <DropdownMenu.Content>
+                                  <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
+                                    Edit
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
+                                    Manage access
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Item
+                                    icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                    onClick={() => toggleStatus.mutate(row.user)}
+                                  >
+                                    {row.user.status === "disabled" ? "Enable" : "Disable"}
+                                  </DropdownMenu.Item>
+                                </DropdownMenu.Content>
+                              </DropdownMenu>
                             </Table.Cell>
                           </Table.Row>
                         );
@@ -475,6 +504,13 @@ export function UsersPage({ request }: { request: AdminRequest }) {
           </section>
         </div>
       </main>
+
+      {dialog?.mode === "create" || dialog?.mode === "edit" ? (
+        <UserFormDialog request={request} state={dialog} onClose={() => setDialog(null)} />
+      ) : null}
+      {dialog?.mode === "access" ? (
+        <ManageAccessDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
+      ) : null}
     </div>
   );
 }
