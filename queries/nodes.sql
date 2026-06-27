@@ -48,6 +48,14 @@ SET
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = sqlc.arg(name);
 
+-- name: PromotePendingNodeToActive :execrows
+UPDATE nodes
+SET
+  status = 'active',
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = sqlc.arg(name)
+  AND status = 'pending';
+
 -- name: UpdateNode :execrows
 UPDATE nodes
 SET

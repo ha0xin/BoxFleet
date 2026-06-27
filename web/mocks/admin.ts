@@ -42,7 +42,8 @@ const nodes: AdminNode[] = [
     current_version: "v12",
     apply_status: "applied",
     latest_heartbeat: iso(20_000),
-    agent_version: "0.4.1"
+    agent_version: "0.4.1",
+    has_active_token: true
   },
   {
     id: "node_frankfurt",
@@ -56,7 +57,8 @@ const nodes: AdminNode[] = [
     current_version: "v11",
     apply_status: "pending",
     latest_heartbeat: iso(45_000),
-    agent_version: "0.4.1"
+    agent_version: "0.4.1",
+    has_active_token: true
   },
   {
     id: "node_singapore",
@@ -71,7 +73,33 @@ const nodes: AdminNode[] = [
     apply_status: "failed",
     apply_error: "sing-box check failed: timeout dialing reality handshake",
     latest_heartbeat: iso(3 * HOUR),
-    agent_version: "0.3.9"
+    agent_version: "0.3.9",
+    has_active_token: true
+  },
+  {
+    // Paused (disabled but token intact) — the row menu offers Enable.
+    id: "node_osaka",
+    name: "osaka",
+    public_host: "203.0.113.55",
+    api_base_url: "https://203.0.113.55:18080",
+    status: "disabled",
+    sing_box_version: "1.9.3",
+    last_seen_at: iso(2 * HOUR),
+    latest_heartbeat: iso(2 * HOUR),
+    agent_version: "0.4.1",
+    has_active_token: true
+  },
+  {
+    // Decommissioned (disabled, tokens revoked) — menu shows re-enroll, not Enable.
+    id: "node_berlin",
+    name: "berlin",
+    public_host: "198.51.100.77",
+    api_base_url: "",
+    status: "disabled",
+    sing_box_version: "1.9.0",
+    last_seen_at: iso(5 * DAY),
+    agent_version: "0.3.9",
+    has_active_token: false
   }
 ];
 

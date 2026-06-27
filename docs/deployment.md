@@ -61,6 +61,10 @@ tar -xzf "boxfleet-${BOXFLEET_VERSION}-linux-amd64.tar.gz"
 
 ## Server Install
 
+> Requires **SQLite ≥ 3.35** on the server host (the binary links system SQLite;
+> a migration uses `ALTER TABLE ... DROP COLUMN`). Current distros are fine;
+> RHEL/CentOS 8 (SQLite 3.26) is too old. See `docs/db-schema.md`.
+
 Install the server-side binaries:
 
 ```bash

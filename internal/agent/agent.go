@@ -403,9 +403,11 @@ func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
 		return false
 	}
 	switch strings.TrimSpace(string(out)) {
-	case "inactive", "failed", "deactivating":
+	case "inactive", "failed":
 		return true
 	default:
+		// Transitional states (activating/deactivating) and unknown probes are
+		// NOT confirmed down, so applyDisabled still issues an (idempotent) stop.
 		return false
 	}
 }
