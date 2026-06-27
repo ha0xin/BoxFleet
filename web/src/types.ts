@@ -15,7 +15,29 @@ export type AdminNode = {
   apply_error?: string;
   latest_heartbeat?: string;
   agent_version?: string;
+  has_active_token?: boolean;
 };
+
+export type ConfigChange = {
+  node: string;
+  target_hash: string;
+  rendered_hash: string;
+  target_version: string;
+  target_config: string;
+  rendered_config: string;
+};
+
+export type ConfigChangesResponse = { changed: ConfigChange[] };
+
+export type PublishResult = {
+  node: string;
+  id?: string;
+  version: number | string;
+  hash?: string;
+  created?: boolean;
+};
+
+export type PublishResponse = { published: PublishResult[] };
 
 export type AdminNodeBootstrap = {
   node: AdminNode;

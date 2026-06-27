@@ -231,6 +231,14 @@ const proxyAccessFor = (userName: string): AdminProxyAccess[] =>
       updated_at: iso(DAY)
     }));
 
+// Mutable per-user access store, seeded lazily from proxyAccessFor so the
+// issue/revoke flow is demoable in dev without a real backend.
+const userAccess = new Map<string, AdminProxyAccess[]>();
+function accessFor(userName: string): AdminProxyAccess[] {
+  if (!userAccess.has(userName)) userAccess.set(userName, proxyAccessFor(userName));
+  return userAccess.get(userName) as AdminProxyAccess[];
+}
+
 const connectionInfoFor = (userName: string): UserConnectionInfo => ({
   user: userName,
   nodes: nodes
@@ -300,8 +308,29 @@ const configChanges = {
       target_config: '{\n  "log": { "level": "info" },\n  "inbounds": []\n}',
       rendered_config: '{\n  "log": { "level": "warn" },\n  "inbounds": [\n    { "type": "vless", "listen_port": 443 }\n  ]\n}'
     }
-  ]
+  ] as Array<{
+    node: string;
+    target_hash: string;
+    rendered_hash: string;
+    target_version: string;
+    target_config: string;
+    rendered_config: string;
+  }>
 };
+
+// Dev helper: record that a node's rendered config now differs from what was
+// published, so a write mutation lights up the global publish bar end-to-end.
+function markNodeChanged(nodeName: string) {
+  if (!nodeName || configChanges.changed.some((c) => c.node === nodeName)) return;
+  configChanges.changed.push({
+    node: nodeName,
+    target_hash: "sha256:prev",
+    rendered_hash: "sha256:next",
+    target_version: "v12",
+    target_config: '{\n  "inbounds": [\n    { "type": "vless", "listen_port": 443 }\n  ]\n}',
+    rendered_config: '{\n  "inbounds": [\n    { "type": "vless", "listen_port": 443 },\n    { "type": "vless", "listen_port": 8443 }\n  ]\n}'
+  });
+}
 
 function pageParams(query: URLSearchParams) {
   const limit = Math.max(1, Math.min(Number(query.get("limit") ?? 50) || 50, 500));
@@ -394,15 +423,79 @@ function systemLogsResponse(query: URLSearchParams): SystemLogsResponse {
   return { logs, note: overview.system_log_note };
 }
 
-type Handler = (ctx: { req: Connect.IncomingMessage; match: RegExpMatchArray | null; query: URLSearchParams }) => unknown;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Handler = (ctx: { req: Connect.IncomingMessage; match: RegExpMatchArray | null; query: URLSearchParams; body?: any }) => unknown;
 type Route = { method: string; pattern: RegExp; handler: Handler };
 
 const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/admin\/overview$/, handler: () => overview },
   { method: "GET", pattern: /^\/api\/admin\/system-logs$/, handler: ({ query }) => systemLogsResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/config\/changes$/, handler: () => configChanges },
-  { method: "POST", pattern: /^\/api\/admin\/config\/publish$/, handler: () => ({ published: configChanges.changed.map((c) => ({ node: c.node, version: c.target_version })) }) },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/config\/publish$/,
+    handler: () => {
+      const published = configChanges.changed.map((c) => ({ node: c.node, version: c.target_version, created: true }));
+      // Advance the fixture so the apply poll converges and the bar turns green:
+      // every tracked node now reports the target version as applied.
+      for (const node of nodes) {
+        if (node.status === "disabled" || node.status === "pending") continue;
+        node.apply_status = "applied";
+        if (node.target_version) node.current_version = node.target_version;
+        delete node.apply_error;
+      }
+      configChanges.changed = [];
+      return { published };
+    }
+  },
   { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies$/,
+    handler: ({ match, body }) => {
+      const node = decodeURIComponent(match?.[1] ?? "");
+      const proxy = makeProxy({
+        id: `px_${now}_${proxies.length}`,
+        node_name: node,
+        name: body?.name ?? "new-proxy",
+        listen_port: Number(body?.listen_port) || 443,
+        enabled: body?.enabled ?? true,
+        traffic_multiplier: Number(body?.traffic_multiplier) || 1
+      });
+      proxies.push(proxy);
+      markNodeChanged(node);
+      return proxy;
+    }
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const node = decodeURIComponent(match?.[1] ?? "");
+      const name = decodeURIComponent(match?.[2] ?? "");
+      const proxy = proxies.find((p) => p.node_name === node && p.name === name);
+      if (proxy && body) {
+        if (typeof body.enabled === "boolean") proxy.enabled = body.enabled;
+        if (typeof body.listen_port === "number") proxy.listen_port = body.listen_port;
+        if (typeof body.traffic_multiplier === "number") proxy.traffic_multiplier = body.traffic_multiplier;
+        proxy.updated_at = new Date().toISOString();
+      }
+      markNodeChanged(node);
+      return proxy ?? { ok: true };
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)$/,
+    handler: ({ match }) => {
+      const node = decodeURIComponent(match?.[1] ?? "");
+      const name = decodeURIComponent(match?.[2] ?? "");
+      const idx = proxies.findIndex((p) => p.node_name === node && p.name === name);
+      if (idx >= 0) proxies.splice(idx, 1);
+      markNodeChanged(node);
+      return { ok: true };
+    }
+  },
   { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes },
   { method: "GET", pattern: /^\/api\/admin\/users$/, handler: () => users },
   { method: "GET", pattern: /^\/api\/admin\/traffic\/users$/, handler: () => traffic },
@@ -445,13 +538,132 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/bootstrap$/,
-    handler: (): AdminNodeBootstrap => ({
-      node: nodes[0],
-      bootstrap_string: "BFNODE:tokyo:eyJhcGkiOiJodHRwczovLzIwMy4wLjExMy4xMCJ9:devtoken",
-      install_script_url: "http://127.0.0.1:18081/install/node.sh"
-    })
+    handler: ({ body }): AdminNodeBootstrap => {
+      const name = (body?.name as string) || `node-${nodes.length}`;
+      const node: AdminNode = {
+        id: `node_${name}`,
+        name,
+        public_host: (body?.public_host as string) || "",
+        api_base_url: "",
+        status: "pending",
+        sing_box_version: "",
+        last_seen_at: ""
+      };
+      nodes.push(node);
+      return {
+        node,
+        bootstrap_string: `BFNODE:${name}:eyJhcGkiOiJodHRwczovLzIwMy4wLjExMy4xMCJ9:devtoken`,
+        install_script_url: "http://127.0.0.1:18081/install/node.sh"
+      };
+    }
   },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => proxyAccessFor(decodeURIComponent(match?.[1] ?? "alice")) },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const node = nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? ""));
+      if (node && body) {
+        if (typeof body.public_host === "string") node.public_host = body.public_host;
+        if (typeof body.api_base_url === "string") node.api_base_url = body.api_base_url;
+        if (body.status === "active" || body.status === "disabled") node.status = body.status;
+      }
+      if (node) markNodeChanged(node.name);
+      return node ?? { ok: true };
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
+    handler: ({ match }) => {
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const idx = nodes.findIndex((n) => n.name === name);
+      if (idx >= 0) nodes.splice(idx, 1);
+      markNodeChanged(name);
+      return { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/users$/,
+    handler: ({ body }) => {
+      const user: AdminUser = {
+        id: `user_${now}_${users.length}`,
+        name: body?.name ?? "new-user",
+        display_name: body?.display_name ?? "",
+        status: "active",
+        global_quota_bytes: Number(body?.global_quota_bytes) || 0,
+        expire_at: typeof body?.expire_at === "string" ? body.expire_at : "",
+        proxy_count: 0
+      };
+      users.push(user);
+      return user;
+    }
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/users\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const user = users.find((u) => u.name === name);
+      if (user && body) {
+        if (typeof body.display_name === "string") user.display_name = body.display_name;
+        if (body.status === "active" || body.status === "disabled") user.status = body.status;
+        if (typeof body.global_quota_bytes === "number") user.global_quota_bytes = body.global_quota_bytes;
+        if (typeof body.expire_at === "string") user.expire_at = body.expire_at;
+      }
+      return user ?? { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/,
+    handler: ({ match, body }) => {
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const proxy = proxies.find((p) => p.node_name === body?.node_name && p.name === body?.proxy_name);
+      const list = accessFor(name);
+      if (proxy && !list.some((a) => a.node_name === proxy.node_name && a.proxy_name === proxy.name)) {
+        const access: AdminProxyAccess = {
+          id: `acc_${name}_${proxy.id}`,
+          user_name: name,
+          node_name: proxy.node_name,
+          proxy_name: proxy.name,
+          protocol: proxy.protocol,
+          listen: proxy.listen,
+          listen_port: proxy.listen_port,
+          transport: proxy.transport,
+          auth_name: `${name}@${proxy.node_name}`,
+          enabled: true,
+          quota_bytes: 0,
+          proxy_multiplier: proxy.traffic_multiplier,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        list.push(access);
+        const user = users.find((u) => u.name === name);
+        if (user) user.proxy_count = list.length;
+        markNodeChanged(proxy.node_name);
+        return access;
+      }
+      return { ok: true };
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/proxies\/([^/]+)\/([^/]+)$/,
+    handler: ({ match }) => {
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const node = decodeURIComponent(match?.[2] ?? "");
+      const proxyName = decodeURIComponent(match?.[3] ?? "");
+      const list = accessFor(name);
+      const idx = list.findIndex((a) => a.node_name === node && a.proxy_name === proxyName);
+      if (idx >= 0) list.splice(idx, 1);
+      const user = users.find((u) => u.name === name);
+      if (user) user.proxy_count = list.length;
+      markNodeChanged(node);
+      return { ok: true };
+    }
+  },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => accessFor(decodeURIComponent(match?.[1] ?? "alice")) },
   { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(decodeURIComponent(match?.[1] ?? "alice")) }
 ];
 
@@ -482,20 +694,41 @@ export function adminMockPlugin(): Plugin {
         const method = (req.method ?? "GET").toUpperCase();
         const query = new URLSearchParams(search);
 
-        for (const route of routes) {
-          if (route.method !== method) continue;
-          const match = pathname.match(route.pattern);
-          if (!match) continue;
-          jsonResponse(res, 200, route.handler({ req, match, query }));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const dispatch = (body?: any) => {
+          for (const route of routes) {
+            if (route.method !== method) continue;
+            const match = pathname.match(route.pattern);
+            if (!match) continue;
+            jsonResponse(res, 200, route.handler({ req, match, query, body }));
+            return;
+          }
+          if (method !== "GET") {
+            jsonResponse(res, 200, writeFallback(method));
+            return;
+          }
+          jsonResponse(res, 404, { error: `mock: no fixture for ${method} ${pathname}` });
+        };
+
+        if (method === "GET" || method === "DELETE") {
+          dispatch();
           return;
         }
 
-        if (method !== "GET") {
-          jsonResponse(res, 200, writeFallback(method));
-          return;
-        }
-
-        jsonResponse(res, 404, { error: `mock: no fixture for ${method} ${pathname}` });
+        // Buffer the JSON body for POST/PATCH/PUT so handlers can reflect edits.
+        let raw = "";
+        req.on("data", (chunk) => {
+          raw += chunk;
+        });
+        req.on("end", () => {
+          let parsed: unknown;
+          try {
+            parsed = raw ? JSON.parse(raw) : undefined;
+          } catch {
+            parsed = undefined;
+          }
+          dispatch(parsed);
+        });
       });
     }
   };

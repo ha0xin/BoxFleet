@@ -16,6 +16,8 @@ import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import { Badge, Breadcrumbs, Button, LayerCard, Link, LinkButton } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
+import { usePublishStatus } from "@/publish/publish-status";
+import { PublishStrip, publishBarToneClass } from "@/publish/publish-strip";
 import type { AdminNode } from "../types";
 
 export type SparklinePoint = { index: number; value: number };
@@ -147,23 +149,29 @@ export function SparkArea({
 }
 
 export function PageTopBar({ current }: { current: string }) {
+  const { status } = usePublishStatus();
   return (
-    <div className="flex h-[58px] shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6">
+    <div
+      className={`flex h-[58px] shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6 transition-colors duration-300 ${publishBarToneClass(status)}`}
+    >
       <Breadcrumbs size="sm">
         <Breadcrumbs.Link href={adminPath("/")}>BoxFleet</Breadcrumbs.Link>
         <Breadcrumbs.Separator />
         <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
       </Breadcrumbs>
-      <div className="ml-auto flex gap-1">
-        <Button variant="ghost" size="sm" icon={LightningIcon}>
-          <span className="hidden md:inline">Ask AI</span>
-        </Button>
-        <LinkButton href={adminPath("/system-logs")} variant="ghost" size="sm" icon={ListChecksIcon}>
-          <span className="hidden md:inline">Logs</span>
-        </LinkButton>
-        <Button variant="ghost" size="sm" shape="square" aria-label="User menu">
-          <UsersIcon className="size-4 text-kumo-subtle" />
-        </Button>
+      <div className="ml-auto flex items-center gap-3">
+        <PublishStrip />
+        <div className="flex gap-1">
+          <Button variant="ghost" size="sm" icon={LightningIcon}>
+            <span className="hidden md:inline">Ask AI</span>
+          </Button>
+          <LinkButton href={adminPath("/system-logs")} variant="ghost" size="sm" icon={ListChecksIcon}>
+            <span className="hidden md:inline">Logs</span>
+          </LinkButton>
+          <Button variant="ghost" size="sm" shape="square" aria-label="User menu">
+            <UsersIcon className="size-4 text-kumo-subtle" />
+          </Button>
+        </div>
       </div>
     </div>
   );

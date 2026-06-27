@@ -5,6 +5,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { Banner, Loader, Sidebar, Text } from "@cloudflare/kumo";
 
 import { AppPageHeader } from "@/components/app-page-header";
+import { PublishStatusProvider } from "@/publish/publish-status";
+import { PublishDiffDialog } from "@/publish/publish-diff-dialog";
 import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
 import { NetworkEventsPage } from "./pages/network-events";
@@ -91,42 +93,46 @@ function App() {
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        {error ? (
-          <div className="px-6 pt-6">
-            <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} />
-          </div>
-        ) : null}
+        <PublishStatusProvider request={request}>
+          {error ? (
+            <div className="px-6 pt-6">
+              <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} />
+            </div>
+          ) : null}
 
-        {loading && !overview ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader size={20} />
-          </div>
-        ) : (
-          <Routes>
-            <Route path="/" element={<OverviewPage overview={overview} />} />
-            <Route path="/nodes" element={<NodesPage request={request} />} />
-            <Route path="/proxies" element={<ProxiesPage request={request} />} />
-            <Route path="/users" element={<UsersPage request={request} />} />
-            <Route path="/traffic" element={<ComingSoon />} />
-            <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
-            <Route path="/system-logs" element={<SystemLogsPage request={request} />} />
-            <Route
-              path="/settings"
-              element={
-                <SettingsPage
-                  tokenInput={tokenInput}
-                  setTokenInput={setTokenInput}
-                  activeToken={activeToken}
-                  applyToken={applyToken}
-                  logout={logout}
-                  refresh={() => void refresh()}
-                  refreshing={adminFetching}
-                />
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        )}
+          {loading && !overview ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader size={20} />
+            </div>
+          ) : (
+            <Routes>
+              <Route path="/" element={<OverviewPage overview={overview} />} />
+              <Route path="/nodes" element={<NodesPage request={request} />} />
+              <Route path="/proxies" element={<ProxiesPage request={request} />} />
+              <Route path="/users" element={<UsersPage request={request} />} />
+              <Route path="/traffic" element={<ComingSoon />} />
+              <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
+              <Route path="/system-logs" element={<SystemLogsPage request={request} />} />
+              <Route
+                path="/settings"
+                element={
+                  <SettingsPage
+                    tokenInput={tokenInput}
+                    setTokenInput={setTokenInput}
+                    activeToken={activeToken}
+                    applyToken={applyToken}
+                    logout={logout}
+                    refresh={() => void refresh()}
+                    refreshing={adminFetching}
+                  />
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          )}
+
+          <PublishDiffDialog />
+        </PublishStatusProvider>
       </main>
     </Sidebar.Provider>
   );
