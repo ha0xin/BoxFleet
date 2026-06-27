@@ -3,12 +3,11 @@
 BoxFleet MVP uses SQLite with WAL mode, `synchronous=NORMAL`, a busy timeout,
 and one open connection per process.
 
-**Requirement: SQLite ≥ 3.35.** The driver is `github.com/mattn/go-sqlite3`,
-which links the host's system SQLite, and migration
+The driver `github.com/mattn/go-sqlite3` compiles its own bundled SQLite
+amalgamation via CGO (no `libsqlite3` tag), so the binary carries a recent SQLite
+and needs none installed on the host (`ldd` shows no `libsqlite3`). Migration
 `012_remove_proxy_user_traffic_multiplier.sql` uses `ALTER TABLE ... DROP COLUMN`
-(added in SQLite 3.35, March 2021). The server therefore needs SQLite ≥ 3.35 —
-fine on current distros, but RHEL/CentOS 8 (3.26) is too old. If older SQLite
-support is ever needed, rewrite that migration as a table-rebuild.
+(SQLite ≥ 3.35), which the bundled SQLite supports regardless of host SQLite.
 
 The schema separates raw traffic from billable traffic so global quota,
 per-node quota, and non-user traffic multiplier overrides can be handled
