@@ -360,7 +360,12 @@ func adminCreateNodeHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminNodeFromNode(node))
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
 	}
 }
 
@@ -411,8 +416,13 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
+		nodeResp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
 		writeJSON(w, adminNodeBootstrapResponse{
-			Node:             adminNodeFromNode(node),
+			Node:             nodeResp,
 			BootstrapString:  bootstrapString,
 			InstallScriptURL: serverURL + "/install.sh",
 		})
@@ -466,7 +476,12 @@ func adminNodeHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminNodeFromNode(node))
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
 	}
 }
 
@@ -502,7 +517,12 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminNodeFromNode(node))
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
 	}
 }
 
@@ -513,7 +533,12 @@ func adminDeleteNodeHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminNodeFromNode(node))
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
 	}
 }
 
@@ -1231,6 +1256,19 @@ func adminNodeFromNode(node db.Node) adminNode {
 		SingBoxVersion: node.SingBoxVersion,
 		LastSeenAt:     nullString(node.LastSeenAt),
 	}
+}
+
+// adminNodeResponse builds a single-node response with has_active_token filled
+// in, so single-node endpoints carry the same paused-vs-decommissioned signal
+// the list endpoint does.
+func adminNodeResponse(ctx context.Context, store *db.DB, node db.Node) (adminNode, error) {
+	item := adminNodeFromNode(node)
+	has, err := store.NodeHasActiveToken(ctx, node.Name)
+	if err != nil {
+		return adminNode{}, err
+	}
+	item.HasActiveToken = has
+	return item, nil
 }
 
 func listAdminUsers(r *http.Request, store *db.DB) ([]adminUser, error) {

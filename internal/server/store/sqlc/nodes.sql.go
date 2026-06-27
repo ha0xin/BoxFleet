@@ -122,6 +122,23 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 	return items, nil
 }
 
+const promotePendingNodeToActive = `-- name: PromotePendingNodeToActive :execrows
+UPDATE nodes
+SET
+  status = 'active',
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?1
+  AND status = 'pending'
+`
+
+func (q *Queries) PromotePendingNodeToActive(ctx context.Context, name string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, promotePendingNodeToActive, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setNodeStatus = `-- name: SetNodeStatus :execrows
 UPDATE nodes
 SET

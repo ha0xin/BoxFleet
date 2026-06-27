@@ -25,6 +25,16 @@ func (db *DB) ListNodeNamesWithActiveTokens(ctx context.Context) ([]string, erro
 	return db.q.ListNodeNamesWithActiveTokens(ctx)
 }
 
+// NodeHasActiveToken reports whether one node currently holds a non-revoked
+// token. Used to populate has_active_token on single-node admin responses.
+func (db *DB) NodeHasActiveToken(ctx context.Context, name string) (bool, error) {
+	rows, err := db.q.ListActiveNodeTokensByNodeName(ctx, normalizeName(name))
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
 func (db *DB) IssueNodeToken(ctx context.Context, nodeName string) (IssuedNodeToken, error) {
 	node, err := db.GetNode(ctx, nodeName)
 	if err != nil {

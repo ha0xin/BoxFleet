@@ -331,3 +331,23 @@ func TestRecordHeartbeatActivatesPendingNode(t *testing.T) {
 		t.Fatalf("disabled node reactivated to %q", got.Status)
 	}
 }
+
+func TestPromotePendingNodeToActiveOnlyAffectsPending(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	// CreateNode makes an active node: the conditional promote must be a no-op,
+	// which is what makes RecordHeartbeat race-safe (a node disabled between the
+	// GetNode read and the promote is not reactivated).
+	if rows, err := store.q.PromotePendingNodeToActive(ctx, "azus"); err != nil || rows != 0 {
+		t.Fatalf("promote on active node: rows=%d err=%v, want 0 rows", rows, err)
+	}
+	if err := store.SetNodeStatus(ctx, "azus", "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := store.q.PromotePendingNodeToActive(ctx, "azus"); err != nil || rows != 1 {
+		t.Fatalf("promote on pending node: rows=%d err=%v, want 1 row", rows, err)
+	}
+}
