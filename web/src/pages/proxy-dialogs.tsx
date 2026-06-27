@@ -43,7 +43,11 @@ function mergeServerName(settingsJSON: string, serverName: string): string {
   let settings: Record<string, unknown> = {};
   try {
     const parsed = JSON.parse(settingsJSON || "{}");
-    if (parsed && typeof parsed === "object") settings = parsed as Record<string, unknown>;
+    // typeof [] === "object", so guard against arrays: assigning server_name to
+    // an array would be dropped by JSON.stringify and silently lose the SNI.
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      settings = parsed as Record<string, unknown>;
+    }
   } catch {
     settings = {};
   }
