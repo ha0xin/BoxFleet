@@ -154,27 +154,40 @@ type v2rayAPIStats struct {
 	Users   []string `json:"users"`
 }
 
+// emptyNodeConfig is a valid running sing-box config with no inbounds: it serves
+// nothing. Used both for nodes with no accesses and for disabled nodes.
+func emptyNodeConfig() singBoxConfig {
+	return singBoxConfig{
+		Log: &logConfig{Level: "info", Timestamp: true},
+		Outbounds: []any{
+			outbound{Type: "direct", Tag: "direct"},
+			outbound{Type: "block", Tag: "block"},
+		},
+		Route: &routeConfig{Final: "direct"},
+		Experimental: &experimentalConfig{
+			V2RayAPI: v2rayAPIConfig{
+				Listen: "127.0.0.1:18082",
+				Stats:  v2rayAPIStats{Enabled: true, Users: []string{}},
+			},
+		},
+	}
+}
+
+// RenderDisabledConfig returns a valid no-inbound config served to a disabled
+// node. New agents act on the X-BoxFleet-Node-State header and stop sing-box;
+// legacy agents that ignore the header still stop serving when they apply this
+// (it passes `sing-box check` and has no inbounds).
+func RenderDisabledConfig() ([]byte, error) {
+	return json.MarshalIndent(emptyNodeConfig(), "", "  ")
+}
+
 func RenderNodeConfig(ctx context.Context, store *db.DB, nodeName string) ([]byte, error) {
 	accesses, err := store.ListProxyAccessesByNode(ctx, nodeName)
 	if err != nil {
 		return nil, err
 	}
 	if len(accesses) == 0 {
-		cfg := singBoxConfig{
-			Log: &logConfig{Level: "info", Timestamp: true},
-			Outbounds: []any{
-				outbound{Type: "direct", Tag: "direct"},
-				outbound{Type: "block", Tag: "block"},
-			},
-			Route: &routeConfig{Final: "direct"},
-			Experimental: &experimentalConfig{
-				V2RayAPI: v2rayAPIConfig{
-					Listen: "127.0.0.1:18082",
-					Stats:  v2rayAPIStats{Enabled: true, Users: []string{}},
-				},
-			},
-		}
-		return json.MarshalIndent(cfg, "", "  ")
+		return json.MarshalIndent(emptyNodeConfig(), "", "  ")
 	}
 	inboundByName := make(map[string]*vlessInbound)
 	var inboundOrder []string

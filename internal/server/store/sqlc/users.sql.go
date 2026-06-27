@@ -191,6 +191,27 @@ func (q *Queries) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ListProx
 	return items, nil
 }
 
+const setProxyUserDisplayName = `-- name: SetProxyUserDisplayName :execrows
+UPDATE proxy_users
+SET
+  display_name = ?1,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?2
+`
+
+type SetProxyUserDisplayNameParams struct {
+	DisplayName string `json:"display_name"`
+	Name        string `json:"name"`
+}
+
+func (q *Queries) SetProxyUserDisplayName(ctx context.Context, arg SetProxyUserDisplayNameParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProxyUserDisplayName, arg.DisplayName, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProxyUserExpire = `-- name: SetProxyUserExpire :execrows
 UPDATE proxy_users
 SET

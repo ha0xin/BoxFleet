@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -201,6 +202,119 @@ func TestOnceRetriesRestartWhenConfigFileMatchesButApplyWasNotSaved(t *testing.T
 	if runner.restarts != 1 {
 		t.Fatalf("restarts = %d, want 1", runner.restarts)
 	}
+}
+
+func TestOnceDisabledStopsSingBoxThenRestartsOnReEnable(t *testing.T) {
+	t.Parallel()
+	config := []byte(`{"inbounds":[]}`)
+	var disabled atomic.Bool
+	disabled.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/node/config":
+			if disabled.Load() {
+				w.Header().Set("X-BoxFleet-Node-State", "disabled")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_1")
+			w.Header().Set("X-BoxFleet-Config-SHA256", bytesSHA256Hex(config))
+			_, _ = w.Write(config)
+		case "/api/node/apply-result", "/api/node/heartbeat", "/api/node/traffic", "/api/node/logs", "/api/node/system-logs":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "sing-box.json")
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingRunner{running: true}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(tmp, "state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = runner
+
+	// Disabled while running: stops sing-box once. The next poll sees it inactive
+	// and does not re-stop. Never restarts while disabled.
+	if err := a.Once(context.Background()); err != nil {
+		t.Fatalf("first disabled Once: %v", err)
+	}
+	if err := a.Once(context.Background()); err != nil {
+		t.Fatalf("second disabled Once: %v", err)
+	}
+	if runner.stops != 1 {
+		t.Fatalf("stops = %d, want 1 (second poll sees inactive)", runner.stops)
+	}
+	if runner.restarts != 0 {
+		t.Fatalf("restarts = %d, want 0 while disabled", runner.restarts)
+	}
+
+	// Reboot of a disabled host re-starts the systemd-enabled unit; the next poll
+	// detects it active and stops it again (no marker is trusted).
+	runner.running = true
+	if err := a.Once(context.Background()); err != nil {
+		t.Fatalf("post-reboot disabled Once: %v", err)
+	}
+	if runner.stops != 2 {
+		t.Fatalf("stops = %d, want 2 after reboot re-start", runner.stops)
+	}
+
+	// Re-enable: even though the config bytes are unchanged, sing-box is inactive
+	// so it restarts.
+	disabled.Store(false)
+	if err := a.Once(context.Background()); err != nil {
+		t.Fatalf("re-enabled Once: %v", err)
+	}
+	if runner.restarts != 1 {
+		t.Fatalf("restarts = %d, want 1 after re-enable", runner.restarts)
+	}
+}
+
+type recordingRunner struct {
+	stops    int
+	restarts int
+	running  bool
+}
+
+func (r *recordingRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 {
+		switch args[0] {
+		case "stop":
+			r.stops++
+			r.running = false
+		case "restart":
+			r.restarts++
+			r.running = true
+		}
+	}
+	return nil
+}
+
+func (r *recordingRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	// `systemctl show -p ActiveState --value <unit>` succeeds for any unit state.
+	if name == "systemctl" && len(args) >= 1 && args[0] == "show" {
+		if r.running {
+			return []byte("active\n"), nil
+		}
+		return []byte("inactive\n"), nil
+	}
+	return []byte("sing-box test"), nil
+}
+
+func (r *recordingRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
+	return nil
 }
 
 func TestHelperProcess(t *testing.T) {

@@ -70,6 +70,13 @@ SET
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = sqlc.arg(name);
 
+-- name: SetProxyUserDisplayName :execrows
+UPDATE proxy_users
+SET
+  display_name = sqlc.arg(display_name),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = sqlc.arg(name);
+
 -- name: SetProxyUserQuota :execrows
 UPDATE proxy_users
 SET

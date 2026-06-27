@@ -64,6 +64,10 @@ type adminNode struct {
 	ApplyError      string `json:"apply_error,omitempty"`
 	LatestHeartbeat string `json:"latest_heartbeat,omitempty"`
 	AgentVersion    string `json:"agent_version,omitempty"`
+	// HasActiveToken distinguishes a reversible pause (disabled, token intact)
+	// from a decommission (disabled, tokens revoked) so the UI does not offer to
+	// re-enable a node whose agent could never authenticate.
+	HasActiveToken bool `json:"has_active_token"`
 }
 
 type adminProxy struct {
@@ -172,6 +176,15 @@ type adminNodePayload struct {
 	Status     string `json:"status"`
 }
 
+type adminNodePatchPayload struct {
+	// Omitted (null) fields are preserved; an explicit value (including "") is
+	// written, so a status-only toggle keeps the API URL while the edit dialog
+	// can clear it.
+	PublicHost *string `json:"public_host"`
+	APIBaseURL *string `json:"api_base_url"`
+	Status     *string `json:"status"`
+}
+
 type adminNodeBootstrapPayload struct {
 	Name       string `json:"name"`
 	PublicHost string `json:"public_host"`
@@ -205,6 +218,14 @@ type adminUserPayload struct {
 	DisplayName      string `json:"display_name"`
 	GlobalQuotaBytes *int64 `json:"global_quota_bytes"`
 	ExpireAt         string `json:"expire_at"`
+}
+
+type adminUserPatchPayload struct {
+	// Omitted (null) fields are left unchanged.
+	DisplayName      *string `json:"display_name"`
+	Status           *string `json:"status"`
+	GlobalQuotaBytes *int64  `json:"global_quota_bytes"`
+	ExpireAt         *string `json:"expire_at"`
 }
 
 type adminIssueAccessPayload struct {
@@ -358,6 +379,14 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
+		// Enrolled nodes start pending until their agent's first authenticated
+		// heartbeat activates them (RecordHeartbeat), so an un-checked-in node
+		// stays out of rendering/publishing and the enroll dialog's promise holds.
+		if err := store.SetNodeStatus(r.Context(), node.Name, "pending"); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		node.Status = "pending"
 		issued, err := store.IssueNodeToken(r.Context(), node.Name)
 		if err != nil {
 			writeAdminError(w, err)
@@ -447,23 +476,27 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		var payload adminNodePayload
+		var payload adminNodePatchPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(payload.PublicHost) == "" {
-			payload.PublicHost = existing.PublicHost
-		}
-		if strings.TrimSpace(payload.Status) == "" {
-			payload.Status = existing.Status
-		}
-		node, err := store.UpdateNode(r.Context(), db.UpdateNodeParams{
+		params := db.UpdateNodeParams{
 			Name:       existing.Name,
-			PublicHost: payload.PublicHost,
-			APIBaseURL: payload.APIBaseURL,
-			Status:     payload.Status,
-		})
+			PublicHost: existing.PublicHost,
+			APIBaseURL: existing.APIBaseURL,
+			Status:     existing.Status,
+		}
+		if payload.PublicHost != nil {
+			params.PublicHost = *payload.PublicHost
+		}
+		if payload.APIBaseURL != nil {
+			params.APIBaseURL = *payload.APIBaseURL
+		}
+		if payload.Status != nil {
+			params.Status = *payload.Status
+		}
+		node, err := store.UpdateNode(r.Context(), params)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -720,6 +753,41 @@ func adminCreateUserHandler(store *db.DB) http.HandlerFunc {
 			GlobalQuotaBytes: user.GlobalQuotaBytes,
 			ExpireAt:         nullString(user.ExpireAt),
 			ProxyCount:       0,
+		})
+	}
+}
+
+func adminUpdateUserHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload adminUserPatchPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		name := chi.URLParam(r, "user")
+		user, err := store.UpdateProxyUser(r.Context(), name, db.UpdateProxyUserParams{
+			DisplayName:      payload.DisplayName,
+			Status:           payload.Status,
+			GlobalQuotaBytes: payload.GlobalQuotaBytes,
+			ExpireAt:         payload.ExpireAt,
+		})
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		accesses, err := store.ListProxyAccessesByUser(r.Context(), name)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminUser{
+			ID:               user.ID,
+			Name:             user.Name,
+			DisplayName:      user.DisplayName,
+			Status:           user.Status,
+			GlobalQuotaBytes: user.GlobalQuotaBytes,
+			ExpireAt:         nullString(user.ExpireAt),
+			ProxyCount:       len(accesses),
 		})
 	}
 }
@@ -1112,6 +1180,14 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	for _, status := range statuses {
 		statusByNode[status.NodeName] = status
 	}
+	tokenNames, err := store.ListNodeNamesWithActiveTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hasToken := make(map[string]bool, len(tokenNames))
+	for _, name := range tokenNames {
+		hasToken[name] = true
+	}
 	out := make([]adminNode, 0, len(nodes))
 	for _, node := range nodes {
 		item := adminNode{
@@ -1122,6 +1198,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 			Status:         node.Status,
 			SingBoxVersion: node.SingBoxVersion,
 			LastSeenAt:     nullString(node.LastSeenAt),
+			HasActiveToken: hasToken[node.Name],
 		}
 		if status, ok := statusByNode[node.Name]; ok {
 			statusItem := adminNodeFromStatus(status)

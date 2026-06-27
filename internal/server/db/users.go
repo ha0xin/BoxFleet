@@ -109,6 +109,81 @@ func (db *DB) DisableProxyUser(ctx context.Context, name string) (ProxyUser, err
 	return db.GetProxyUser(ctx, name)
 }
 
+type UpdateProxyUserParams struct {
+	// Nil fields are left unchanged.
+	DisplayName      *string
+	Status           *string
+	GlobalQuotaBytes *int64
+	ExpireAt         *string
+}
+
+// UpdateProxyUser applies a partial user patch atomically: all fields are
+// validated first, then written in a single transaction so a later invalid
+// field never leaves an earlier one half-committed.
+func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdateProxyUserParams) (ProxyUser, error) {
+	normalized := normalizeName(name)
+	if normalized == "" {
+		return ProxyUser{}, errors.New("user name is required")
+	}
+	if params.Status != nil && *params.Status != "active" && *params.Status != "disabled" {
+		return ProxyUser{}, fmt.Errorf("unsupported user status %q", *params.Status)
+	}
+	err := db.withTx(ctx, func(q *store.Queries) error {
+		if params.DisplayName != nil {
+			affected, err := q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{DisplayName: *params.DisplayName, Name: normalized})
+			if err != nil {
+				return err
+			}
+			if err := requireAffected(affected, "proxy user", name); err != nil {
+				return err
+			}
+		}
+		if params.GlobalQuotaBytes != nil {
+			affected, err := q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{GlobalQuotaBytes: *params.GlobalQuotaBytes, Name: normalized})
+			if err != nil {
+				return err
+			}
+			if err := requireAffected(affected, "proxy user", name); err != nil {
+				return err
+			}
+		}
+		if params.ExpireAt != nil {
+			affected, err := q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{ExpireAt: nullableTrimmedString(*params.ExpireAt), Name: normalized})
+			if err != nil {
+				return err
+			}
+			if err := requireAffected(affected, "proxy user", name); err != nil {
+				return err
+			}
+		}
+		if params.Status != nil {
+			affected, err := q.SetProxyUserStatus(ctx, store.SetProxyUserStatusParams{Status: *params.Status, Name: normalized})
+			if err != nil {
+				return err
+			}
+			if err := requireAffected(affected, "proxy user", name); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	return db.GetProxyUser(ctx, name)
+}
+
+func (db *DB) SetProxyUserDisplayName(ctx context.Context, name, displayName string) error {
+	affected, err := db.q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{
+		DisplayName: displayName,
+		Name:        normalizeName(name),
+	})
+	if err != nil {
+		return err
+	}
+	return requireAffected(affected, "proxy user", name)
+}
+
 func (db *DB) SetProxyUserQuota(ctx context.Context, name string, quotaBytes int64) error {
 	affected, err := db.q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{
 		GlobalQuotaBytes: quotaBytes,

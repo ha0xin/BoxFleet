@@ -11,6 +11,12 @@ INSERT INTO node_tokens (
   sqlc.arg(token_digest)
 );
 
+-- name: ListNodeNamesWithActiveTokens :many
+SELECT DISTINCT n.name
+FROM nodes n
+JOIN node_tokens t ON t.node_id = n.id
+WHERE t.revoked_at IS NULL;
+
 -- name: GetActiveNodeTokenByDigest :one
 SELECT
   t.id,
@@ -23,7 +29,6 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE n.name = sqlc.arg(node_name)
-  AND n.status != 'disabled'
   AND t.revoked_at IS NULL
   AND t.token_digest = sqlc.arg(token_digest);
 
@@ -39,7 +44,6 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE n.name = sqlc.arg(node_name)
-  AND n.status != 'disabled'
   AND t.revoked_at IS NULL
 ORDER BY t.created_at DESC;
 
