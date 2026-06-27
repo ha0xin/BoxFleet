@@ -82,12 +82,18 @@ export function PublishStrip() {
     );
   }
 
-  // failed
+  // failed / incomplete
+  const failedLabel =
+    progress.failed > 0
+      ? `Apply failed on ${progress.failed} node(s)`
+      : progress.total > 0
+        ? `Apply incomplete — ${progress.applied}/${progress.total} nodes responded`
+        : "Publish failed";
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="flex items-center gap-1.5 font-medium text-kumo-danger">
         <XCircleIcon className="size-4" weight="fill" />
-        {progress.failed > 0 ? `Apply failed on ${progress.failed} node(s)` : "Publish failed"}
+        {failedLabel}
       </span>
       <Button size="sm" variant="ghost" onClick={openDiff}>
         Review

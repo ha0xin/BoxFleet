@@ -357,11 +357,12 @@ func (a *Agent) Once(ctx context.Context) error {
 		response.Hash = configHash
 	}
 	if current, err := os.ReadFile(a.Config.SingBoxConfig); err == nil && bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(config)) {
-		// Drive the "nothing to do" decision off the actual service state rather
-		// than a persisted marker: restart only when sing-box is confirmed down
-		// (re-enabled or crashed). An unknown/transitional probe is left alone so
-		// a flaky probe does not churn a healthy unit with needless restarts.
-		if state.AppliedConfigHash == configHash && !a.singBoxConfirmedDown(ctx) {
+		// Take the "nothing to do" early return only when sing-box is *confirmed*
+		// running. A re-enabled node has matching applied hash and unchanged
+		// bytes, so a probe error (or inactive/transitional state) must not be
+		// read as "up" — otherwise a single D-Bus hiccup would leave the
+		// re-enabled node stopped until a later poll. Unknown ⇒ restart (idempotent).
+		if state.AppliedConfigHash == configHash && a.singBoxConfirmedActive(ctx) {
 			a.reportRuntimeState(ctx, response)
 			return nil
 		}
@@ -407,6 +408,17 @@ func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
 	default:
 		return false
 	}
+}
+
+// singBoxConfirmedActive reports whether sing-box is known to be running. A probe
+// error or any non-"active" state returns false, so callers treat "unknown" as
+// "not confirmed up" and act (restart) rather than assuming the service is fine.
+func (a *Agent) singBoxConfirmedActive(ctx context.Context) bool {
+	out, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", a.Config.SingBoxService)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "active"
 }
 
 // applyDisabled stops sing-box for an administratively disabled node and keeps

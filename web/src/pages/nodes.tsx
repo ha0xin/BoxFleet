@@ -106,7 +106,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
   const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
     req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
       method: "PATCH",
-      body: JSON.stringify({ name: node.name, status: node.status === "disabled" ? "active" : "disabled" })
+      body: JSON.stringify({ status: node.status === "disabled" ? "active" : "disabled" })
     })
   );
 

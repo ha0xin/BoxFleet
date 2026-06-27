@@ -45,6 +45,9 @@ const PublishContext = createContext<PublishContextValue | null>(null);
 type Phase = "browsing" | "publishing" | "applying" | "celebrating" | "error";
 
 const CELEBRATE_MS = 2600;
+// How long to wait for published nodes to apply before declaring the apply
+// incomplete (an offline node never reports applied or failed).
+const APPLY_TIMEOUT_MS = 120_000;
 
 function nodeIsTracked(node: AdminNode): boolean {
   // Disabled nodes never apply config; pending nodes have not enrolled yet.
@@ -104,13 +107,14 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
     };
   }, [nodesQuery.data]);
 
-  // Drive the apply phase off live node state. Convergence (every published node
-  // applied, none failed) wins even from `error`, so an agent that recovers on a
-  // later retry flips the bar green instead of staying red until dismissed.
-  // total === 0 (nothing left to wait on) counts as converged so we never hang.
+  // Drive the apply phase off live node state. Convergence (every tracked
+  // published node applied, none failed) wins even from `error`, so an agent that
+  // recovers on a later retry flips the bar green instead of staying red until
+  // dismissed. `total > 0` guards the race where the just-published nodes are not
+  // yet in the snapshot (0 >= 0 would otherwise celebrate falsely).
   useEffect(() => {
     if ((phase !== "applying" && phase !== "error") || !nodesQuery.data) return;
-    if (progress.failed === 0 && progress.applied >= progress.total) {
+    if (progress.failed === 0 && progress.total > 0 && progress.applied >= progress.total) {
       setPhase("celebrating");
       return;
     }
@@ -118,6 +122,15 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
       setPhase("error");
     }
   }, [phase, nodesQuery.data, progress]);
+
+  // Bound the wait: an offline node stays `active` but never applies or fails, so
+  // without a timeout the bar would spin "Applying" forever. After the deadline,
+  // fall to `error` (the strip shows it as incomplete, not a hard failure).
+  useEffect(() => {
+    if (phase !== "applying") return;
+    const timer = setTimeout(() => setPhase("error"), APPLY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   // Auto-clear the green celebration back to idle after the sheen plays.
   useEffect(() => {

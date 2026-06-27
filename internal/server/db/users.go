@@ -173,17 +173,6 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 	return db.GetProxyUser(ctx, name)
 }
 
-func (db *DB) SetProxyUserDisplayName(ctx context.Context, name, displayName string) error {
-	affected, err := db.q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{
-		DisplayName: displayName,
-		Name:        normalizeName(name),
-	})
-	if err != nil {
-		return err
-	}
-	return requireAffected(affected, "proxy user", name)
-}
-
 func (db *DB) SetProxyUserQuota(ctx context.Context, name string, quotaBytes int64) error {
 	affected, err := db.q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{
 		GlobalQuotaBytes: quotaBytes,
