@@ -82,6 +82,8 @@ Payload structs live in `internal/model/` and are imported by both `internal/age
 
 Agent state (`State` in `internal/agent/agent.go`) tracks v2ray counter values plus a per-counter `CounterEpoch` to detect sing-box restarts (counter goes backwards → epoch++, treat current value as the delta). Do not switch to `reset=true` on v2ray `GetStats` — losing a single response loses traffic.
 
+Node lifecycle and disable semantics: a node is `pending` after bootstrap and becomes `active` on its first authenticated heartbeat (`RecordHeartbeat`). Disabling has two distinct paths that must stay distinct — **pause** (`PATCH /nodes/{node}` status / `bf node disable`) keeps the token valid; `GET /api/node/config` then returns `X-BoxFleet-Node-State: disabled` plus a valid no-inbound config (`render.RenderDisabledConfig`), and the agent stops `sing-box` while its daemon keeps polling. **Decommission** (`DELETE /nodes/{node}` / `bf node delete`) additionally revokes tokens (full cutoff). Token verification deliberately does **not** filter on node status — revocation is the kill switch, not the status — so do not re-add a `status != 'disabled'` clause to the node-token queries. The agent decides stop/restart from real `systemctl` `ActiveState`, never a persisted marker.
+
 ### Renderer and sing-box
 
 `internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. Only VLESS-Reality is rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client-side `NodeInfo` generation.
@@ -124,6 +126,7 @@ Most coverage lives in `internal/agent`, `internal/cli/bf`, `internal/server/{ap
 
 ## Docs to consult
 
+- `docs/agent-handoff.md` — current admin UI handoff, known caveats, and next tasks for follow-up agents.
 - `docs/deployment.md` — artifact-based server and node deployment flow.
 - `docs/testing.md` — current layer-by-layer test strategy and the gap list.
 - `docs/mvp-decisions.md` — why SQLite, why `bf`, why split binaries.

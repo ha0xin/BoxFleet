@@ -26,6 +26,15 @@ Only active rows are rendered:
 - `user_node_bindings.enabled = 1`
 - `proxy_accesses.enabled = 1`
 
+### Disabled nodes
+
+A disabled node does not get its normal render. `GET /api/node/config` returns
+`render.RenderDisabledConfig()` — the base config below with **no inbounds** —
+together with the `X-BoxFleet-Node-State: disabled` header. New agents act on the
+header and stop `sing-box`; older agents that ignore it still stop serving because
+applying a no-inbound config takes down all listeners. A node with no proxy
+accesses renders the same empty shape.
+
 ## Base Config
 
 Every generated config should include:
