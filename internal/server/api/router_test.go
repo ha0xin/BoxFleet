@@ -42,6 +42,41 @@ func TestNodeConfigEndpoint(t *testing.T) {
 	}
 }
 
+func TestNodeConfigEndpointSignalsDisabled(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	issued, err := store.IssueNodeToken(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Disable via status only (token stays valid, unlike the decommission path).
+	if err := store.SetNodeStatus(ctx, "azus", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/node/config", nil)
+	req.Header.Set("X-BoxFleet-Node", "azus")
+	req.Header.Set("Authorization", "Bearer "+issued.Token)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Options{DB: store}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-BoxFleet-Node-State") != "disabled" {
+		t.Fatalf("node state = %q, want disabled", rec.Header().Get("X-BoxFleet-Node-State"))
+	}
+	// Body is a valid no-inbound config (for legacy agents); it must not carry
+	// any inbounds.
+	if body := rec.Body.String(); strings.Contains(body, `"inbounds"`) {
+		t.Fatalf("disabled config should have no inbounds: %s", body)
+	}
+	if rec.Header().Get("X-BoxFleet-Config-SHA256") == "" {
+		t.Fatal("disabled config missing hash header")
+	}
+}
+
 func TestNodeConfigEndpointServesPublishedConfig(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
@@ -518,6 +553,198 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 	}
 	if proxy.ListenPort != 39091 || proxy.Enabled || proxy.TrafficMultiplier != 1.5 {
 		t.Fatalf("proxy = %#v", proxy)
+	}
+}
+
+func TestAdminNodeStatusTogglePreservesAPIURL(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	serve := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
+		req := adminJSONRequest(t, method, path, body)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(http.MethodPost, "/api/admin/nodes", map[string]any{
+		"name":        "node-a",
+		"public_host": "203.0.113.10",
+		"status":      "active",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("create node status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
+		"name":         "node-a",
+		"api_base_url": "http://node-a.local",
+		"status":       "active",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("set api url status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Status-only PATCH (no api_base_url) must not wipe the configured URL.
+	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
+		"name":   "node-a",
+		"status": "disabled",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	node, err := store.GetNode(context.Background(), "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.APIBaseURL != "http://node-a.local" || node.Status != "disabled" {
+		t.Fatalf("node = %#v", node)
+	}
+
+	// An explicit empty api_base_url (edit dialog clearing the field) clears it,
+	// unlike an omitted field which is preserved above.
+	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
+		"name":         "node-a",
+		"api_base_url": "",
+		"status":       "active",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("clear api url status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	node, err = store.GetNode(context.Background(), "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.APIBaseURL != "" {
+		t.Fatalf("api_base_url = %q, want cleared", node.APIBaseURL)
+	}
+}
+
+func TestAdminUserPatchIsAtomic(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	serve := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
+		req := adminJSONRequest(t, method, path, body)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(http.MethodPost, "/api/admin/users", map[string]any{
+		"name": "alice", "display_name": "Alice",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("create user status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// Valid display_name + invalid status: the whole patch must roll back, so the
+	// display_name change does not persist despite being processed first.
+	if rec := serve(http.MethodPatch, "/api/admin/users/alice", map[string]any{
+		"display_name": "Changed",
+		"status":       "bogus",
+	}); rec.Code == http.StatusOK {
+		t.Fatalf("patch with invalid status unexpectedly succeeded: %s", rec.Body.String())
+	}
+	user, err := store.GetProxyUser(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.DisplayName != "Alice" {
+		t.Fatalf("display_name = %q, want unchanged (atomic rollback)", user.DisplayName)
+	}
+}
+
+func TestAdminProxyEditPreservesRealityKeys(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	serve := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
+		req := adminJSONRequest(t, method, path, body)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(http.MethodPost, "/api/admin/nodes", map[string]any{
+		"name": "node-a", "public_host": "203.0.113.10", "status": "active",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("create node status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec := serve(http.MethodPost, "/api/admin/nodes/node-a/proxies", map[string]any{
+		"name": "vless-1", "protocol": "vless_reality", "listen": "0.0.0.0", "listen_port": 443, "transport": "tcp",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("create proxy status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	before, err := store.GetProxy(context.Background(), "node-a", "vless-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seed map[string]any
+	if err := json.Unmarshal([]byte(before.SettingsJSON), &seed); err != nil {
+		t.Fatalf("seed settings: %v (%s)", err, before.SettingsJSON)
+	}
+
+	// Mirror the edit dialog: re-send the existing settings with an overridden
+	// SNI. The server must keep the original Reality key pair / short_id.
+	seed["server_name"] = "www.apple.com"
+	merged, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a/proxies/vless-1", map[string]any{
+		"listen_port":   8443,
+		"settings_json": string(merged),
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("patch proxy status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := store.GetProxy(context.Background(), "node-a", "vless-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(after.SettingsJSON), &got); err != nil {
+		t.Fatalf("after settings: %v (%s)", err, after.SettingsJSON)
+	}
+	if got["reality_private_key"] != seed["reality_private_key"] || got["reality_public_key"] != seed["reality_public_key"] {
+		t.Fatalf("reality keys rotated: before=%v/%v after=%v/%v",
+			seed["reality_private_key"], seed["reality_public_key"], got["reality_private_key"], got["reality_public_key"])
+	}
+	if got["server_name"] != "www.apple.com" {
+		t.Fatalf("server_name = %v", got["server_name"])
+	}
+}
+
+func TestAdminUserManagement(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	serve := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
+		req := adminJSONRequest(t, method, path, body)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := serve(http.MethodPost, "/api/admin/users", map[string]any{
+		"name":               "alice",
+		"display_name":       "Alice",
+		"global_quota_bytes": 1000,
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("create user status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// PATCH dispatches each non-nil field to its setter and leaves omitted ones alone.
+	if rec := serve(http.MethodPatch, "/api/admin/users/alice", map[string]any{
+		"display_name":       "Alice Z",
+		"global_quota_bytes": 2048,
+		"status":             "disabled",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("patch user status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	user, err := store.GetProxyUser(context.Background(), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.DisplayName != "Alice Z" || user.GlobalQuotaBytes != 2048 || user.Status != "disabled" {
+		t.Fatalf("user = %#v", user)
 	}
 }
 

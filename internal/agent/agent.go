@@ -72,6 +72,9 @@ type ConfigResponse struct {
 	Version   string
 	Hash      string
 	Mode      string
+	// State is the server's desired node state. "disabled" means the agent
+	// should stop sing-box while keeping its daemon polling; empty means serve.
+	State string
 }
 
 type State struct {
@@ -340,18 +343,25 @@ func (a *Agent) Once(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	config := response.Data
 	state, err := a.LoadState()
 	if err != nil {
 		return err
 	}
+	if response.State == "disabled" {
+		return a.applyDisabled(ctx, response)
+	}
+	config := response.Data
 	configHash := response.Hash
 	if configHash == "" {
 		configHash = bytesSHA256Hex(config)
 		response.Hash = configHash
 	}
 	if current, err := os.ReadFile(a.Config.SingBoxConfig); err == nil && bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(config)) {
-		if state.AppliedConfigHash == configHash {
+		// Drive the "nothing to do" decision off the actual service state rather
+		// than a persisted marker: restart only when sing-box is confirmed down
+		// (re-enabled or crashed). An unknown/transitional probe is left alone so
+		// a flaky probe does not churn a healthy unit with needless restarts.
+		if state.AppliedConfigHash == configHash && !a.singBoxConfirmedDown(ctx) {
 			a.reportRuntimeState(ctx, response)
 			return nil
 		}
@@ -378,6 +388,53 @@ func (a *Agent) Once(ctx context.Context) error {
 		return err
 	}
 	a.reportRuntimeState(ctx, response)
+	return nil
+}
+
+// singBoxConfirmedDown reports whether sing-box is known to be stopped. It reads
+// ActiveState via `systemctl show` (which succeeds for any unit state), so an
+// inactive/failed unit is distinguished from an unknown probe result: a D-Bus or
+// other probe failure returns false. Callers therefore never treat an unknown or
+// transitional (activating) state as proof the service is down.
+func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
+	out, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", a.Config.SingBoxService)
+	if err != nil {
+		return false
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "inactive", "failed", "deactivating":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyDisabled stops sing-box for an administratively disabled node and keeps
+// reporting heartbeats so the daemon stays visible and controllable. It writes
+// no agent state of its own (ReportTraffic owns the counter/pending state), so
+// it can never clobber a flushed traffic report.
+func (a *Agent) applyDisabled(ctx context.Context, response ConfigResponse) error {
+	// Act unless the service is confirmed already stopped. An unknown probe or a
+	// transitional (activating) state must not skip the stop, since the unit may
+	// still be (or be coming) up.
+	if !a.singBoxConfirmedDown(ctx) {
+		// Flush before stopping a possibly-running service: stopping drops the
+		// in-memory v2ray counters. ReportTraffic durably stages the pending
+		// report before it POSTs, so a POST/server failure still preserves the
+		// interval. We stop regardless (the operator disabled the node), so a
+		// failure that prevented staging is surfaced as an explicit accounting
+		// loss rather than silently dropped.
+		if err := a.ReportTraffic(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent: stopping disabled node despite traffic flush failure; final interval may be unaccounted: %v\n", err)
+		}
+		if err := a.Runner.Run(ctx, "systemctl", "stop", a.Config.SingBoxService); err != nil {
+			_ = a.ReportHeartbeat(ctx, response, "disabled")
+			return err
+		}
+	}
+	if err := a.ReportHeartbeat(ctx, response, "disabled"); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent disabled heartbeat failed: %v\n", err)
+	}
 	return nil
 }
 
@@ -853,6 +910,7 @@ func (a *Agent) FetchConfigVersioned(ctx context.Context) (ConfigResponse, error
 		Version:   resp.Header.Get("X-BoxFleet-Config-Version"),
 		Hash:      resp.Header.Get("X-BoxFleet-Config-SHA256"),
 		Mode:      resp.Header.Get("X-BoxFleet-Config-Mode"),
+		State:     resp.Header.Get("X-BoxFleet-Node-State"),
 	}, nil
 }
 

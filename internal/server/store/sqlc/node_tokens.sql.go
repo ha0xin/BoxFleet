@@ -53,7 +53,6 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE n.name = ?1
-  AND n.status != 'disabled'
   AND t.revoked_at IS NULL
   AND t.token_digest = ?2
 `
@@ -90,7 +89,6 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE n.name = ?1
-  AND n.status != 'disabled'
   AND t.revoked_at IS NULL
 ORDER BY t.created_at DESC
 `
@@ -116,6 +114,36 @@ func (q *Queries) ListActiveNodeTokensByNodeName(ctx context.Context, nodeName s
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodeNamesWithActiveTokens = `-- name: ListNodeNamesWithActiveTokens :many
+SELECT DISTINCT n.name
+FROM nodes n
+JOIN node_tokens t ON t.node_id = n.id
+WHERE t.revoked_at IS NULL
+`
+
+func (q *Queries) ListNodeNamesWithActiveTokens(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listNodeNamesWithActiveTokens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

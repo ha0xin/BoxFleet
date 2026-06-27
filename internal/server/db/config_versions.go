@@ -241,6 +241,14 @@ func (db *DB) RecordHeartbeat(ctx context.Context, heartbeat Heartbeat) error {
 	}); err != nil {
 		return err
 	}
+	// First authenticated heartbeat completes enrollment: a pending node has
+	// reported in, so promote it to active. Disabled/degraded are left alone (a
+	// disabled node still heartbeats and must not self-reactivate).
+	if node.Status == "pending" {
+		if _, err := db.q.SetNodeStatus(ctx, store.SetNodeStatusParams{Status: "active", Name: node.Name}); err != nil {
+			return err
+		}
+	}
 	return db.q.TouchNodeSeen(ctx, store.TouchNodeSeenParams{
 		LastSeenAt:     sql.NullString{String: reportedAt, Valid: true},
 		SingBoxVersion: heartbeat.SingBoxVersion,

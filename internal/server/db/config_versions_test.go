@@ -292,3 +292,42 @@ func seedTrafficFixture(t *testing.T, ctx context.Context, store *DB) {
 		t.Fatal(err)
 	}
 }
+
+func TestRecordHeartbeatActivatesPendingNode(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Bootstrap-enrolled nodes are pending until their agent checks in.
+	if err := store.SetNodeStatus(ctx, "azus", "pending"); err != nil {
+		t.Fatal(err)
+	}
+
+	// First authenticated heartbeat completes enrollment.
+	if err := store.RecordHeartbeat(ctx, Heartbeat{NodeName: "azus", Status: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetNode(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "active" {
+		t.Fatalf("status after heartbeat = %q, want active", got.Status)
+	}
+
+	// A disabled node still heartbeats (paused) and must not self-reactivate.
+	if err := store.SetNodeStatus(ctx, "azus", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHeartbeat(ctx, Heartbeat{NodeName: "azus", Status: "disabled"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetNode(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "disabled" {
+		t.Fatalf("disabled node reactivated to %q", got.Status)
+	}
+}

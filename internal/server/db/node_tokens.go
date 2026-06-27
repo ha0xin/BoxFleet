@@ -18,6 +18,13 @@ type IssuedNodeToken struct {
 	Token    string
 }
 
+// ListNodeNamesWithActiveTokens returns the names of nodes that currently hold a
+// non-revoked token. A disabled node still in this set was paused; one absent
+// from it was decommissioned (its tokens were revoked).
+func (db *DB) ListNodeNamesWithActiveTokens(ctx context.Context) ([]string, error) {
+	return db.q.ListNodeNamesWithActiveTokens(ctx)
+}
+
 func (db *DB) IssueNodeToken(ctx context.Context, nodeName string) (IssuedNodeToken, error) {
 	node, err := db.GetNode(ctx, nodeName)
 	if err != nil {

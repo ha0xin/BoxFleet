@@ -59,6 +59,7 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/nodes/{node}/config/render", adminRenderConfigHandler(options.DB))
 		r.Get("/users", adminUsersHandler(options.DB))
 		r.Post("/users", adminCreateUserHandler(options.DB))
+		r.Patch("/users/{user}", adminUpdateUserHandler(options.DB))
 		r.Delete("/users/{user}", adminDeleteUserHandler(options.DB))
 		r.Get("/users/{user}/proxies", adminUserProxiesHandler(options.DB))
 		r.Post("/users/{user}/proxies", adminIssueUserProxyAccessHandler(options.DB))
@@ -114,6 +115,26 @@ func nodeConfigHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodeName, ok := authenticateNode(w, r, store)
 		if !ok {
+			return
+		}
+		// An administratively disabled node keeps a valid token (status set via
+		// PATCH, not the token-revoking decommission path), so its agent daemon
+		// still polls here. Signal it to stop serving (systemctl stop sing-box)
+		// instead of handing back config; re-enabling resumes normal config.
+		if node, err := store.GetNode(r.Context(), nodeName); err == nil && node.Status == "disabled" {
+			// Body is a valid no-inbound config so legacy agents that ignore the
+			// header still stop serving on apply; new agents act on the header.
+			body, err := render.RenderDisabledConfig()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			w.Header().Set("X-BoxFleet-Node-State", "disabled")
+			w.Header().Set("X-BoxFleet-Config-Mode", "disabled")
+			w.Header().Set("X-BoxFleet-Config-SHA256", db.SHA256Hex(body))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(body)
+			_, _ = w.Write([]byte("\n"))
 			return
 		}
 		version, err := store.GetTargetConfig(r.Context(), nodeName)
