@@ -317,6 +317,76 @@ func (r *recordingRunner) StreamLines(context.Context, string, []string, func(st
 	return nil
 }
 
+func TestOnceRestartsWhenServiceNotConfirmedActive(t *testing.T) {
+	t.Parallel()
+	config := []byte(`{"inbounds":[]}`)
+	hash := bytesSHA256Hex(config)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/node/config":
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_1")
+			w.Header().Set("X-BoxFleet-Config-SHA256", hash)
+			_, _ = w.Write(config)
+		case "/api/node/apply-result", "/api/node/heartbeat", "/api/node/traffic", "/api/node/logs", "/api/node/system-logs":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "sing-box.json")
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &probeErrorRunner{}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(tmp, "state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = runner
+	// Config bytes and applied hash already match, so the only thing that would
+	// skip the restart is a *confirmed-active* probe. The probe errors here, so
+	// the agent must restart rather than assume the re-enabled node is up.
+	if err := a.SaveState(State{AppliedConfigHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Once(context.Background()); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if runner.restarts != 1 {
+		t.Fatalf("restarts = %d, want 1 (probe unknown must not skip restart)", runner.restarts)
+	}
+}
+
+// probeErrorRunner fails the `systemctl show ActiveState` probe (unknown state).
+type probeErrorRunner struct{ restarts int }
+
+func (r *probeErrorRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 && args[0] == "restart" {
+		r.restarts++
+	}
+	return nil
+}
+
+func (r *probeErrorRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	if name == "systemctl" && len(args) >= 1 && args[0] == "show" {
+		return nil, errors.New("dbus unavailable")
+	}
+	return []byte("sing-box test"), nil
+}
+
+func (r *probeErrorRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
+	return nil
+}
+
 func TestHelperProcess(t *testing.T) {
 	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "--" {
 		return

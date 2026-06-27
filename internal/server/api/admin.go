@@ -177,9 +177,10 @@ type adminNodePayload struct {
 }
 
 type adminNodePatchPayload struct {
-	// Omitted (null) fields are preserved; an explicit value (including "") is
-	// written, so a status-only toggle keeps the API URL while the edit dialog
-	// can clear it.
+	// Omitted (null) fields are preserved; an explicit value is written. So a
+	// status-only toggle keeps the API URL, and the edit dialog can clear
+	// api_base_url with "". public_host is required (UpdateNode rejects "")
+	// and the edit form enforces a non-empty value before sending it.
 	PublicHost *string `json:"public_host"`
 	APIBaseURL *string `json:"api_base_url"`
 	Status     *string `json:"status"`
@@ -1124,7 +1125,12 @@ func configChanges(ctx context.Context, store *db.DB) ([]adminConfigChange, erro
 	}
 	changes := make([]adminConfigChange, 0)
 	for _, node := range nodes {
-		if node.Status != "active" {
+		// Only disabled nodes are skipped: a disabled node is served the
+		// no-inbound config directly. Pending nodes (enrolled, awaiting first
+		// heartbeat) and degraded nodes are still rendered/published so their
+		// agent pulls the right target as soon as it polls — otherwise Apply
+		// would silently skip a freshly enrolled node.
+		if node.Status == "disabled" {
 			continue
 		}
 		raw, err := render.RenderNodeConfig(ctx, store, node.Name)

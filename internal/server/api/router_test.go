@@ -711,6 +711,42 @@ func TestAdminProxyEditPreservesRealityKeys(t *testing.T) {
 	}
 }
 
+func TestConfigChangesIncludesPendingNodes(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	// Bootstrap leaves a freshly enrolled node pending; it must still appear in
+	// the change set so Apply does not silently skip it.
+	if err := store.SetNodeStatus(ctx, "azus", "pending"); err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	req := adminJSONRequest(t, http.MethodGet, "/api/admin/config/changes", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Changed []struct {
+			Node string `json:"node"`
+		} `json:"changed"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range resp.Changed {
+		if c.Node == "azus" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pending node azus missing from changed set: %+v", resp.Changed)
+	}
+}
+
 func TestAdminUserManagement(t *testing.T) {
 	store := openAPITestDB(t)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})

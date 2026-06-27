@@ -246,7 +246,25 @@ UI work is the Traffic page.
    - Add sqlc queries and API response types instead of aggregating large raw
      result sets in the browser.
 
-3. Open design questions (deferred, need product sign-off — see
+3. Deferred fixes (acknowledged, intentionally postponed):
+   - **Decommission has no restore path.** `DELETE /nodes/{node}` sets disabled +
+     revokes tokens; Enable is then hidden (no active token) and re-enroll via
+     `/nodes/bootstrap` hits a unique-name 422. The agreed fix is an explicit
+     `POST /api/admin/nodes/{node}/reenroll` (only for a decommissioned node:
+     disabled + no active token) that sets pending, issues a fresh token, and
+     returns a new bootstrap string, plus a real "Re-enroll" UI action. Bootstrap
+     stays strict so an accidental name collision never clobbers a live node.
+     Postponed because no nodes are being decommissioned yet.
+   - **Publish polling re-renders every node every 15s.**
+     `PublishStatusProvider` polls `/api/admin/config/changes`, which runs a full
+     `RenderNodeConfig` for every non-disabled node unconditionally. Fine for
+     small N; for scale, drive it from a server-side dirty signal instead of
+     unconditional timer-driven full renders.
+   - **Extra `GetNode` per agent config poll.** `nodeConfigHandler` does a
+     `GetNode` just to check disabled status before `GetTargetConfig`; could read
+     status from a row an existing query already loads.
+
+4. Open design questions (need product sign-off — see
    `docs/code-review-findings.md`):
    - Publish gate: should a re-enabled node refuse to apply a stale published
      target until republished, and should target-less nodes get a waiting config
@@ -254,7 +272,7 @@ UI work is the Traffic page.
    - CLI slimming: `bf` is to be trimmed to ops/diagnostics once confirmed; Web
      UI owns day-to-day CRUD. Docs still describe the full CLI for now.
 
-4. Add focused tests for new API/query behaviour.
+5. Add focused tests for new API/query behaviour.
    - For backend traffic aggregation, test in `internal/server/db` and
      `internal/server/api`.
    - For frontend-only changes, `npm --prefix web run build` is the minimum;

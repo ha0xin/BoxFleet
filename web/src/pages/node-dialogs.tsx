@@ -125,7 +125,9 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
 // active on an unrelated host/URL edit. The PATCH omits status, so the server
 // preserves it.
 const editSchema = z.object({
-  public_host: z.string(),
+  // Public host is required server-side (UpdateNode rejects an empty value), so
+  // validate it here instead of letting a cleared field fail with a 422.
+  public_host: z.string().min(1, "Public host is required"),
   api_base_url: z.string()
 });
 
@@ -176,7 +178,12 @@ export function EditNodeDialog({
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
 
         <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
-          <Input label="Public host" placeholder="203.0.113.10" {...form.register("public_host")} />
+          <Input
+            label="Public host"
+            placeholder="203.0.113.10"
+            error={form.formState.errors.public_host?.message}
+            {...form.register("public_host")}
+          />
           <Input label="API base URL" placeholder="https://203.0.113.10:18080" {...form.register("api_base_url")} />
           <div className="mt-2 flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>
