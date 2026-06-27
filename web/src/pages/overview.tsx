@@ -339,7 +339,7 @@ function buildSystemItems(overview: Overview | null): ListWidgetItem[] {
 }
 
 function latestLogTone(log: SystemLog): Tone {
-  const level = log.level.toLowerCase();
+  const level = (log.level || "").toLowerCase();
   if (level.includes("error") || level.includes("fatal")) return "danger";
   if (level.includes("warn")) return "warning";
   return "subtle";

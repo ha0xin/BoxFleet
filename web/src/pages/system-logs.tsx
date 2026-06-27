@@ -36,7 +36,7 @@ function queryString(params: Record<string, string | number | undefined>) {
 }
 
 function normalizeLevel(level: string): Exclude<LevelFilter, "all"> {
-  const value = level.trim().toLowerCase();
+  const value = (level || "").trim().toLowerCase();
   if (value.includes("fatal") || value.includes("error")) return "error";
   if (value.includes("warn")) return "warn";
   if (value.includes("debug") || value.includes("trace")) return "debug";
