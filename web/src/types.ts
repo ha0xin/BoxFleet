@@ -1,10 +1,16 @@
 export type AdminNodeStatus = "pending" | "active" | "disabled" | "degraded";
 export type AdminNodeApplyStatus = "pending" | "applied" | "failed" | "rolled_back";
 
+export type AdminNodeHost = {
+  host: string;
+  selected: boolean;
+};
+
 export type AdminNode = {
   id: string;
   name: string;
   public_host: string;
+  hosts?: AdminNodeHost[];
   api_base_url: string;
   status: AdminNodeStatus;
   sing_box_version: string;

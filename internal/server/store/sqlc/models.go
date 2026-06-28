@@ -51,6 +51,7 @@ type Node struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`
 	PublicHost     string         `json:"public_host"`
+	HostsJson      string         `json:"hosts_json"`
 	ApiBaseUrl     string         `json:"api_base_url"`
 	Status         string         `json:"status"`
 	SingBoxVersion string         `json:"sing_box_version"`

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CopyIcon } from "@phosphor-icons/react";
-import { Banner, Button, Dialog, Input } from "@cloudflare/kumo";
+import { CopyIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { Banner, Button, Dialog, Input, Switch } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodeBootstrap } from "../types";
 import type { AdminRequest } from "@/publish/publish-status";
@@ -243,46 +243,86 @@ export function EditNodeDialog({
 }) {
   const form = useForm<EditValues>({
     resolver: zodResolver(editSchema),
-    defaultValues: {
-      public_host: node.public_host,
-      api_base_url: node.api_base_url
-    }
+    defaultValues: editDefaults(node)
   });
+  const { fields, append, remove } = useFieldArray({ control: form.control, name: "hosts" });
   useEffect(() => {
-    form.reset({
-      public_host: node.public_host,
-      api_base_url: node.api_base_url
-    });
+    form.reset(editDefaults(node));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id]);
 
   const mutation = useAdminMutation<EditValues, AdminNode>(
     request,
-    (req, values) =>
-      req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
+    (req, values) => {
+      const hosts = values.hosts
+        .map((h) => ({ host: h.host.trim(), selected: h.selected }))
+        .filter((h) => h.host !== "");
+      return req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
         method: "PATCH",
-        body: JSON.stringify(values)
-      }),
+        body: JSON.stringify({ hosts, api_base_url: values.api_base_url })
+      });
+    },
     { onSuccess: onClose }
   );
+
+  const hostsErrors = form.formState.errors.hosts;
+  const hostsError = hostsErrors?.message ?? hostsErrors?.root?.message;
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
       <Dialog size="base" className="p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Edit {node.name}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Update the node's public host and API URL. Use Disable or Decommission to change its status.
+          Update the node's hosts and API URL. Use Disable or Decommission to change its status.
         </Dialog.Description>
 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
 
         <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
-          <Input
-            label="Public host"
-            placeholder="203.0.113.10"
-            error={form.formState.errors.public_host?.message}
-            {...form.register("public_host")}
-          />
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium text-kumo-default">Hosts</span>
+            <span className="text-xs text-kumo-subtle">
+              The first host is primary. Each host with “Profile” on generates a client connection profile.
+            </span>
+            {fields.map((field, index) => (
+              <div key={field.id} className="flex items-center gap-2">
+                <Input
+                  className="flex-1"
+                  placeholder="203.0.113.10 · example.com · 2606:4700::1"
+                  {...form.register(`hosts.${index}.host`)}
+                />
+                <Switch
+                  controlFirst={false}
+                  label="Profile"
+                  checked={form.watch(`hosts.${index}.selected`)}
+                  onCheckedChange={(value) => form.setValue(`hosts.${index}.selected`, Boolean(value))}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  shape="square"
+                  aria-label="Remove host"
+                  disabled={fields.length === 1}
+                  onClick={() => remove(index)}
+                >
+                  <TrashIcon className="size-4 text-kumo-danger" />
+                </Button>
+              </div>
+            ))}
+            <div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon={PlusIcon}
+                onClick={() => append({ host: "", selected: false })}
+              >
+                Add host
+              </Button>
+            </div>
+            {hostsError ? <span className="text-xs text-kumo-danger">{hostsError}</span> : null}
+          </div>
           <Input label="API base URL" placeholder="https://203.0.113.10:18080" {...form.register("api_base_url")} />
           <div className="mt-2 flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>

@@ -417,6 +417,165 @@ func TestAdminNodeBootstrapCreatesNodeAndToken(t *testing.T) {
 	}
 }
 
+func TestAdminNodeReenroll(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+	ctx := context.Background()
+
+	decodeBootstrap := func(t *testing.T, rec *httptest.ResponseRecorder) (adminNode, model.BootstrapConfig) {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Node            adminNode `json:"node"`
+			BootstrapString string    `json:"bootstrap_string"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := model.DecodeBootstrap(payload.BootstrapString)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return payload.Node, cfg
+	}
+	reenroll := func() *httptest.ResponseRecorder {
+		req := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/edge-r/reenroll", nil)
+		req.Host = "boxfleet.example"
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Enroll a pending node and capture its first token.
+	bootReq := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/bootstrap", map[string]string{"name": "edge-r"})
+	bootReq.Host = "boxfleet.example"
+	bootRec := httptest.NewRecorder()
+	router.ServeHTTP(bootRec, bootReq)
+	_, firstCfg := decodeBootstrap(t, bootRec)
+
+	// Pending re-enroll rotates the token: the new one verifies, the old is revoked.
+	node, secondCfg := decodeBootstrap(t, reenroll())
+	if node.Status != "pending" {
+		t.Fatalf("status after pending re-enroll = %q, want pending", node.Status)
+	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", secondCfg.Token); !ok {
+		t.Fatal("re-enrolled token did not verify")
+	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", firstCfg.Token); ok {
+		t.Fatal("old token should be revoked after re-enroll")
+	}
+
+	// An active node refuses re-enroll (keeps its working token untouched).
+	if err := store.SetNodeStatus(ctx, "edge-r", "active"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := reenroll(); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("active re-enroll status = %d, want 422", rec.Code)
+	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", secondCfg.Token); !ok {
+		t.Fatal("active node's token should survive a rejected re-enroll")
+	}
+
+	// Decommission revokes the token; re-enroll restores the node to pending.
+	delReq := adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/edge-r", nil)
+	delRec := httptest.NewRecorder()
+	router.ServeHTTP(delRec, delReq)
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("decommission status = %d, body = %s", delRec.Code, delRec.Body.String())
+	}
+	restored, thirdCfg := decodeBootstrap(t, reenroll())
+	if restored.Status != "pending" {
+		t.Fatalf("status after restore re-enroll = %q, want pending", restored.Status)
+	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", thirdCfg.Token); !ok {
+		t.Fatal("restored token did not verify")
+	}
+}
+
+func TestAdminNodePatchMultiHost(t *testing.T) {
+	store := openAPITestDB(t)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	createReq := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes", map[string]string{
+		"name":        "edge",
+		"public_host": "1.2.3.4",
+	})
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	patchReq := adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/edge", map[string]any{
+		"hosts": []map[string]any{
+			{"host": "example.net", "selected": true},
+			{"host": "203.0.113.5", "selected": false},
+		},
+	})
+	patchRec := httptest.NewRecorder()
+	router.ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, body = %s", patchRec.Code, patchRec.Body.String())
+	}
+	var node adminNode
+	if err := json.NewDecoder(patchRec.Body).Decode(&node); err != nil {
+		t.Fatal(err)
+	}
+	// public_host mirrors the first host; the full list round-trips.
+	if node.PublicHost != "example.net" {
+		t.Fatalf("public_host = %q, want example.net", node.PublicHost)
+	}
+	if len(node.Hosts) != 2 || node.Hosts[0].Host != "example.net" || !node.Hosts[0].Selected {
+		t.Fatalf("hosts = %#v", node.Hosts)
+	}
+	if node.Hosts[1].Host != "203.0.113.5" || node.Hosts[1].Selected {
+		t.Fatalf("second host = %#v", node.Hosts[1])
+	}
+
+	// The list endpoint must carry hosts too, or the edit dialog falls back to the
+	// single public_host and a later save silently drops the extra hosts.
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, adminJSONRequest(t, http.MethodGet, "/api/admin/nodes", nil))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body = %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []adminNode
+	if err := json.NewDecoder(listRec.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	var fromList *adminNode
+	for i := range listed {
+		if listed[i].Name == "edge" {
+			fromList = &listed[i]
+		}
+	}
+	if fromList == nil || len(fromList.Hosts) != 2 {
+		t.Fatalf("list response dropped hosts: %#v", fromList)
+	}
+
+	// An explicit empty host replacement is rejected, not silently collapsed back
+	// to the primary host.
+	emptyRec := httptest.NewRecorder()
+	router.ServeHTTP(emptyRec, adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/edge", map[string]any{
+		"hosts": []map[string]any{},
+	}))
+	if emptyRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty-hosts patch status = %d, want 422", emptyRec.Code)
+	}
+	// And the prior host list is unchanged.
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, adminJSONRequest(t, http.MethodGet, "/api/admin/nodes/edge", nil))
+	var after adminNode
+	if err := json.NewDecoder(getRec.Body).Decode(&after); err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Hosts) != 2 {
+		t.Fatalf("hosts changed after rejected empty patch: %#v", after.Hosts)
+	}
+}
+
 func TestInstallScriptEndpoint(t *testing.T) {
 	store := openAPITestDB(t)
 	router := NewRouter(Options{

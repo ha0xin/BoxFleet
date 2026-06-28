@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
@@ -90,6 +91,43 @@ func TestRenderNodeInfo(t *testing.T) {
 	}
 	if info.Proxies[0].Flow != db.VLESSRealityFlowVision {
 		t.Fatalf("flow = %q", info.Proxies[0].Flow)
+	}
+}
+
+func TestRenderNodeInfoMultiHost(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	// Two selected hosts and one deselected; expect a profile per selected host.
+	if _, err := store.UpdateNode(ctx, db.UpdateNodeParams{
+		Name:   "azus",
+		Status: "active",
+		Hosts: []db.NodeHost{
+			{Host: "azus.example.net", Selected: true},
+			{Host: "203.0.113.10", Selected: true},
+			{Host: "2606:4700::1", Selected: false},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := NodeInfoForUser(ctx, store, "alice", "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(info.Proxies) != 2 {
+		t.Fatalf("want 2 per-host profiles, got %d: %#v", len(info.Proxies), info.Proxies)
+	}
+	servers := map[string]bool{}
+	for _, p := range info.Proxies {
+		servers[p.Server] = true
+		if !strings.Contains(p.Name, "@") {
+			t.Fatalf("multi-host profile name should be disambiguated, got %q", p.Name)
+		}
+	}
+	if !servers["azus.example.net"] || !servers["203.0.113.10"] || servers["2606:4700::1"] {
+		t.Fatalf("unexpected servers: %#v", servers)
 	}
 }
 

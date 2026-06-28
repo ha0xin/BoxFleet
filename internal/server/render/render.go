@@ -324,6 +324,11 @@ func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName strin
 	if len(accesses) == 0 {
 		return NodeInfo{}, fmt.Errorf("user %q has no active proxy accesses on node %q", userName, nodeName)
 	}
+	// Each selected node host yields its own client profile (a node may publish a
+	// domain plus several IPv4/IPv6 addresses). Fall back to the view's single
+	// public_host if the node row can't be loaded or has no selected host.
+	hosts := selectedNodeHosts(ctx, store, nodeName, accesses[0].NodePublicHost)
+	multiHost := len(hosts) > 1
 	info := NodeInfo{User: accesses[0].ProxyUserName, Node: accesses[0].NodeName}
 	for _, access := range accesses {
 		if access.Protocol != db.ProtocolVLESSReality {
@@ -333,22 +338,51 @@ func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName strin
 		if err != nil {
 			return NodeInfo{}, err
 		}
-		info.Proxies = append(info.Proxies, NodeInfoProxy{
-			Name:       access.ProxyName,
-			Type:       access.Protocol,
-			Server:     access.NodePublicHost,
-			ServerPort: access.ListenPort,
-			UUID:       userCredential.UUID,
-			Flow:       userCredential.Flow,
-			ServerName: settings.ServerName,
-			PublicKey:  settings.RealityPublicKey,
-			ShortID:    settings.ShortID,
-		})
+		for _, host := range hosts {
+			name := access.ProxyName
+			if multiHost {
+				// Disambiguate the per-host profiles so callers (and config
+				// rendering, which matches on Name) can pick a specific address.
+				name = access.ProxyName + " @ " + host
+			}
+			info.Proxies = append(info.Proxies, NodeInfoProxy{
+				Name:       name,
+				Type:       access.Protocol,
+				Server:     host,
+				ServerPort: access.ListenPort,
+				UUID:       userCredential.UUID,
+				Flow:       userCredential.Flow,
+				ServerName: settings.ServerName,
+				PublicKey:  settings.RealityPublicKey,
+				ShortID:    settings.ShortID,
+			})
+		}
 	}
 	if len(info.Proxies) == 0 {
 		return NodeInfo{}, fmt.Errorf("user %q has no supported proxy accesses on node %q", userName, nodeName)
 	}
 	return info, nil
+}
+
+// selectedNodeHosts returns the addresses that should each get a client profile:
+// the node's hosts marked selected, in order. It degrades gracefully to the
+// supplied fallback (the proxy view's public_host) if the node can't be loaded
+// or nothing is selected, so rendering never produces an empty server address.
+func selectedNodeHosts(ctx context.Context, store *db.DB, nodeName, fallback string) []string {
+	node, err := store.GetNode(ctx, nodeName)
+	if err != nil {
+		return []string{fallback}
+	}
+	hosts := make([]string, 0, len(node.Hosts))
+	for _, h := range node.Hosts {
+		if h.Selected {
+			hosts = append(hosts, h.Host)
+		}
+	}
+	if len(hosts) == 0 {
+		return []string{fallback}
+	}
+	return hosts
 }
 
 func RenderNodeInfo(ctx context.Context, store *db.DB, userName, nodeName string) ([]byte, error) {

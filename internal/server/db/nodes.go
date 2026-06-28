@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,10 +12,19 @@ import (
 	store "github.com/haoxin/boxfleet/internal/server/store/sqlc"
 )
 
+// NodeHost is one reachable address for a node (domain, IPv4, or IPv6). Selected
+// hosts each produce a client connection profile; the first host is the primary
+// and is mirrored into the node's public_host column.
+type NodeHost struct {
+	Host     string `json:"host"`
+	Selected bool   `json:"selected"`
+}
+
 type Node struct {
 	ID             string
 	Name           string
 	PublicHost     string
+	Hosts          []NodeHost
 	APIBaseURL     string
 	Status         string
 	SingBoxVersion string
@@ -26,8 +36,66 @@ type Node struct {
 type UpdateNodeParams struct {
 	Name       string
 	PublicHost string
+	// Hosts, when non-empty, replaces the node's full host list. Callers that
+	// only deal with a single address may leave it nil and set PublicHost.
+	Hosts      []NodeHost
 	APIBaseURL string
 	Status     string
+}
+
+// normalizeNodeHosts trims, drops empty/duplicate hosts (keeping first), and
+// guarantees a usable list: at least one host, with the first selected when
+// nothing else is. It errors only when no non-empty host remains.
+func normalizeNodeHosts(hosts []NodeHost) ([]NodeHost, error) {
+	seen := make(map[string]bool, len(hosts))
+	out := make([]NodeHost, 0, len(hosts))
+	for _, h := range hosts {
+		host := strings.TrimSpace(h.Host)
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		out = append(out, NodeHost{Host: host, Selected: h.Selected})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("node public host is required")
+	}
+	anySelected := false
+	for _, h := range out {
+		if h.Selected {
+			anySelected = true
+			break
+		}
+	}
+	if !anySelected {
+		out[0].Selected = true
+	}
+	return out, nil
+}
+
+func encodeNodeHosts(hosts []NodeHost) (string, error) {
+	raw, err := json.Marshal(hosts)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// parseNodeHosts decodes the stored hosts_json, falling back to the legacy
+// single public_host for rows written before multi-host support.
+func parseNodeHosts(raw, fallbackHost string) []NodeHost {
+	if trimmed := strings.TrimSpace(raw); trimmed != "" && trimmed != "[]" {
+		var hosts []NodeHost
+		if err := json.Unmarshal([]byte(trimmed), &hosts); err == nil {
+			if normalized, err := normalizeNodeHosts(hosts); err == nil {
+				return normalized
+			}
+		}
+	}
+	if fallbackHost = strings.TrimSpace(fallbackHost); fallbackHost != "" {
+		return []NodeHost{{Host: fallbackHost, Selected: true}}
+	}
+	return nil
 }
 
 type NodeFilter struct {
@@ -59,10 +127,17 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 	if err != nil {
 		return Node{}, err
 	}
+	// A node is created with a single primary host; additional hosts are added
+	// later via UpdateNode. Keep hosts_json in sync with public_host from the start.
+	hostsJSON, err := encodeNodeHosts([]NodeHost{{Host: publicHost, Selected: true}})
+	if err != nil {
+		return Node{}, err
+	}
 	err = db.q.CreateNode(ctx, store.CreateNodeParams{
 		ID:         nodeID,
 		Name:       name,
 		PublicHost: publicHost,
+		HostsJson:  hostsJSON,
 		ApiBaseUrl: strings.TrimSpace(apiBaseURL),
 	})
 	if err != nil {
@@ -73,19 +148,33 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 
 func (db *DB) UpdateNode(ctx context.Context, params UpdateNodeParams) (Node, error) {
 	name := normalizeName(params.Name)
-	publicHost := strings.TrimSpace(params.PublicHost)
 	status := strings.TrimSpace(params.Status)
 	if name == "" {
 		return Node{}, errors.New("node name is required")
 	}
-	if publicHost == "" {
-		return Node{}, errors.New("node public host is required")
-	}
 	if !validNodeStatus(status) {
 		return Node{}, fmt.Errorf("unsupported node status %q", status)
 	}
+	// Hosts is the source of truth when provided; single-host callers may leave it
+	// nil and set PublicHost instead. A non-nil but empty Hosts is an explicit
+	// "replace with no hosts" — it must NOT fall back to PublicHost, so that an
+	// empty host-list replacement is rejected by normalizeNodeHosts rather than
+	// silently collapsing the node back to its primary host. nil != empty in Go.
+	hosts := params.Hosts
+	if hosts == nil {
+		hosts = []NodeHost{{Host: strings.TrimSpace(params.PublicHost), Selected: true}}
+	}
+	normalized, err := normalizeNodeHosts(hosts)
+	if err != nil {
+		return Node{}, err
+	}
+	hostsJSON, err := encodeNodeHosts(normalized)
+	if err != nil {
+		return Node{}, err
+	}
 	affected, err := db.q.UpdateNode(ctx, store.UpdateNodeParams{
-		PublicHost: publicHost,
+		PublicHost: normalized[0].Host,
+		HostsJson:  hostsJSON,
 		ApiBaseUrl: strings.TrimSpace(params.APIBaseURL),
 		Status:     status,
 		Name:       name,
@@ -132,6 +221,7 @@ SELECT
   n.id,
   n.name,
   n.public_host,
+  n.hosts_json,
   n.api_base_url,
   n.status,
   n.sing_box_version,
@@ -151,10 +241,12 @@ OFFSET ?`
 	nodes := make([]Node, 0)
 	for rows.Next() {
 		var node Node
+		var hostsJSON string
 		if err := rows.Scan(
 			&node.ID,
 			&node.Name,
 			&node.PublicHost,
+			&hostsJSON,
 			&node.APIBaseURL,
 			&node.Status,
 			&node.SingBoxVersion,
@@ -164,6 +256,7 @@ OFFSET ?`
 		); err != nil {
 			return NodePage{}, err
 		}
+		node.Hosts = parseNodeHosts(hostsJSON, node.PublicHost)
 		nodes = append(nodes, node)
 	}
 	if err := rows.Err(); err != nil {
@@ -264,6 +357,7 @@ func mapNode(row store.Node) Node {
 		ID:             row.ID,
 		Name:           row.Name,
 		PublicHost:     row.PublicHost,
+		Hosts:          parseNodeHosts(row.HostsJson, row.PublicHost),
 		APIBaseURL:     row.ApiBaseUrl,
 		Status:         row.Status,
 		SingBoxVersion: row.SingBoxVersion,

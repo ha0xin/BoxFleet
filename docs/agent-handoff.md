@@ -247,14 +247,28 @@ UI work is the Traffic page.
      result sets in the browser.
 
 3. Deferred fixes (acknowledged, intentionally postponed):
-   - **Decommission has no restore path.** `DELETE /nodes/{node}` sets disabled +
-     revokes tokens; Enable is then hidden (no active token) and re-enroll via
-     `/nodes/bootstrap` hits a unique-name 422. The agreed fix is an explicit
-     `POST /api/admin/nodes/{node}/reenroll` (only for a decommissioned node:
-     disabled + no active token) that sets pending, issues a fresh token, and
-     returns a new bootstrap string, plus a real "Re-enroll" UI action. Bootstrap
-     stays strict so an accidental name collision never clobbers a live node.
-     Postponed because no nodes are being decommissioned yet.
+   - **Re-enroll / re-show install command — DONE.** `POST /api/admin/nodes/{node}/reenroll`
+     (`adminReenrollNodeHandler`) re-issues a bootstrap string for an existing
+     node. Allowed only for a `pending` node (its one-time bootstrap was lost
+     before first check-in) or a decommissioned node (`disabled` + no active
+     token); an `active` node is rejected (422) and a paused node should be
+     re-enabled instead. Because the raw bootstrap token is never stored, it
+     rotates the token (revoke existing + issue fresh — net one token, never
+     accumulating) and returns a decommissioned node to `pending`. UI:
+     `ReenrollNodeDialog` + node-menu items "Show install command" (pending) /
+     "Re-enroll" (decommissioned). Bootstrap stays strict (still 422s on a name
+     collision) so it never clobbers a live node. The enroll/re-enroll dialogs
+     now show one copy-paste **Install command** (`curl … -o … && sudo sh …
+     'bootstrap'`) instead of separate string/URL fields.
+   - **Multiple hosts per node — DONE.** A node can publish several addresses
+     (domain, IPv4, IPv6) via the `hosts_json` column (migration 013); each host
+     marked "selected" gets its own client profile in `render.NodeInfoForUser`
+     (profile names are suffixed `@ <host>` when more than one). `public_host`
+     mirrors the first host so views/search/sort are untouched; `db.NodeHost` +
+     `normalizeNodeHosts` own validation (≥1 host, ≥1 selected, dedup). Enroll
+     stays single-host (primary); multi-host is managed in the node **Edit**
+     dialog (a `useFieldArray` host list with a per-row "Profile" Switch). API:
+     `adminNode.hosts` + `adminNodePatchPayload.hosts`.
    - **Publish polling re-renders every node every 15s.**
      `PublishStatusProvider` polls `/api/admin/config/changes`, which runs a full
      `RenderNodeConfig` for every non-disabled node unconditionally. Fine for
@@ -277,6 +291,51 @@ UI work is the Traffic page.
      `internal/server/api`.
    - For frontend-only changes, `npm --prefix web run build` is the minimum;
      use Playwright screenshots/geometry checks for layout-sensitive Kumo work.
+
+## Planned: Agent Self-Update (UI-triggered)
+
+Agreed design, not yet built. Today agents never self-update: `install.sh`
+injects the running server version so *new* nodes download a matching
+`boxfleet-agent` from the GitHub Release, but an already-bootstrapped agent has
+no self-update path (`internal/agent/agent.go` only knows its service name).
+
+Target UX: after the server is upgraded, the Web UI shows the new version and an
+**Update** button per node plus an **Update all** action; clicking it makes that
+node's agent upgrade itself on its next poll.
+
+Confirmed decisions:
+
+- **Target version is pinned to the server version** (the release bundles a
+  matching agent). A node is "outdated" when its reported `agent_version`
+  differs from the server version. No free-form version entry.
+- Phase the work: **Phase 1** (low risk) exposes the server version to the UI
+  and shows "update available" per node by comparing to `agent_version` — no
+  action yet. **Phase 2** adds the trigger + agent self-update + buttons.
+- **No automatic rollback in v1** — SHA256-verify the download, sanity-check the
+  new binary (`<new> version`) before swapping, keep a backup of the old binary,
+  and document manual recovery. A `systemd OnFailure`-driven auto-rollback is a
+  later v2 consideration.
+
+Proposed mechanism (pull-based, matching the agent-only-pulls architecture):
+
+1. Admin clicks Update → server marks the node "agent-update requested" (a new
+   nodes column / flag). "Update all" flags every outdated active node.
+2. On the next `GET /api/node/config` poll, if the flag is set and the reported
+   version differs, the response carries a directive header
+   (`X-BoxFleet-Agent-Update: <server-version>`).
+3. The agent downloads `boxfleet-agent-<version>-linux-amd64` from the Release
+   (same source as `install.sh`), SHA-verifies it, backs up + atomically
+   replaces its own binary, and `systemctl restart boxfleet-agent`.
+4. After restart the agent's heartbeat reports the new version; the server
+   clears the flag once `agent_version == server-version` (version match is the
+   ack, so it cannot loop).
+
+Risks to keep in mind when building Phase 2:
+
+- A broken new binary leaves that node's agent down with no remote fix (the
+  agent is the thing that updates) — hence SHA-verify + sanity-check + backup,
+  and **test on one node first**.
+- Sequence the self-update so it does not interrupt an in-flight config apply.
 
 ## Known Caveats
 

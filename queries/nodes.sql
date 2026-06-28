@@ -3,12 +3,14 @@ INSERT INTO nodes (
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status
 ) VALUES (
   sqlc.arg(id),
   sqlc.arg(name),
   sqlc.arg(public_host),
+  sqlc.arg(hosts_json),
   sqlc.arg(api_base_url),
   'active'
 );
@@ -18,6 +20,7 @@ SELECT
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status,
   sing_box_version,
@@ -32,6 +35,7 @@ SELECT
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status,
   sing_box_version,
@@ -60,6 +64,7 @@ WHERE name = sqlc.arg(name)
 UPDATE nodes
 SET
   public_host = sqlc.arg(public_host),
+  hosts_json = sqlc.arg(hosts_json),
   api_base_url = sqlc.arg(api_base_url),
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')

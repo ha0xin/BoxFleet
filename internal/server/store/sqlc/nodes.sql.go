@@ -14,6 +14,7 @@ INSERT INTO nodes (
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status
 ) VALUES (
@@ -21,6 +22,7 @@ INSERT INTO nodes (
   ?2,
   ?3,
   ?4,
+  ?5,
   'active'
 )
 `
@@ -29,6 +31,7 @@ type CreateNodeParams struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	PublicHost string `json:"public_host"`
+	HostsJson  string `json:"hosts_json"`
 	ApiBaseUrl string `json:"api_base_url"`
 }
 
@@ -37,6 +40,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) error {
 		arg.ID,
 		arg.Name,
 		arg.PublicHost,
+		arg.HostsJson,
 		arg.ApiBaseUrl,
 	)
 	return err
@@ -47,6 +51,7 @@ SELECT
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status,
   sing_box_version,
@@ -64,6 +69,7 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 		&i.ID,
 		&i.Name,
 		&i.PublicHost,
+		&i.HostsJson,
 		&i.ApiBaseUrl,
 		&i.Status,
 		&i.SingBoxVersion,
@@ -79,6 +85,7 @@ SELECT
   id,
   name,
   public_host,
+  hosts_json,
   api_base_url,
   status,
   sing_box_version,
@@ -102,6 +109,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.ID,
 			&i.Name,
 			&i.PublicHost,
+			&i.HostsJson,
 			&i.ApiBaseUrl,
 			&i.Status,
 			&i.SingBoxVersion,
@@ -164,14 +172,16 @@ const updateNode = `-- name: UpdateNode :execrows
 UPDATE nodes
 SET
   public_host = ?1,
-  api_base_url = ?2,
-  status = ?3,
+  hosts_json = ?2,
+  api_base_url = ?3,
+  status = ?4,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?4
+WHERE name = ?5
 `
 
 type UpdateNodeParams struct {
 	PublicHost string `json:"public_host"`
+	HostsJson  string `json:"hosts_json"`
 	ApiBaseUrl string `json:"api_base_url"`
 	Status     string `json:"status"`
 	Name       string `json:"name"`
@@ -180,6 +190,7 @@ type UpdateNodeParams struct {
 func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateNode,
 		arg.PublicHost,
+		arg.HostsJson,
 		arg.ApiBaseUrl,
 		arg.Status,
 		arg.Name,

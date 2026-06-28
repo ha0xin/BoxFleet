@@ -69,6 +69,14 @@ type adminNode struct {
 	// from a decommission (disabled, tokens revoked) so the UI does not offer to
 	// re-enable a node whose agent could never authenticate.
 	HasActiveToken bool `json:"has_active_token"`
+	// Hosts is the full ordered host list; public_host mirrors Hosts[0]. Each
+	// selected host produces a client connection profile.
+	Hosts []adminNodeHost `json:"hosts,omitempty"`
+}
+
+type adminNodeHost struct {
+	Host     string `json:"host"`
+	Selected bool   `json:"selected"`
 }
 
 type adminProxy struct {
@@ -183,8 +191,12 @@ type adminNodePatchPayload struct {
 	// api_base_url with "". public_host is required (UpdateNode rejects "")
 	// and the edit form enforces a non-empty value before sending it.
 	PublicHost *string `json:"public_host"`
-	APIBaseURL *string `json:"api_base_url"`
-	Status     *string `json:"status"`
+	// Hosts, when present, replaces the full host list (the edit dialog sends it
+	// and public_host is then derived from the first entry). Single-host clients
+	// may still send public_host instead.
+	Hosts      *[]adminNodeHost `json:"hosts"`
+	APIBaseURL *string          `json:"api_base_url"`
+	Status     *string          `json:"status"`
 }
 
 type adminNodeBootstrapPayload struct {
@@ -565,10 +577,19 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 		params := db.UpdateNodeParams{
 			Name:       existing.Name,
 			PublicHost: existing.PublicHost,
+			Hosts:      existing.Hosts,
 			APIBaseURL: existing.APIBaseURL,
 			Status:     existing.Status,
 		}
-		if payload.PublicHost != nil {
+		if payload.Hosts != nil {
+			hosts := make([]db.NodeHost, 0, len(*payload.Hosts))
+			for _, h := range *payload.Hosts {
+				hosts = append(hosts, db.NodeHost{Host: h.Host, Selected: h.Selected})
+			}
+			params.Hosts = hosts
+		} else if payload.PublicHost != nil {
+			// Single-host edit: replace the whole list with just this address.
+			params.Hosts = nil
 			params.PublicHost = *payload.PublicHost
 		}
 		if payload.APIBaseURL != nil {
@@ -1286,16 +1307,10 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	}
 	out := make([]adminNode, 0, len(nodes))
 	for _, node := range nodes {
-		item := adminNode{
-			ID:             node.ID,
-			Name:           node.Name,
-			PublicHost:     node.PublicHost,
-			APIBaseURL:     node.APIBaseURL,
-			Status:         node.Status,
-			SingBoxVersion: node.SingBoxVersion,
-			LastSeenAt:     nullString(node.LastSeenAt),
-			HasActiveToken: hasToken[node.Name],
-		}
+		// Base off adminNodeFromNode so list responses carry the same fields as
+		// single-node responses (notably Hosts) instead of a divergent literal.
+		item := adminNodeFromNode(node)
+		item.HasActiveToken = hasToken[node.Name]
 		if status, ok := statusByNode[node.Name]; ok {
 			statusItem := adminNodeFromStatus(status)
 			item.TargetVersion = statusItem.TargetVersion
@@ -1312,6 +1327,10 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 }
 
 func adminNodeFromNode(node db.Node) adminNode {
+	hosts := make([]adminNodeHost, 0, len(node.Hosts))
+	for _, h := range node.Hosts {
+		hosts = append(hosts, adminNodeHost{Host: h.Host, Selected: h.Selected})
+	}
 	return adminNode{
 		ID:             node.ID,
 		Name:           node.Name,
@@ -1320,6 +1339,7 @@ func adminNodeFromNode(node db.Node) adminNode {
 		Status:         node.Status,
 		SingBoxVersion: node.SingBoxVersion,
 		LastSeenAt:     nullString(node.LastSeenAt),
+		Hosts:          hosts,
 	}
 }
 

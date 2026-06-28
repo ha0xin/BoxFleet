@@ -287,7 +287,12 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                               </span>
                             </Table.Cell>
                             <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">{node.public_host || node.api_base_url || "n/a"}</span>
+                              <span className="whitespace-nowrap text-kumo-subtle">
+                                {node.public_host || node.api_base_url || "n/a"}
+                                {node.hosts && node.hosts.length > 1 ? (
+                                  <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
+                                ) : null}
+                              </span>
                             </Table.Cell>
                             <Table.Cell>
                               <span className="whitespace-nowrap text-kumo-subtle">{node.agent_version || "n/a"}</span>

@@ -41,7 +41,8 @@ updated_at
 ```text
 id
 name                      unique
-public_host
+public_host               primary host; mirrors hosts_json[0]
+hosts_json                JSON [{"host":..,"selected":..}, ..] (migration 013)
 api_base_url
 status                    pending | active | disabled | degraded
 sing_box_version
@@ -49,6 +50,14 @@ last_seen_at
 created_at
 updated_at
 ```
+
+A node may publish several reachable addresses (a domain, multiple IPv4, IPv6).
+`hosts_json` is the ordered source of truth; `public_host` is kept in sync with
+the first entry so the `proxy_details` / `proxy_access_details` views, search,
+and sorting stay on a single column. Each host marked `selected` produces its own
+client connection profile (`render.NodeInfoForUser`); the first host is always
+present and at least one host is always selected (`db.normalizeNodeHosts`). Rows
+written before migration 013 fall back to `[{public_host, selected:true}]`.
 
 Status semantics (see "Node Lifecycle" in `docs/architecture.md`):
 

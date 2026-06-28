@@ -33,7 +33,12 @@ const nodes: AdminNode[] = [
   {
     id: "node_tokyo",
     name: "tokyo",
-    public_host: "203.0.113.10",
+    public_host: "tokyo.example.net",
+    hosts: [
+      { host: "tokyo.example.net", selected: true },
+      { host: "203.0.113.10", selected: true },
+      { host: "2606:4700::6810:84e5", selected: false }
+    ],
     api_base_url: "https://203.0.113.10:18080",
     status: "active",
     sing_box_version: "1.9.3",
@@ -586,12 +591,38 @@ const routes: Route[] = [
     }
   },
   {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/reenroll$/,
+    handler: ({ match }): AdminNodeBootstrap => {
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const node = nodes.find((n) => n.name === name);
+      if (node) {
+        node.status = "pending";
+        node.has_active_token = true;
+      }
+      return {
+        node: node ?? nodes[0],
+        bootstrap_string: `BFNODE:${name}:eyJhcGkiOiJodHRwczovLzIwMy4wLjExMy4xMCJ9:devtoken2`,
+        install_script_url: "http://127.0.0.1:18081/install/node.sh"
+      };
+    }
+  },
+  {
     method: "PATCH",
     pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
     handler: ({ match, body }) => {
       const node = nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? ""));
       if (node && body) {
-        if (typeof body.public_host === "string") node.public_host = body.public_host;
+        if (Array.isArray(body.hosts)) {
+          const hosts = (body.hosts as AdminNode["hosts"]) ?? [];
+          if (hosts.length > 0) {
+            node.hosts = hosts;
+            node.public_host = hosts[0].host;
+          }
+        } else if (typeof body.public_host === "string") {
+          node.public_host = body.public_host;
+          node.hosts = [{ host: body.public_host, selected: true }];
+        }
         if (typeof body.api_base_url === "string") node.api_base_url = body.api_base_url;
         if (body.status === "active" || body.status === "disabled") node.status = body.status;
       }
