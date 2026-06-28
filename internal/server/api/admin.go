@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -393,40 +394,104 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		node.Status = "pending"
-		issued, err := store.IssueNodeToken(r.Context(), node.Name)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
 		serverURL := strings.TrimRight(strings.TrimSpace(payload.ServerURL), "/")
 		if serverURL == "" {
 			serverURL = requestBaseURL(r)
 		}
-		singBoxURL := strings.TrimSpace(payload.SingBoxURL)
-		bootstrapString, err := model.EncodeBootstrap(model.BootstrapConfig{
-			NodeName:        issued.NodeName,
-			Token:           issued.Token,
-			ServerURL:       serverURL,
-			SingBoxURL:      singBoxURL,
-			InstallDir:      agent.DefaultInstallDir,
-			AgentConfigPath: agent.DefaultConfigPath,
-			V2RayAPIAddress: agent.DefaultV2RayAPIAddress,
-		})
+		resp, err := bootstrapResponseForNode(r.Context(), store, node, serverURL, strings.TrimSpace(payload.SingBoxURL))
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		nodeResp, err := adminNodeResponse(r.Context(), store, node)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		writeJSON(w, adminNodeBootstrapResponse{
-			Node:             nodeResp,
-			BootstrapString:  bootstrapString,
-			InstallScriptURL: serverURL + "/install.sh",
-		})
+		writeJSON(w, resp)
 	}
+}
+
+// adminReenrollNodeHandler re-issues a bootstrap string for an existing node so
+// its install command can be shown again after the one-time enroll dialog was
+// closed, or so a rebuilt/decommissioned node can be brought back online. It is
+// deliberately restricted: an active node keeps its working token (no need, and
+// minting extra tokens for a live agent is undesirable), and a paused node
+// (disabled but token intact) should be re-enabled, not re-enrolled. Only a
+// pending node (bootstrap lost before first check-in) or a decommissioned node
+// (disabled with no valid token) qualifies.
+func adminReenrollNodeHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := chi.URLParam(r, "node")
+		node, err := store.GetNode(r.Context(), name)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		hasToken, err := store.NodeHasActiveToken(r.Context(), node.Name)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		if !(node.Status == "pending" || (node.Status == "disabled" && !hasToken)) {
+			writeAdminError(w, fmt.Errorf("node %q cannot be re-enrolled in status %q", node.Name, node.Status))
+			return
+		}
+		// The raw bootstrap token is never stored (only its hash), so the original
+		// install string is unrecoverable. Revoke any existing token and issue a
+		// fresh one, keeping exactly one valid token rather than accumulating.
+		if err := store.RevokeNodeTokens(r.Context(), node.Name); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		// A decommissioned node is disabled; return it to pending so it re-enters
+		// rendering/publishing once its agent checks in. A pending node stays pending.
+		if node.Status != "pending" {
+			if err := store.SetNodeStatus(r.Context(), node.Name, "pending"); err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			node.Status = "pending"
+		}
+		// Body is optional; honor server_url / sing_box_url overrides when present.
+		var payload adminNodeBootstrapPayload
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		serverURL := strings.TrimRight(strings.TrimSpace(payload.ServerURL), "/")
+		if serverURL == "" {
+			serverURL = requestBaseURL(r)
+		}
+		resp, err := bootstrapResponseForNode(r.Context(), store, node, serverURL, strings.TrimSpace(payload.SingBoxURL))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
+	}
+}
+
+// bootstrapResponseForNode issues a fresh node token and builds the bootstrap
+// string + install command response shared by enroll and re-enroll.
+func bootstrapResponseForNode(ctx context.Context, store *db.DB, node db.Node, serverURL, singBoxURL string) (adminNodeBootstrapResponse, error) {
+	issued, err := store.IssueNodeToken(ctx, node.Name)
+	if err != nil {
+		return adminNodeBootstrapResponse{}, err
+	}
+	bootstrapString, err := model.EncodeBootstrap(model.BootstrapConfig{
+		NodeName:        issued.NodeName,
+		Token:           issued.Token,
+		ServerURL:       serverURL,
+		SingBoxURL:      singBoxURL,
+		InstallDir:      agent.DefaultInstallDir,
+		AgentConfigPath: agent.DefaultConfigPath,
+		V2RayAPIAddress: agent.DefaultV2RayAPIAddress,
+	})
+	if err != nil {
+		return adminNodeBootstrapResponse{}, err
+	}
+	nodeResp, err := adminNodeResponse(ctx, store, node)
+	if err != nil {
+		return adminNodeBootstrapResponse{}, err
+	}
+	return adminNodeBootstrapResponse{
+		Node:             nodeResp,
+		BootstrapString:  bootstrapString,
+		InstallScriptURL: serverURL + "/install.sh",
+	}, nil
 }
 
 func releaseRepo(options Options) string {

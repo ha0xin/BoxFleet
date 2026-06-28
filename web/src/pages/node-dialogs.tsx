@@ -13,15 +13,33 @@ export type NodeDialogState =
   | { mode: "enroll" }
   | { mode: "edit"; node: AdminNode }
   | { mode: "delete"; node: AdminNode }
+  | { mode: "reenroll"; node: AdminNode }
   | null;
 
-function CopyField({ label, value }: { label: string; value: string }) {
+// Single-quote a value for safe inclusion in a /bin/sh command (escape embedded
+// single quotes the POSIX way: close, add an escaped quote, reopen).
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+// The download-script and the bootstrap token belong in one runnable command so
+// the operator can paste a single line on the node. Download to a temp file then
+// run it (lets the script be re-inspected/re-run) rather than piping curl|sh.
+function installCommand(scriptUrl: string, bootstrap: string): string {
+  return `curl -fsSL ${shellQuote(scriptUrl)} -o /tmp/boxfleet-install.sh && sudo sh /tmp/boxfleet-install.sh ${shellQuote(bootstrap)}`;
+}
+
+function CopyField({ label, value, wrap = false }: { label: string; value: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm font-medium text-kumo-default">{label}</span>
       <div className="flex items-stretch gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-md border border-kumo-line bg-kumo-canvas px-3 py-2 font-mono text-xs text-kumo-subtle">
+        <code
+          className={`min-w-0 flex-1 rounded-md border border-kumo-line bg-kumo-canvas px-3 py-2 font-mono text-xs text-kumo-subtle ${
+            wrap ? "whitespace-pre-wrap break-all" : "truncate"
+          }`}
+        >
           {value}
         </code>
         <Button
@@ -39,6 +57,22 @@ function CopyField({ label, value }: { label: string; value: string }) {
         </Button>
       </div>
       {copied ? <span className="text-xs text-kumo-success">Copied</span> : null}
+    </div>
+  );
+}
+
+// Shared success view for enroll + re-enroll: one copy-paste install command.
+function BootstrapResult({ result, onClose }: { result: AdminNodeBootstrap; onClose: () => void }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <CopyField
+        label="Install command"
+        value={installCommand(result.install_script_url, result.bootstrap_string)}
+        wrap
+      />
+      <div className="mt-2 flex justify-end">
+        <Button onClick={onClose}>Done</Button>
+      </div>
     </div>
   );
 }
@@ -80,13 +114,7 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
 
         {result ? (
-          <div className="flex flex-col gap-4">
-            <CopyField label="Bootstrap string" value={result.bootstrap_string} />
-            <CopyField label="Install script URL" value={result.install_script_url} />
-            <div className="mt-2 flex justify-end">
-              <Button onClick={onClose}>Done</Button>
-            </div>
-          </div>
+          <BootstrapResult result={result} onClose={onClose} />
         ) : (
           <form
             className="flex flex-col gap-4"
@@ -120,18 +148,89 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
   );
 }
 
+// Re-show the install command for an existing node. The original bootstrap token
+// is unrecoverable (only its hash is stored), so the server rotates the token on
+// re-enroll. Offered for a pending node (bootstrap lost before first check-in) or
+// a decommissioned one being restored — not for an active node serving traffic.
+export function ReenrollNodeDialog({
+  request,
+  node,
+  onClose
+}: {
+  request: AdminRequest;
+  node: AdminNode;
+  onClose: () => void;
+}) {
+  const [result, setResult] = useState<AdminNodeBootstrap | null>(null);
+  const isRestore = node.status === "disabled";
+
+  const mutation = useAdminMutation<void, AdminNodeBootstrap>(
+    request,
+    (req) => req(`/api/admin/nodes/${encodeURIComponent(node.name)}/reenroll`, { method: "POST" }),
+    { onSuccess: (data) => setResult(data) }
+  );
+
+  return (
+    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Dialog size="lg" className="p-6">
+        <Dialog.Title className="text-xl font-semibold text-kumo-default">
+          {isRestore ? `Re-enroll ${node.name}` : `Install command for ${node.name}`}
+        </Dialog.Title>
+        <Dialog.Description className="mb-4 text-kumo-subtle">
+          {result
+            ? "Run the command on the node. It appears as pending until the agent reports in."
+            : isRestore
+              ? "Issue a fresh agent token and bootstrap string to bring this decommissioned node back online. Its old token stays revoked."
+              : "Re-issue this node's install command. A fresh agent token is generated and any previous token is revoked."}
+        </Dialog.Description>
+
+        {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
+
+        {result ? (
+          <BootstrapResult result={result} onClose={onClose} />
+        ) : (
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button loading={mutation.isPending} onClick={() => mutation.mutate()}>
+              {isRestore ? "Re-enroll" : "Generate install command"}
+            </Button>
+          </div>
+        )}
+      </Dialog>
+    </Dialog.Root>
+  );
+}
+
 // Status is owned by the Disable/Enable toggle and Decommission action, not this
 // form — including it here would silently promote a pending/degraded node to
 // active on an unrelated host/URL edit. The PATCH omits status, so the server
 // preserves it.
 const editSchema = z.object({
-  // Public host is required server-side (UpdateNode rejects an empty value), so
-  // validate it here instead of letting a cleared field fail with a 422.
-  public_host: z.string().min(1, "Public host is required"),
+  // A node may publish several addresses (domain, IPv4, IPv6). The first is the
+  // primary (mirrored to public_host server-side); each "selected" host yields a
+  // client profile. Require at least one non-empty host and one selected.
+  hosts: z
+    .array(z.object({ host: z.string(), selected: z.boolean() }))
+    .refine((hosts) => hosts.some((h) => h.host.trim() !== ""), {
+      message: "At least one host is required"
+    })
+    .refine((hosts) => hosts.some((h) => h.host.trim() !== "" && h.selected), {
+      message: "Select at least one host to generate a client profile"
+    }),
   api_base_url: z.string()
 });
 
 type EditValues = z.infer<typeof editSchema>;
+
+function editDefaults(node: AdminNode): EditValues {
+  const hosts =
+    node.hosts && node.hosts.length > 0
+      ? node.hosts.map((h) => ({ host: h.host, selected: h.selected }))
+      : [{ host: node.public_host, selected: true }];
+  return { hosts, api_base_url: node.api_base_url };
+}
 
 export function EditNodeDialog({
   request,

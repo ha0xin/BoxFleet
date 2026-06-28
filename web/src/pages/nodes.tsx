@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowsClockwiseIcon,
   CheckCircleIcon,
   DotsThreeIcon,
+  DownloadSimpleIcon,
   FunnelIcon,
   HardDrivesIcon,
   PencilSimpleIcon,
@@ -10,8 +12,7 @@ import {
   PlusIcon,
   ProhibitIcon,
   SortAscendingIcon,
-  SortDescendingIcon,
-  WarningCircleIcon
+  SortDescendingIcon
 } from "@phosphor-icons/react";
 import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
 
@@ -26,7 +27,7 @@ import {
   rowLinkClassName
 } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog } from "./node-dialogs";
+import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -313,11 +314,19 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                   <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", node })}>
                                     Edit
                                   </DropdownMenu.Item>
+                                  {node.status === "pending" ? (
+                                    // Pending: the one-time bootstrap may have been lost before the
+                                    // agent checked in. Let the operator re-show the install command.
+                                    <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setDialog({ mode: "reenroll", node })}>
+                                      Show install command
+                                    </DropdownMenu.Item>
+                                  ) : null}
                                   {node.status === "disabled" && node.has_active_token === false ? (
                                     // Decommissioned: tokens were revoked, so Enable would yield an
-                                    // active node whose agent can never authenticate. Re-enroll instead.
-                                    <DropdownMenu.Item icon={WarningCircleIcon} disabled>
-                                      Decommissioned — re-enroll to restore
+                                    // active node whose agent can never authenticate. Re-enroll issues
+                                    // a fresh token + bootstrap to bring it back online.
+                                    <DropdownMenu.Item icon={ArrowsClockwiseIcon} onClick={() => setDialog({ mode: "reenroll", node })}>
+                                      Re-enroll
                                     </DropdownMenu.Item>
                                   ) : (
                                     <>
@@ -371,6 +380,9 @@ export function NodesPage({ request }: { request: AdminRequest }) {
       ) : null}
       {dialog?.mode === "delete" ? (
         <DeleteNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
+      ) : null}
+      {dialog?.mode === "reenroll" ? (
+        <ReenrollNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
       ) : null}
     </div>
   );

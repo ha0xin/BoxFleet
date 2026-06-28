@@ -51,6 +51,7 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/nodes/{node}", adminNodeHandler(options.DB))
 		r.Patch("/nodes/{node}", adminUpdateNodeHandler(options.DB))
 		r.Delete("/nodes/{node}", adminDeleteNodeHandler(options.DB))
+		r.Post("/nodes/{node}/reenroll", adminReenrollNodeHandler(options.DB))
 		r.Get("/nodes/{node}/status", adminNodeStatusHandler(options.DB))
 		r.Get("/nodes/{node}/proxies", adminNodeProxiesHandler(options.DB))
 		r.Post("/nodes/{node}/proxies", adminCreateProxyHandler(options.DB))
