@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestRenderVLESSRealityServerAndClientConfigs(t *testing.T) {
@@ -128,6 +129,95 @@ func TestRenderNodeInfoMultiHost(t *testing.T) {
 	}
 	if !servers["azus.example.net"] || !servers["203.0.113.10"] || servers["2606:4700::1"] {
 		t.Fatalf("unexpected servers: %#v", servers)
+	}
+}
+
+func TestRenderMihomoProxyProvider(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	raw, err := RenderMihomoProxyProvider(ctx, store, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-key") || strings.Contains(string(raw), "reality_private_key") {
+		t.Fatalf("provider leaked Reality private key:\n%s", raw)
+	}
+
+	var provider struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(raw, &provider); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Proxies) != 1 {
+		t.Fatalf("proxies = %d, want 1:\n%s", len(provider.Proxies), raw)
+	}
+	proxy := provider.Proxies[0]
+	if proxy["name"] != "azus / vless-39090" ||
+		proxy["type"] != "vless" ||
+		proxy["server"] != "203.0.113.10" ||
+		proxy["port"] != 39090 ||
+		proxy["uuid"] == "" ||
+		proxy["flow"] != db.VLESSRealityFlowVision ||
+		proxy["network"] != "tcp" ||
+		proxy["tls"] != true ||
+		proxy["servername"] != "www.amazon.com" ||
+		proxy["client-fingerprint"] != "chrome" ||
+		proxy["packet-encoding"] != "xudp" ||
+		proxy["encryption"] != "" {
+		t.Fatalf("unexpected proxy: %#v", proxy)
+	}
+	reality, ok := proxy["reality-opts"].(map[string]any)
+	if !ok || reality["public-key"] != "public-key" || reality["short-id"] != "01234567" {
+		t.Fatalf("unexpected reality options: %#v", proxy["reality-opts"])
+	}
+}
+
+func TestRenderMihomoProxyProviderMultiHostAndDisabled(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	if _, err := store.UpdateNode(ctx, db.UpdateNodeParams{
+		Name:   "azus",
+		Status: "active",
+		Hosts: []db.NodeHost{
+			{Host: "azus.example.net", Selected: true},
+			{Host: "2606:4700::1", Selected: true},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := RenderMihomoProxyProvider(ctx, store, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var provider struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(raw, &provider); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Proxies) != 2 {
+		t.Fatalf("proxies = %d, want 2:\n%s", len(provider.Proxies), raw)
+	}
+	if provider.Proxies[0]["name"] != "azus / vless-39090 @ azus.example.net" ||
+		provider.Proxies[1]["name"] != "azus / vless-39090 @ 2606:4700::1" {
+		t.Fatalf("unexpected names: %q, %q", provider.Proxies[0]["name"], provider.Proxies[1]["name"])
+	}
+
+	if _, err := store.SetProxyAccessEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = RenderMihomoProxyProvider(ctx, store, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "proxies: []\n" {
+		t.Fatalf("disabled access provider = %q, want empty proxies", raw)
 	}
 }
 

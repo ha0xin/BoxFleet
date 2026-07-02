@@ -990,29 +990,12 @@ func adminUserNodeInfoHandler(store *db.DB) http.HandlerFunc {
 
 func adminUserConnectionInfoHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userName := chi.URLParam(r, "user")
-		accesses, err := store.ListProxyAccessesByUser(r.Context(), userName)
+		info, err := render.ConnectionInfoForUser(r.Context(), store, chi.URLParam(r, "user"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		seen := make(map[string]bool)
-		out := make([]render.NodeInfo, 0)
-		for _, access := range accesses {
-			if seen[access.NodeName] {
-				continue
-			}
-			seen[access.NodeName] = true
-			info, err := render.NodeInfoForUser(r.Context(), store, userName, access.NodeName)
-			if err != nil {
-				continue
-			}
-			out = append(out, info)
-		}
-		writeJSON(w, map[string]any{
-			"user":  userName,
-			"nodes": out,
-		})
+		writeJSON(w, info)
 	}
 }
 

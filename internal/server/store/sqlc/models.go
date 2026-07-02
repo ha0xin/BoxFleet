@@ -218,6 +218,15 @@ type Setting struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+type SubscriptionToken struct {
+	ID          string         `json:"id"`
+	ProxyUserID string         `json:"proxy_user_id"`
+	Token       string         `json:"token"`
+	CreatedAt   string         `json:"created_at"`
+	LastUsedAt  sql.NullString `json:"last_used_at"`
+	RevokedAt   sql.NullString `json:"revoked_at"`
+}
+
 type SystemLog struct {
 	ID            string         `json:"id"`
 	NodeID        string         `json:"node_id"`

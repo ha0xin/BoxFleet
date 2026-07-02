@@ -15,9 +15,9 @@ consistently.
 
 The executable draft lives in `migrations/`. `010_init.sql` is the public
 baseline; later migrations are append-only (e.g.
-`012_remove_proxy_user_traffic_multiplier.sql`). Recent feature work changed only
-query text (`queries/*.sql`), not the schema, so no new migration was needed —
-regenerate sqlc after editing queries.
+`012_remove_proxy_user_traffic_multiplier.sql`). Migration
+`014_subscription_tokens.sql` adds revocable Mihomo proxy-provider links.
+Regenerate sqlc after editing queries or the schema snapshot.
 
 ## Core Tables
 
@@ -34,6 +34,21 @@ global_quota_bytes        0 means unlimited
 expire_at                 nullable
 created_at
 updated_at
+```
+
+### subscription_tokens
+
+One active Mihomo proxy-provider link per proxy user. Revoked rows are retained
+for lifecycle history; proxy changes update the dynamically rendered response
+without rotating the token.
+
+```text
+id
+proxy_user_id
+token                     unique high-entropy bearer token
+created_at
+last_used_at
+revoked_at
 ```
 
 ### nodes

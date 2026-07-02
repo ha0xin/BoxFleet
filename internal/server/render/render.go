@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"go.yaml.in/yaml/v3"
 )
 
 const DefaultMixedListenPort = 2080
@@ -28,6 +29,11 @@ type NodeInfo struct {
 	Proxies []NodeInfoProxy `json:"proxies"`
 }
 
+type ConnectionInfo struct {
+	User  string     `json:"user"`
+	Nodes []NodeInfo `json:"nodes"`
+}
+
 type NodeInfoProxy struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`
@@ -38,6 +44,32 @@ type NodeInfoProxy struct {
 	ServerName string `json:"server_name"`
 	PublicKey  string `json:"public_key"`
 	ShortID    string `json:"short_id"`
+}
+
+type mihomoProxyProvider struct {
+	Proxies []mihomoVLESSProxy `yaml:"proxies"`
+}
+
+type mihomoVLESSProxy struct {
+	Name              string               `yaml:"name"`
+	Type              string               `yaml:"type"`
+	Server            string               `yaml:"server"`
+	Port              int                  `yaml:"port"`
+	UUID              string               `yaml:"uuid"`
+	UDP               bool                 `yaml:"udp"`
+	Flow              string               `yaml:"flow"`
+	Network           string               `yaml:"network"`
+	TLS               bool                 `yaml:"tls"`
+	ServerName        string               `yaml:"servername"`
+	ClientFingerprint string               `yaml:"client-fingerprint"`
+	PacketEncoding    string               `yaml:"packet-encoding"`
+	RealityOpts       mihomoRealityOptions `yaml:"reality-opts"`
+	Encryption        string               `yaml:"encryption"`
+}
+
+type mihomoRealityOptions struct {
+	PublicKey string `yaml:"public-key"`
+	ShortID   string `yaml:"short-id"`
 }
 
 type vlessRealitySettings struct {
@@ -324,6 +356,10 @@ func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName strin
 	if len(accesses) == 0 {
 		return NodeInfo{}, fmt.Errorf("user %q has no active proxy accesses on node %q", userName, nodeName)
 	}
+	return nodeInfoFromAccesses(ctx, store, userName, nodeName, accesses)
+}
+
+func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName string, accesses []db.ProxyAccess) (NodeInfo, error) {
 	// Each selected node host yields its own client profile (a node may publish a
 	// domain plus several IPv4/IPv6 addresses). Fall back to the view's single
 	// public_host if the node row can't be loaded or has no selected host.
@@ -364,6 +400,55 @@ func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName strin
 	return info, nil
 }
 
+// ConnectionInfoForUser returns all currently active, supported client
+// profiles for a user. Disabled users, nodes, bindings, proxies, and accesses
+// are filtered by ListProxyAccessesByUserNode.
+func ConnectionInfoForUser(ctx context.Context, store *db.DB, userName string) (ConnectionInfo, error) {
+	user, err := store.GetProxyUser(ctx, userName)
+	if err != nil {
+		return ConnectionInfo{}, err
+	}
+	allAccesses, err := store.ListProxyAccessesByUser(ctx, userName)
+	if err != nil {
+		return ConnectionInfo{}, err
+	}
+
+	info := ConnectionInfo{User: user.Name, Nodes: make([]NodeInfo, 0)}
+	seenNodes := make(map[string]struct{})
+	for _, access := range allAccesses {
+		if _, seen := seenNodes[access.NodeName]; seen {
+			continue
+		}
+		seenNodes[access.NodeName] = struct{}{}
+
+		activeAccesses, err := store.ListProxyAccessesByUserNode(ctx, userName, access.NodeName)
+		if err != nil {
+			return ConnectionInfo{}, err
+		}
+		if len(activeAccesses) == 0 {
+			continue
+		}
+		for _, activeAccess := range activeAccesses {
+			if activeAccess.Protocol != db.ProtocolVLESSReality {
+				return ConnectionInfo{}, fmt.Errorf(
+					"connection info renderer only supports %s, got %s on %s/%s",
+					db.ProtocolVLESSReality,
+					activeAccess.Protocol,
+					activeAccess.NodeName,
+					activeAccess.ProxyName,
+				)
+			}
+		}
+
+		nodeInfo, err := nodeInfoFromAccesses(ctx, store, userName, access.NodeName, activeAccesses)
+		if err != nil {
+			return ConnectionInfo{}, err
+		}
+		info.Nodes = append(info.Nodes, nodeInfo)
+	}
+	return info, nil
+}
+
 // selectedNodeHosts returns the addresses that should each get a client profile:
 // the node's hosts marked selected, in order. It degrades gracefully to the
 // supplied fallback (the proxy view's public_host) if the node can't be loaded
@@ -391,6 +476,44 @@ func RenderNodeInfo(ctx context.Context, store *db.DB, userName, nodeName string
 		return nil, err
 	}
 	return json.MarshalIndent(info, "", "  ")
+}
+
+// RenderMihomoProxyProvider renders all currently active VLESS-Reality
+// accesses for a user as a Mihomo proxy-provider document. It intentionally
+// emits only the top-level proxies field, so callers can serve it directly to
+// a Mihomo/Clash proxy-provider.
+func RenderMihomoProxyProvider(ctx context.Context, store *db.DB, userName string) ([]byte, error) {
+	info, err := ConnectionInfoForUser(ctx, store, userName)
+	if err != nil {
+		return nil, err
+	}
+
+	provider := mihomoProxyProvider{Proxies: make([]mihomoVLESSProxy, 0)}
+	for _, node := range info.Nodes {
+		for _, proxy := range node.Proxies {
+			provider.Proxies = append(provider.Proxies, mihomoVLESSProxy{
+				Name:              node.Node + " / " + proxy.Name,
+				Type:              "vless",
+				Server:            proxy.Server,
+				Port:              proxy.ServerPort,
+				UUID:              proxy.UUID,
+				UDP:               true,
+				Flow:              proxy.Flow,
+				Network:           "tcp",
+				TLS:               true,
+				ServerName:        proxy.ServerName,
+				ClientFingerprint: "chrome",
+				PacketEncoding:    "xudp",
+				RealityOpts: mihomoRealityOptions{
+					PublicKey: proxy.PublicKey,
+					ShortID:   proxy.ShortID,
+				},
+				Encryption: "",
+			})
+		}
+	}
+
+	return yaml.Marshal(provider)
 }
 
 func parseVLESSReality(access db.ProxyAccess) (vlessRealitySettings, db.VLESSRealityCredential, error) {

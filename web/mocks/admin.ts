@@ -8,6 +8,7 @@ import type {
   AdminProxyAccess,
   AdminProxiesResponse,
   AdminSettings,
+  AdminSubscription,
   AdminUser,
   NetworkEvent,
   NetworkEventsResponse,
@@ -272,28 +273,100 @@ function accessFor(userName: string): AdminProxyAccess[] {
   return userAccess.get(userName) as AdminProxyAccess[];
 }
 
-const connectionInfoFor = (userName: string): UserConnectionInfo => ({
-  user: userName,
-  nodes: nodes
-    .filter((n) => n.status === "active")
-    .map((n) => ({
-      user: userName,
-      node: n.name,
-      proxies: proxies
-        .filter((p) => p.node_name === n.name && p.enabled)
-        .map((p) => ({
-          name: p.name,
-          type: "vless",
-          server: n.public_host,
-          server_port: p.listen_port,
-          uuid: `00000000-0000-4000-8000-${p.id.replace(/[^0-9a-f]/gi, "").padEnd(12, "0").slice(0, 12)}`,
-          flow: "xtls-rprx-vision",
-          server_name: "www.cloudflare.com",
-          public_key: "0Rsht7y9rH2nMpdJ8m1l8oUuTPwQ9cKuVqz4kf3aXmE",
-          short_id: "a1b2c3d4"
-        }))
-    }))
-});
+const connectionInfoFor = (userName: string): UserConnectionInfo => {
+  const activeAccesses = new Set(
+    accessFor(userName)
+      .filter((access) => access.enabled)
+      .map((access) => `${access.node_name}\u0000${access.proxy_name}`)
+  );
+  return {
+    user: userName,
+    nodes: nodes
+      .filter((n) => n.status === "active")
+      .map((n) => ({
+        user: userName,
+        node: n.name,
+        proxies: proxies
+          .filter(
+            (p) =>
+              p.node_name === n.name &&
+              p.enabled &&
+              activeAccesses.has(`${p.node_name}\u0000${p.name}`)
+          )
+          .map((p) => ({
+            name: p.name,
+            type: "vless",
+            server: n.public_host,
+            server_port: p.listen_port,
+            uuid: `00000000-0000-4000-8000-${p.id.replace(/[^0-9a-f]/gi, "").padEnd(12, "0").slice(0, 12)}`,
+            flow: "xtls-rprx-vision",
+            server_name: "www.cloudflare.com",
+            public_key: "0Rsht7y9rH2nMpdJ8m1l8oUuTPwQ9cKuVqz4kf3aXmE",
+            short_id: "a1b2c3d4"
+          }))
+      }))
+      .filter((node) => node.proxies.length > 0)
+  };
+};
+
+const subscriptions = new Map<string, AdminSubscription>([
+  [
+    "alice",
+    {
+      active: true,
+      url: "http://127.0.0.1:5173/sub/bfsub_mock_alice",
+      created_at: iso(14 * DAY),
+      last_used_at: iso(10 * MIN)
+    }
+  ]
+]);
+
+function subscriptionFor(userName: string): AdminSubscription {
+  return subscriptions.get(userName) ?? {
+    active: false,
+    url: "",
+    created_at: "",
+    last_used_at: ""
+  };
+}
+
+function issueSubscription(userName: string): AdminSubscription {
+  const subscription = {
+    active: true,
+    url: `http://127.0.0.1:5173/sub/bfsub_mock_${userName}_${Date.now()}`,
+    created_at: new Date().toISOString(),
+    last_used_at: ""
+  };
+  subscriptions.set(userName, subscription);
+  return subscription;
+}
+
+function proxyProviderFor(userName: string): string {
+  const profiles = connectionInfoFor(userName).nodes.flatMap((node) =>
+    node.proxies.map((proxy) => ({ node: node.node, ...proxy }))
+  );
+  if (profiles.length === 0) return "proxies: []\n";
+  return `proxies:\n${profiles
+    .map(
+      (proxy) => `  - name: ${JSON.stringify(`${proxy.node} / ${proxy.name}`)}
+    type: vless
+    server: ${JSON.stringify(proxy.server)}
+    port: ${proxy.server_port}
+    uuid: ${JSON.stringify(proxy.uuid)}
+    udp: true
+    flow: ${JSON.stringify(proxy.flow)}
+    network: tcp
+    tls: true
+    servername: ${JSON.stringify(proxy.server_name)}
+    client-fingerprint: chrome
+    packet-encoding: xudp
+    reality-opts:
+      public-key: ${JSON.stringify(proxy.public_key)}
+      short-id: ${JSON.stringify(proxy.short_id)}
+    encryption: ""`
+    )
+    .join("\n")}\n`;
+}
 
 const networkTargets = [
   "api.github.com",
@@ -723,7 +796,20 @@ const routes: Route[] = [
     }
   },
   { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => accessFor(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(decodeURIComponent(match?.[1] ?? "alice")) }
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(decodeURIComponent(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxy-provider$/, handler: ({ match }) => proxyProviderFor(decodeURIComponent(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => subscriptionFor(decodeURIComponent(match?.[1] ?? "alice")) },
+  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => issueSubscription(decodeURIComponent(match?.[1] ?? "alice")) },
+  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription\/rotate$/, handler: ({ match }) => issueSubscription(decodeURIComponent(match?.[1] ?? "alice")) },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/,
+    handler: ({ match }) => {
+      const name = decodeURIComponent(match?.[1] ?? "alice");
+      subscriptions.delete(name);
+      return subscriptionFor(name);
+    }
+  }
 ];
 
 function jsonResponse(res: import("node:http").ServerResponse, status: number, body: unknown) {

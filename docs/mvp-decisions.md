@@ -181,10 +181,14 @@ The eventual production log path should:
 
 ## User Node Information
 
-The MVP does not provide subscription URLs.
+`bf` generates connection information for each proxy user and node. The admin
+Web UI also exposes that information and can issue one revocable Mihomo
+`proxy-provider` URL per user. The provider response contains only a top-level
+`proxies:` list; it is not a complete Clash profile with groups or rules.
 
-Instead, `bf` generates connection information for each proxy user and node.
-This can be printed, exported, or copied into clients manually.
+Provider content is rendered from the current active accesses on every request,
+so adding, removing, or editing a proxy changes the content without changing
+the URL. Rotating or revoking the subscription token invalidates the URL.
 
 Recommended command shape:
 

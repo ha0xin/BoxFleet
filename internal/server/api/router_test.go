@@ -192,6 +192,169 @@ func TestNodeConfigEndpointRejectsBadToken(t *testing.T) {
 	}
 }
 
+func TestAdminSubscriptionLifecycleAndDynamicProvider(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	req := adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/subscription", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("initial get status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var subscription adminUserSubscription
+	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
+		t.Fatal(err)
+	}
+	if subscription.Active || subscription.URL != "" {
+		t.Fatalf("initial subscription = %#v", subscription)
+	}
+
+	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/subscription", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("issue status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
+		t.Fatal(err)
+	}
+	if !subscription.Active || !strings.HasPrefix(subscription.URL, "http://example.com/sub/bfsub_") {
+		t.Fatalf("issued subscription = %#v", subscription)
+	}
+	oldPath := strings.TrimPrefix(subscription.URL, "http://example.com")
+
+	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("provider status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); contentType != "application/yaml; charset=utf-8" {
+		t.Fatalf("content type = %q", contentType)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "proxies:") ||
+		!strings.Contains(body, "name: azus / vless-39090") ||
+		!strings.Contains(body, "type: vless") {
+		t.Fatalf("provider body = %s", body)
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("provider missing ETag")
+	}
+	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
+	req.Header.Set("If-None-Match", etag)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+		t.Fatalf("conditional status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/subscription", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
+		t.Fatal(err)
+	}
+	if subscription.LastUsedAt == "" {
+		t.Fatalf("last_used_at was not exposed: %#v", subscription)
+	}
+
+	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateProxy(ctx, db.UpdateProxyParams{
+		NodeName:          proxy.NodeName,
+		Name:              proxy.Name,
+		Listen:            proxy.Listen,
+		ListenPort:        39091,
+		Transport:         proxy.Transport,
+		Enabled:           proxy.Enabled,
+		TrafficMultiplier: proxy.TrafficMultiplier,
+		SettingsJSON:      proxy.SettingsJSON,
+		InboundRulesJSON:  proxy.InboundRulesJSON,
+		OutboundRulesJSON: proxy.OutboundRulesJSON,
+		RouteRulesJSON:    proxy.RouteRulesJSON,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "port: 39091") {
+		t.Fatalf("modified provider status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("ETag") == etag {
+		t.Fatal("provider ETag did not change after proxy edit")
+	}
+
+	if _, err := store.SetProxyAccessEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "proxies: []\n" {
+		t.Fatalf("updated provider status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+
+	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/subscription/rotate", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rotate status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
+		t.Fatal(err)
+	}
+	newPath := strings.TrimPrefix(subscription.URL, "http://example.com")
+	if newPath == oldPath {
+		t.Fatal("rotate kept the old URL")
+	}
+	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("old token status after rotate = %d", rec.Code)
+	}
+
+	req = adminJSONRequest(t, http.MethodDelete, "/api/admin/users/alice/subscription", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, newPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("revoked token status = %d", rec.Code)
+	}
+}
+
+func TestAdminProxyProviderRequiresAuth(t *testing.T) {
+	store := openAPITestDB(t)
+	seedAPITestNode(t, context.Background(), store)
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/users/alice/proxy-provider", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d", rec.Code)
+	}
+
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/proxy-provider", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "proxies:") {
+		t.Fatalf("authenticated status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminNetworkEventsPaginationAndFilters(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)

@@ -21,8 +21,8 @@ proxy node
   - public VLESS Reality proxy port, default 39090/tcp
 ```
 
-Quota enforcement, rate limits, abuse detection, and subscription URLs are not
-implemented yet.
+Quota enforcement, rate limits, and abuse detection are not implemented yet.
+Per-user Mihomo proxy-provider URLs are available from the admin Users page.
 
 ## Release Artifacts
 

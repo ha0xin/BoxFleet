@@ -18,6 +18,7 @@ The intended architecture is:
 - Keep node-side memory usage low enough for small VPS instances.
 - Support managed proxy users, quota accounting, and expiration.
 - Generate per-user per-node `sing-box` connection information.
+- Serve per-user Mihomo `proxy-provider` YAML through revocable subscription links.
 - Avoid running Docker, databases, or web panels on edge nodes.
 
 ## Non-goals

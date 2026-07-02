@@ -52,7 +52,14 @@ function App() {
       }
       throw new Error(`${response.status} ${body}`);
     }
-    return (await response.json()) as T;
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    const contentType = response.headers.get("Content-Type") ?? "";
+    if (contentType.includes("application/json")) {
+      return (await response.json()) as T;
+    }
+    return (await response.text()) as T;
   }
 
   async function refresh() {

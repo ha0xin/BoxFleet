@@ -130,6 +130,13 @@ export type UserConnectionInfo = {
   }>;
 };
 
+export type AdminSubscription = {
+  active: boolean;
+  url: string;
+  created_at: string;
+  last_used_at: string;
+};
+
 export type TrafficRow = {
   user_name: string;
   direction: string;

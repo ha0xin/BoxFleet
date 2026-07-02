@@ -6,6 +6,7 @@ import {
   CheckCircleIcon,
   DotsThreeIcon,
   FunnelIcon,
+  IdentificationCardIcon,
   KeyIcon,
   PencilSimpleIcon,
   PlusIcon,
@@ -22,7 +23,7 @@ import type { AdminUser, TrafficRow } from "../types";
 import { formatBytes } from "../utils";
 import { PageHeader, PageTopBar } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { ManageAccessDialog, UserFormDialog } from "./user-dialogs";
+import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -470,6 +471,12 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                                     Manage access
                                   </DropdownMenu.Item>
                                   <DropdownMenu.Item
+                                    icon={IdentificationCardIcon}
+                                    onClick={() => setDialog({ mode: "connection", user: row.user })}
+                                  >
+                                    Connection info
+                                  </DropdownMenu.Item>
+                                  <DropdownMenu.Item
                                     icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
                                     onClick={() => toggleStatus.mutate(row.user)}
                                   >
@@ -510,6 +517,9 @@ export function UsersPage({ request }: { request: AdminRequest }) {
       ) : null}
       {dialog?.mode === "access" ? (
         <ManageAccessDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
+      ) : null}
+      {dialog?.mode === "connection" ? (
+        <ConnectionInfoDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
       ) : null}
     </div>
   );
