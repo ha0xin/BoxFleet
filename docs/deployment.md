@@ -3,6 +3,10 @@
 This document covers the artifact-based deployment path for the management
 server and native node agent.
 
+For the current `azus` management host, including its resource constraints,
+paths, backup policy, GitHub Actions commands, and smoke checks, see
+[`azus-runbook.md`](azus-runbook.md).
+
 ## Shape
 
 ```text
