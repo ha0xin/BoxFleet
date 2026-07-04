@@ -3,6 +3,7 @@ export type AdminNodeApplyStatus = "pending" | "applied" | "failed" | "rolled_ba
 
 export type AdminNodeHost = {
   host: string;
+  tag: string;
   selected: boolean;
 };
 
@@ -68,6 +69,7 @@ export type AdminProxy = {
   transport: string;
   enabled: boolean;
   traffic_multiplier: number;
+  short_id: string;
   settings_json: string;
   inbound_rules_json: string;
   outbound_rules_json: string;
@@ -118,6 +120,8 @@ export type UserConnectionInfo = {
     node: string;
     proxies: Array<{
       name: string;
+      proxy_name: string;
+      host_tag: string;
       type: string;
       server: string;
       server_port: number;

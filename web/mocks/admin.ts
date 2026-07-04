@@ -36,9 +36,9 @@ const nodes: AdminNode[] = [
     name: "tokyo",
     public_host: "tokyo.example.net",
     hosts: [
-      { host: "tokyo.example.net", selected: true },
-      { host: "203.0.113.10", selected: true },
-      { host: "2606:4700::6810:84e5", selected: false }
+      { host: "tokyo.example.net", tag: "", selected: true },
+      { host: "203.0.113.10", tag: "ipv4", selected: true },
+      { host: "2606:4700::6810:84e5", tag: "ipv6", selected: false }
     ],
     api_base_url: "https://203.0.113.10:18080",
     status: "active",
@@ -228,7 +228,8 @@ const makeProxy = (over: Partial<AdminProxy> & Pick<AdminProxy, "id" | "node_nam
   transport: "tcp",
   enabled: true,
   traffic_multiplier: 1,
-  settings_json: JSON.stringify({ flow: "xtls-rprx-vision" }),
+  short_id: "a1b2c3d4",
+  settings_json: JSON.stringify({ flow: "xtls-rprx-vision", short_id: "a1b2c3d4" }),
   inbound_rules_json: "[]",
   outbound_rules_json: "[]",
   route_rules_json: "[]",
@@ -293,17 +294,23 @@ const connectionInfoFor = (userName: string): UserConnectionInfo => {
               p.enabled &&
               activeAccesses.has(`${p.node_name}\u0000${p.name}`)
           )
-          .map((p) => ({
-            name: p.name,
-            type: "vless",
-            server: n.public_host,
-            server_port: p.listen_port,
-            uuid: `00000000-0000-4000-8000-${p.id.replace(/[^0-9a-f]/gi, "").padEnd(12, "0").slice(0, 12)}`,
-            flow: "xtls-rprx-vision",
-            server_name: "www.cloudflare.com",
-            public_key: "0Rsht7y9rH2nMpdJ8m1l8oUuTPwQ9cKuVqz4kf3aXmE",
-            short_id: "a1b2c3d4"
-          }))
+          .flatMap((p) =>
+            (n.hosts ?? [{ host: n.public_host, tag: "", selected: true }])
+              .filter((host) => host.selected)
+              .map((host) => ({
+                name: host.tag ? `${p.name}-${host.tag}` : p.name,
+                proxy_name: p.name,
+                host_tag: host.tag,
+                type: "vless",
+                server: host.host,
+                server_port: p.listen_port,
+                uuid: `00000000-0000-4000-8000-${p.id.replace(/[^0-9a-f]/gi, "").padEnd(12, "0").slice(0, 12)}`,
+                flow: "xtls-rprx-vision",
+                server_name: "www.cloudflare.com",
+                public_key: "0Rsht7y9rH2nMpdJ8m1l8oUuTPwQ9cKuVqz4kf3aXmE",
+                short_id: p.short_id
+              }))
+          )
       }))
       .filter((node) => node.proxies.length > 0)
   };
@@ -348,7 +355,7 @@ function proxyProviderFor(userName: string): string {
   if (profiles.length === 0) return "proxies: []\n";
   return `proxies:\n${profiles
     .map(
-      (proxy) => `  - name: ${JSON.stringify(`${proxy.node} / ${proxy.name}`)}
+      (proxy) => `  - name: ${JSON.stringify(proxy.name)}
     type: vless
     server: ${JSON.stringify(proxy.server)}
     port: ${proxy.server_port}
@@ -566,7 +573,11 @@ const routes: Route[] = [
         name: body?.name ?? "new-proxy",
         listen_port: Number(body?.listen_port) || 443,
         enabled: body?.enabled ?? true,
-        traffic_multiplier: Number(body?.traffic_multiplier) || 1
+        traffic_multiplier: Number(body?.traffic_multiplier) || 1,
+        settings_json:
+          typeof body?.settings_json === "string"
+            ? body.settings_json
+            : JSON.stringify({ flow: "xtls-rprx-vision", short_id: "a1b2c3d4" })
       });
       proxies.push(proxy);
       markNodeChanged(node);
@@ -584,6 +595,28 @@ const routes: Route[] = [
         if (typeof body.enabled === "boolean") proxy.enabled = body.enabled;
         if (typeof body.listen_port === "number") proxy.listen_port = body.listen_port;
         if (typeof body.traffic_multiplier === "number") proxy.traffic_multiplier = body.traffic_multiplier;
+        if (typeof body.settings_json === "string") proxy.settings_json = body.settings_json;
+        if (typeof body.short_id === "string") {
+          proxy.short_id = body.short_id;
+          try {
+            const settings = JSON.parse(proxy.settings_json) as Record<string, unknown>;
+            settings.short_id = body.short_id;
+            proxy.settings_json = JSON.stringify(settings);
+          } catch {
+            proxy.settings_json = JSON.stringify({ short_id: body.short_id });
+          }
+        }
+        if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== proxy.name) {
+          const oldName = proxy.name;
+          proxy.name = body.name.trim();
+          for (const accesses of userAccess.values()) {
+            for (const access of accesses) {
+              if (access.node_name === node && access.proxy_name === oldName) {
+                access.proxy_name = proxy.name;
+              }
+            }
+          }
+        }
         proxy.updated_at = new Date().toISOString();
       }
       markNodeChanged(node);
@@ -686,6 +719,7 @@ const routes: Route[] = [
     handler: ({ match, body }) => {
       const node = nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? ""));
       if (node && body) {
+        const oldName = node.name;
         if (Array.isArray(body.hosts)) {
           const hosts = (body.hosts as AdminNode["hosts"]) ?? [];
           if (hosts.length > 0) {
@@ -694,10 +728,21 @@ const routes: Route[] = [
           }
         } else if (typeof body.public_host === "string") {
           node.public_host = body.public_host;
-          node.hosts = [{ host: body.public_host, selected: true }];
+          node.hosts = [{ host: body.public_host, tag: "", selected: true }];
         }
         if (typeof body.api_base_url === "string") node.api_base_url = body.api_base_url;
         if (body.status === "active" || body.status === "disabled") node.status = body.status;
+        if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== oldName) {
+          node.name = body.name.trim();
+          for (const proxy of proxies) {
+            if (proxy.node_name === oldName) proxy.node_name = node.name;
+          }
+          for (const accesses of userAccess.values()) {
+            for (const access of accesses) {
+              if (access.node_name === oldName) access.node_name = node.name;
+            }
+          }
+        }
       }
       if (node) markNodeChanged(node.name);
       return node ?? { ok: true };

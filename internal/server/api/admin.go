@@ -76,6 +76,7 @@ type adminNode struct {
 
 type adminNodeHost struct {
 	Host     string `json:"host"`
+	Tag      string `json:"tag,omitempty"`
 	Selected bool   `json:"selected"`
 }
 
@@ -89,6 +90,7 @@ type adminProxy struct {
 	Transport         string  `json:"transport"`
 	Enabled           bool    `json:"enabled"`
 	TrafficMultiplier float64 `json:"traffic_multiplier"`
+	ShortID           string  `json:"short_id"`
 	SettingsJSON      string  `json:"settings_json"`
 	InboundRulesJSON  string  `json:"inbound_rules_json"`
 	OutboundRulesJSON string  `json:"outbound_rules_json"`
@@ -190,6 +192,7 @@ type adminNodePatchPayload struct {
 	// status-only toggle keeps the API URL, and the edit dialog can clear
 	// api_base_url with "". public_host is required (UpdateNode rejects "")
 	// and the edit form enforces a non-empty value before sending it.
+	Name       *string `json:"name"`
 	PublicHost *string `json:"public_host"`
 	// Hosts, when present, replaces the full host list (the edit dialog sends it
 	// and public_host is then derived from the first entry). Single-host clients
@@ -215,6 +218,7 @@ type adminNodeBootstrapResponse struct {
 type adminProxyPayload struct {
 	// For PATCH, omitted and null fields both mean "leave the existing value".
 	Name              string   `json:"name"`
+	ShortID           *string  `json:"short_id"`
 	Protocol          string   `json:"protocol"`
 	Listen            *string  `json:"listen"`
 	ListenPort        *int     `json:"listen_port"`
@@ -581,10 +585,13 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 			APIBaseURL: existing.APIBaseURL,
 			Status:     existing.Status,
 		}
+		if payload.Name != nil {
+			params.Name = *payload.Name
+		}
 		if payload.Hosts != nil {
 			hosts := make([]db.NodeHost, 0, len(*payload.Hosts))
 			for _, h := range *payload.Hosts {
-				hosts = append(hosts, db.NodeHost{Host: h.Host, Selected: h.Selected})
+				hosts = append(hosts, db.NodeHost{Host: h.Host, Tag: h.Tag, Selected: h.Selected})
 			}
 			params.Hosts = hosts
 		} else if payload.PublicHost != nil {
@@ -598,7 +605,7 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 		if payload.Status != nil {
 			params.Status = *payload.Status
 		}
-		node, err := store.UpdateNode(r.Context(), params)
+		node, err := store.UpdateNodeByName(r.Context(), chi.URLParam(r, "node"), params)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -771,8 +778,11 @@ func adminUpdateProxyHandler(store *db.DB) http.HandlerFunc {
 			multiplier = *payload.TrafficMultiplier
 		}
 		settingsJSON := existing.SettingsJSON
-		if payload.SettingsJSON != nil {
+		if payload.SettingsJSON != nil || payload.ShortID != nil {
 			payload.Protocol = existing.Protocol
+			if payload.SettingsJSON == nil {
+				payload.SettingsJSON = &existing.SettingsJSON
+			}
 			var err error
 			settingsJSON, err = proxySettingsJSON(payload)
 			if err != nil {
@@ -780,9 +790,13 @@ func adminUpdateProxyHandler(store *db.DB) http.HandlerFunc {
 				return
 			}
 		}
-		proxy, err := store.UpdateProxy(r.Context(), db.UpdateProxyParams{
+		name := existing.Name
+		if strings.TrimSpace(payload.Name) != "" {
+			name = payload.Name
+		}
+		proxy, err := store.UpdateProxyByName(r.Context(), chi.URLParam(r, "node"), chi.URLParam(r, "proxy"), db.UpdateProxyParams{
 			NodeName:          existing.NodeName,
-			Name:              existing.Name,
+			Name:              name,
 			Listen:            stringValue(payload.Listen, existing.Listen),
 			ListenPort:        intValue(payload.ListenPort, existing.ListenPort),
 			Transport:         stringValue(payload.Transport, existing.Transport),
@@ -1312,7 +1326,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 func adminNodeFromNode(node db.Node) adminNode {
 	hosts := make([]adminNodeHost, 0, len(node.Hosts))
 	for _, h := range node.Hosts {
-		hosts = append(hosts, adminNodeHost{Host: h.Host, Selected: h.Selected})
+		hosts = append(hosts, adminNodeHost{Host: h.Host, Tag: h.Tag, Selected: h.Selected})
 	}
 	return adminNode{
 		ID:             node.ID,
@@ -1474,6 +1488,7 @@ func adminProxyFromDB(proxy db.Proxy) adminProxy {
 		Transport:         proxy.Transport,
 		Enabled:           proxy.Enabled,
 		TrafficMultiplier: proxy.TrafficMultiplier,
+		ShortID:           proxyShortID(proxy.SettingsJSON),
 		SettingsJSON:      proxy.SettingsJSON,
 		InboundRulesJSON:  proxy.InboundRulesJSON,
 		OutboundRulesJSON: proxy.OutboundRulesJSON,
@@ -1481,6 +1496,16 @@ func adminProxyFromDB(proxy db.Proxy) adminProxy {
 		CreatedAt:         proxy.CreatedAt,
 		UpdatedAt:         proxy.UpdatedAt,
 	}
+}
+
+func proxyShortID(settingsJSON string) string {
+	var settings struct {
+		ShortID string `json:"short_id"`
+	}
+	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+		return ""
+	}
+	return settings.ShortID
 }
 
 func adminSystemLogs(logs []db.SystemLog) []adminSystemLog {
@@ -1555,9 +1580,18 @@ func proxySettingsJSON(payload adminProxyPayload) (string, error) {
 		settings["reality_private_key"] = keyPair.PrivateKey
 		settings["reality_public_key"] = keyPair.PublicKey
 	}
-	if _, ok := settings["short_id"]; !ok {
-		settings["short_id"] = ""
+	shortID := ""
+	if existing, ok := settings["short_id"].(string); ok {
+		shortID = existing
 	}
+	if payload.ShortID != nil {
+		shortID = *payload.ShortID
+	}
+	normalizedShortID, err := db.NormalizeRealityShortID(shortID)
+	if err != nil {
+		return "", err
+	}
+	settings["short_id"] = normalizedShortID
 	settings["server_name"] = serverName
 	settings["handshake_server"] = handshakeServer
 	raw, err := json.Marshal(settings)

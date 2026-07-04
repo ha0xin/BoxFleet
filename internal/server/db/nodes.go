@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/haoxin/boxfleet/internal/id"
 	store "github.com/haoxin/boxfleet/internal/server/store/sqlc"
@@ -17,6 +19,7 @@ import (
 // and is mirrored into the node's public_host column.
 type NodeHost struct {
 	Host     string `json:"host"`
+	Tag      string `json:"tag,omitempty"`
 	Selected bool   `json:"selected"`
 }
 
@@ -55,7 +58,11 @@ func normalizeNodeHosts(hosts []NodeHost) ([]NodeHost, error) {
 			continue
 		}
 		seen[host] = true
-		out = append(out, NodeHost{Host: host, Selected: h.Selected})
+		out = append(out, NodeHost{
+			Host:     host,
+			Tag:      strings.TrimSpace(h.Tag),
+			Selected: h.Selected,
+		})
 	}
 	if len(out) == 0 {
 		return nil, errors.New("node public host is required")
@@ -71,6 +78,33 @@ func normalizeNodeHosts(hosts []NodeHost) ([]NodeHost, error) {
 		out[0].Selected = true
 	}
 	return out, nil
+}
+
+func validateNodeHostTags(hosts []NodeHost) error {
+	seen := make(map[string]bool, len(hosts))
+	for i, host := range hosts {
+		tag := strings.TrimSpace(host.Tag)
+		if i > 0 && tag == "" {
+			return fmt.Errorf("tag is required for additional host %q", host.Host)
+		}
+		if tag == "" {
+			continue
+		}
+		if utf8.RuneCountInString(tag) > 32 {
+			return fmt.Errorf("host tag %q must be at most 32 characters", tag)
+		}
+		for _, r := range tag {
+			if unicode.IsControl(r) {
+				return fmt.Errorf("host tag %q must not contain control characters", tag)
+			}
+		}
+		key := strings.ToLower(tag)
+		if seen[key] {
+			return fmt.Errorf("host tag %q is duplicated", tag)
+		}
+		seen[key] = true
+	}
+	return nil
 }
 
 func encodeNodeHosts(hosts []NodeHost) (string, error) {
@@ -120,8 +154,16 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 	if name == "" {
 		return Node{}, errors.New("node name is required")
 	}
+	if err := validateNameForAuth(name, "node"); err != nil {
+		return Node{}, err
+	}
 	if publicHost == "" {
 		return Node{}, errors.New("node public host is required")
+	}
+	if _, err := db.q.GetNodeIDByNameOrAlias(ctx, name); err == nil {
+		return Node{}, fmt.Errorf("node name %q is already in use", name)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Node{}, err
 	}
 	nodeID, err := id.New("node")
 	if err != nil {
@@ -147,10 +189,32 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 }
 
 func (db *DB) UpdateNode(ctx context.Context, params UpdateNodeParams) (Node, error) {
+	currentName := normalizeName(params.Name)
+	if currentName == "" {
+		return Node{}, errors.New("node name is required")
+	}
+	existing, err := db.GetNode(ctx, currentName)
+	if err != nil {
+		return Node{}, err
+	}
+	params.Name = existing.Name
+	return db.UpdateNodeByName(ctx, currentName, params)
+}
+
+// UpdateNodeByName atomically updates a node selected by currentName. Params.Name
+// is the desired canonical name and may rename the node in the same transaction.
+func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params UpdateNodeParams) (Node, error) {
+	currentName = normalizeName(currentName)
 	name := normalizeName(params.Name)
 	status := strings.TrimSpace(params.Status)
+	if currentName == "" {
+		return Node{}, errors.New("current node name is required")
+	}
 	if name == "" {
 		return Node{}, errors.New("node name is required")
+	}
+	if err := validateNameForAuth(name, "node"); err != nil {
+		return Node{}, err
 	}
 	if !validNodeStatus(status) {
 		return Node{}, fmt.Errorf("unsupported node status %q", status)
@@ -168,24 +232,116 @@ func (db *DB) UpdateNode(ctx context.Context, params UpdateNodeParams) (Node, er
 	if err != nil {
 		return Node{}, err
 	}
+	if err := validateNodeHostTags(normalized); err != nil {
+		return Node{}, err
+	}
 	hostsJSON, err := encodeNodeHosts(normalized)
 	if err != nil {
 		return Node{}, err
 	}
-	affected, err := db.q.UpdateNode(ctx, store.UpdateNodeParams{
-		PublicHost: normalized[0].Host,
-		HostsJson:  hostsJSON,
-		ApiBaseUrl: strings.TrimSpace(params.APIBaseURL),
-		Status:     status,
-		Name:       name,
+	err = db.withTx(ctx, func(qtx *store.Queries) error {
+		existing, err := qtx.GetNodeByName(ctx, currentName)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("node %q not found", currentName)
+			}
+			return err
+		}
+		if err := renameNodeTx(ctx, qtx, existing.ID, existing.Name, name); err != nil {
+			return err
+		}
+		affected, err := qtx.UpdateNode(ctx, store.UpdateNodeParams{
+			PublicHost: normalized[0].Host,
+			HostsJson:  hostsJSON,
+			ApiBaseUrl: strings.TrimSpace(params.APIBaseURL),
+			Status:     status,
+			Name:       name,
+		})
+		if err != nil {
+			return err
+		}
+		return requireAffected(affected, "node", currentName)
 	})
 	if err != nil {
 		return Node{}, err
 	}
-	if err := requireAffected(affected, "node", name); err != nil {
+	return db.GetNode(ctx, name)
+}
+
+func renameNodeTx(ctx context.Context, qtx *store.Queries, nodeID, currentName, newName string) error {
+	if currentName == newName {
+		return nil
+	}
+	ownerID, err := qtx.GetNodeIDByNameOrAlias(ctx, newName)
+	switch {
+	case err == nil && ownerID != nodeID:
+		return fmt.Errorf("node name %q is already in use", newName)
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	case err == nil:
+		if err := qtx.DeleteNodeNameAlias(ctx, store.DeleteNodeNameAliasParams{
+			Alias:  newName,
+			NodeID: nodeID,
+		}); err != nil {
+			return err
+		}
+	}
+	if err := qtx.CreateNodeNameAlias(ctx, store.CreateNodeNameAliasParams{
+		Alias:  currentName,
+		NodeID: nodeID,
+	}); err != nil {
+		return err
+	}
+	affected, err := qtx.RenameNodeByID(ctx, store.RenameNodeByIDParams{
+		Name: newName,
+		ID:   nodeID,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAffected(affected, "node", currentName)
+}
+
+// RenameNode changes a node's canonical name while preserving its prior name as
+// an alias. Existing tokens and all ID-based relationships remain unchanged.
+func (db *DB) RenameNode(ctx context.Context, oldName, newName string) (Node, error) {
+	oldName = normalizeName(oldName)
+	newName = normalizeName(newName)
+	if oldName == "" {
+		return Node{}, errors.New("node name is required")
+	}
+	if newName == "" {
+		return Node{}, errors.New("new node name is required")
+	}
+	if err := validateNameForAuth(newName, "node"); err != nil {
 		return Node{}, err
 	}
-	return db.GetNode(ctx, name)
+	var nodeID string
+	err := db.withTx(ctx, func(qtx *store.Queries) error {
+		existing, err := qtx.GetNodeByName(ctx, oldName)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("node %q not found", oldName)
+			}
+			return err
+		}
+		nodeID = existing.ID
+		if existing.Name == newName {
+			return nil
+		}
+		return renameNodeTx(ctx, qtx, existing.ID, existing.Name, newName)
+	})
+	if err != nil {
+		return Node{}, err
+	}
+	node, err := db.GetNode(ctx, newName)
+	if err != nil {
+		return Node{}, err
+	}
+	if node.ID != nodeID {
+		return Node{}, fmt.Errorf("renamed node %q resolved to an unexpected record", newName)
+	}
+	return node, nil
 }
 
 func (db *DB) ListNodes(ctx context.Context) ([]Node, error) {
@@ -323,9 +479,13 @@ func (db *DB) SetNodeStatus(ctx context.Context, name, status string) error {
 	if !validNodeStatus(status) {
 		return fmt.Errorf("unsupported node status %q", status)
 	}
+	node, err := db.GetNode(ctx, name)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetNodeStatus(ctx, store.SetNodeStatusParams{
 		Status: status,
-		Name:   normalizeName(name),
+		Name:   node.Name,
 	})
 	if err != nil {
 		return err

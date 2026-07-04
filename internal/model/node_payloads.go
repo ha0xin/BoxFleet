@@ -1,5 +1,7 @@
 package model
 
+const CanonicalNodeNameHeader = "X-BoxFleet-Node-Name"
+
 type ApplyResult struct {
 	NodeName        string `json:"node_name"`
 	ConfigVersionID string `json:"config_version_id"`

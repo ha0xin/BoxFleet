@@ -138,10 +138,14 @@ func (db *DB) SetProxyAccessEnabled(ctx context.Context, userName, nodeName, pro
 }
 
 func (db *DB) GetProxyAccess(ctx context.Context, userName, nodeName, proxyName string) (ProxyAccess, error) {
+	proxy, err := db.GetProxy(ctx, nodeName, proxyName)
+	if err != nil {
+		return ProxyAccess{}, err
+	}
 	row, err := db.q.GetProxyAccess(ctx, store.GetProxyAccessParams{
 		UserName:  normalizeName(userName),
-		NodeName:  normalizeName(nodeName),
-		ProxyName: normalizeName(proxyName),
+		NodeName:  proxy.NodeName,
+		ProxyName: proxy.Name,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -153,7 +157,11 @@ func (db *DB) GetProxyAccess(ctx context.Context, userName, nodeName, proxyName 
 }
 
 func (db *DB) ListProxyAccessesByNode(ctx context.Context, nodeName string) ([]ProxyAccess, error) {
-	rows, err := db.q.ListProxyAccessesByNodeName(ctx, normalizeName(nodeName))
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.q.ListProxyAccessesByNodeName(ctx, node.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -165,9 +173,13 @@ func (db *DB) ListProxyAccessesByNode(ctx context.Context, nodeName string) ([]P
 }
 
 func (db *DB) ListProxyAccessesByUserNode(ctx context.Context, userName, nodeName string) ([]ProxyAccess, error) {
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := db.q.ListProxyAccessesByUserNode(ctx, store.ListProxyAccessesByUserNodeParams{
 		UserName: normalizeName(userName),
-		NodeName: normalizeName(nodeName),
+		NodeName: node.Name,
 	})
 	if err != nil {
 		return nil, err

@@ -45,6 +45,7 @@ const getActiveNodeTokenByDigest = `-- name: GetActiveNodeTokenByDigest :one
 SELECT
   t.id,
   t.node_id,
+  n.name AS node_name,
   t.token_hash,
   t.token_digest,
   t.created_at,
@@ -52,7 +53,14 @@ SELECT
   t.revoked_at
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
-WHERE n.name = ?1
+WHERE (
+    n.name = ?1
+    OR n.id = (
+      SELECT node_id
+      FROM node_name_aliases
+      WHERE alias = ?1
+    )
+  )
   AND t.revoked_at IS NULL
   AND t.token_digest = ?2
 `
@@ -62,12 +70,24 @@ type GetActiveNodeTokenByDigestParams struct {
 	TokenDigest sql.NullString `json:"token_digest"`
 }
 
-func (q *Queries) GetActiveNodeTokenByDigest(ctx context.Context, arg GetActiveNodeTokenByDigestParams) (NodeToken, error) {
+type GetActiveNodeTokenByDigestRow struct {
+	ID          string         `json:"id"`
+	NodeID      string         `json:"node_id"`
+	NodeName    string         `json:"node_name"`
+	TokenHash   string         `json:"token_hash"`
+	TokenDigest sql.NullString `json:"token_digest"`
+	CreatedAt   string         `json:"created_at"`
+	LastUsedAt  sql.NullString `json:"last_used_at"`
+	RevokedAt   sql.NullString `json:"revoked_at"`
+}
+
+func (q *Queries) GetActiveNodeTokenByDigest(ctx context.Context, arg GetActiveNodeTokenByDigestParams) (GetActiveNodeTokenByDigestRow, error) {
 	row := q.db.QueryRowContext(ctx, getActiveNodeTokenByDigest, arg.NodeName, arg.TokenDigest)
-	var i NodeToken
+	var i GetActiveNodeTokenByDigestRow
 	err := row.Scan(
 		&i.ID,
 		&i.NodeID,
+		&i.NodeName,
 		&i.TokenHash,
 		&i.TokenDigest,
 		&i.CreatedAt,
@@ -81,6 +101,7 @@ const listActiveNodeTokensByNodeName = `-- name: ListActiveNodeTokensByNodeName 
 SELECT
   t.id,
   t.node_id,
+  n.name AS node_name,
   t.token_hash,
   t.token_digest,
   t.created_at,
@@ -88,23 +109,42 @@ SELECT
   t.revoked_at
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
-WHERE n.name = ?1
+WHERE (
+    n.name = ?1
+    OR n.id = (
+      SELECT node_id
+      FROM node_name_aliases
+      WHERE alias = ?1
+    )
+  )
   AND t.revoked_at IS NULL
 ORDER BY t.created_at DESC
 `
 
-func (q *Queries) ListActiveNodeTokensByNodeName(ctx context.Context, nodeName string) ([]NodeToken, error) {
+type ListActiveNodeTokensByNodeNameRow struct {
+	ID          string         `json:"id"`
+	NodeID      string         `json:"node_id"`
+	NodeName    string         `json:"node_name"`
+	TokenHash   string         `json:"token_hash"`
+	TokenDigest sql.NullString `json:"token_digest"`
+	CreatedAt   string         `json:"created_at"`
+	LastUsedAt  sql.NullString `json:"last_used_at"`
+	RevokedAt   sql.NullString `json:"revoked_at"`
+}
+
+func (q *Queries) ListActiveNodeTokensByNodeName(ctx context.Context, nodeName string) ([]ListActiveNodeTokensByNodeNameRow, error) {
 	rows, err := q.db.QueryContext(ctx, listActiveNodeTokensByNodeName, nodeName)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []NodeToken
+	var items []ListActiveNodeTokensByNodeNameRow
 	for rows.Next() {
-		var i NodeToken
+		var i ListActiveNodeTokensByNodeNameRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeID,
+			&i.NodeName,
 			&i.TokenHash,
 			&i.TokenDigest,
 			&i.CreatedAt,

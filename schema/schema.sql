@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS nodes (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS node_name_aliases (
+  alias TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_node_name_aliases_node_id
+  ON node_name_aliases(node_id);
+
 CREATE TABLE IF NOT EXISTS node_tokens (
   id TEXT PRIMARY KEY,
   node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -81,8 +90,18 @@ CREATE TABLE IF NOT EXISTS proxies (
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxies_node_id ON proxies(node_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name);
 CREATE INDEX IF NOT EXISTS idx_proxies_node_listener
   ON proxies(node_id, listen, listen_port, transport, protocol);
+
+CREATE TABLE IF NOT EXISTS proxy_name_aliases (
+  alias TEXT PRIMARY KEY,
+  proxy_id TEXT NOT NULL REFERENCES proxies(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_name_aliases_proxy_id
+  ON proxy_name_aliases(proxy_id);
 
 CREATE VIEW IF NOT EXISTS proxy_details AS
 SELECT

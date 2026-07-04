@@ -46,6 +46,36 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) error {
 	return err
 }
 
+const createNodeNameAlias = `-- name: CreateNodeNameAlias :exec
+INSERT INTO node_name_aliases (alias, node_id)
+VALUES (?1, ?2)
+`
+
+type CreateNodeNameAliasParams struct {
+	Alias  string `json:"alias"`
+	NodeID string `json:"node_id"`
+}
+
+func (q *Queries) CreateNodeNameAlias(ctx context.Context, arg CreateNodeNameAliasParams) error {
+	_, err := q.db.ExecContext(ctx, createNodeNameAlias, arg.Alias, arg.NodeID)
+	return err
+}
+
+const deleteNodeNameAlias = `-- name: DeleteNodeNameAlias :exec
+DELETE FROM node_name_aliases
+WHERE alias = ?1 AND node_id = ?2
+`
+
+type DeleteNodeNameAliasParams struct {
+	Alias  string `json:"alias"`
+	NodeID string `json:"node_id"`
+}
+
+func (q *Queries) DeleteNodeNameAlias(ctx context.Context, arg DeleteNodeNameAliasParams) error {
+	_, err := q.db.ExecContext(ctx, deleteNodeNameAlias, arg.Alias, arg.NodeID)
+	return err
+}
+
 const getNodeByName = `-- name: GetNodeByName :one
 SELECT
   id,
@@ -60,6 +90,11 @@ SELECT
   updated_at
 FROM nodes
 WHERE name = ?1
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = ?1
+   )
 `
 
 func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) {
@@ -78,6 +113,24 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getNodeIDByNameOrAlias = `-- name: GetNodeIDByNameOrAlias :one
+SELECT id
+FROM nodes
+WHERE name = ?1
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = ?1
+   )
+`
+
+func (q *Queries) GetNodeIDByNameOrAlias(ctx context.Context, name string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getNodeIDByNameOrAlias, name)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listNodes = `-- name: ListNodes :many
@@ -141,6 +194,27 @@ WHERE name = ?1
 
 func (q *Queries) PromotePendingNodeToActive(ctx context.Context, name string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, promotePendingNodeToActive, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const renameNodeByID = `-- name: RenameNodeByID :execrows
+UPDATE nodes
+SET
+  name = ?1,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+`
+
+type RenameNodeByIDParams struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+func (q *Queries) RenameNodeByID(ctx context.Context, arg RenameNodeByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameNodeByID, arg.Name, arg.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -208,16 +208,58 @@ export function ReenrollNodeDialog({
 // active on an unrelated host/URL edit. The PATCH omits status, so the server
 // preserves it.
 const editSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(64, "Use at most 64 characters"),
   // A node may publish several addresses (domain, IPv4, IPv6). The first is the
   // primary (mirrored to public_host server-side); each "selected" host yields a
   // client profile. Require at least one non-empty host and one selected.
   hosts: z
-    .array(z.object({ host: z.string(), selected: z.boolean() }))
+    .array(z.object({ host: z.string(), tag: z.string(), selected: z.boolean() }))
     .refine((hosts) => hosts.some((h) => h.host.trim() !== ""), {
       message: "At least one host is required"
     })
     .refine((hosts) => hosts.some((h) => h.host.trim() !== "" && h.selected), {
       message: "Select at least one host to generate a client profile"
+    })
+    .superRefine((hosts, context) => {
+      const tags = new Map<string, number>();
+      hosts.forEach((host, index) => {
+        if (host.host.trim() === "") return;
+        const tag = host.tag.trim();
+        if (index > 0 && tag === "") {
+          context.addIssue({
+            code: "custom",
+            message: "Tag is required for an additional host",
+            path: [index, "tag"]
+          });
+          return;
+        }
+        if ([...tag].length > 32) {
+          context.addIssue({
+            code: "custom",
+            message: "Use at most 32 characters",
+            path: [index, "tag"]
+          });
+        }
+        if (/\p{Cc}/u.test(tag)) {
+          context.addIssue({
+            code: "custom",
+            message: "Control characters are not allowed",
+            path: [index, "tag"]
+          });
+        }
+        if (tag === "") return;
+        const normalized = tag.toLowerCase();
+        const duplicate = tags.get(normalized);
+        if (duplicate !== undefined) {
+          context.addIssue({
+            code: "custom",
+            message: `Tag duplicates host ${duplicate + 1}`,
+            path: [index, "tag"]
+          });
+        } else {
+          tags.set(normalized, index);
+        }
+      });
     }),
   api_base_url: z.string()
 });
@@ -227,9 +269,9 @@ type EditValues = z.infer<typeof editSchema>;
 function editDefaults(node: AdminNode): EditValues {
   const hosts =
     node.hosts && node.hosts.length > 0
-      ? node.hosts.map((h) => ({ host: h.host, selected: h.selected }))
-      : [{ host: node.public_host, selected: true }];
-  return { hosts, api_base_url: node.api_base_url };
+      ? node.hosts.map((h) => ({ host: h.host, tag: h.tag ?? "", selected: h.selected }))
+      : [{ host: node.public_host, tag: "", selected: true }];
+  return { name: node.name, hosts, api_base_url: node.api_base_url };
 }
 
 export function EditNodeDialog({
@@ -255,11 +297,11 @@ export function EditNodeDialog({
     request,
     (req, values) => {
       const hosts = values.hosts
-        .map((h) => ({ host: h.host.trim(), selected: h.selected }))
+        .map((h) => ({ host: h.host.trim(), tag: h.tag.trim(), selected: h.selected }))
         .filter((h) => h.host !== "");
       return req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
         method: "PATCH",
-        body: JSON.stringify({ hosts, api_base_url: values.api_base_url })
+        body: JSON.stringify({ name: values.name.trim(), hosts, api_base_url: values.api_base_url.trim() })
       });
     },
     { onSuccess: onClose }
@@ -273,23 +315,34 @@ export function EditNodeDialog({
       <Dialog size="base" className="p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Edit {node.name}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Update the node's hosts and API URL. Use Disable or Decommission to change its status.
+          Update the node's name, hosts, and API URL. Use Disable or Decommission to change its status.
         </Dialog.Description>
 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
 
         <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
+          <Input
+            label="Node name"
+            error={form.formState.errors.name?.message}
+            {...form.register("name")}
+          />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium text-kumo-default">Hosts</span>
             <span className="text-xs text-kumo-subtle">
-              The first host is primary. Each host with “Profile” on generates a client connection profile.
+              The first host is primary. Additional hosts require a unique tag. Each host with “Profile” on
+              generates a client connection profile.
             </span>
             {fields.map((field, index) => (
-              <div key={field.id} className="flex items-center gap-2">
+              <div key={field.id} className="grid grid-cols-[minmax(0,2fr)_minmax(7rem,1fr)_auto_auto] items-start gap-2">
                 <Input
-                  className="flex-1"
                   placeholder="203.0.113.10 · example.com · 2606:4700::1"
+                  error={form.formState.errors.hosts?.[index]?.host?.message}
                   {...form.register(`hosts.${index}.host`)}
+                />
+                <Input
+                  placeholder={index === 0 ? "Tag (optional)" : "Tag"}
+                  error={form.formState.errors.hosts?.[index]?.tag?.message}
+                  {...form.register(`hosts.${index}.tag`)}
                 />
                 <Switch
                   controlFirst={false}
@@ -316,7 +369,7 @@ export function EditNodeDialog({
                 variant="secondary"
                 size="sm"
                 icon={PlusIcon}
-                onClick={() => append({ host: "", selected: false })}
+                onClick={() => append({ host: "", tag: "", selected: false })}
               >
                 Add host
               </Button>

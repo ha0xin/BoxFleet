@@ -236,7 +236,7 @@ func TestAdminSubscriptionLifecycleAndDynamicProvider(t *testing.T) {
 		t.Fatalf("content type = %q", contentType)
 	}
 	if body := rec.Body.String(); !strings.Contains(body, "proxies:") ||
-		!strings.Contains(body, "name: azus / vless-39090") ||
+		!strings.Contains(body, "name: vless-39090") ||
 		!strings.Contains(body, "type: vless") {
 		t.Fatalf("provider body = %s", body)
 	}
@@ -674,7 +674,7 @@ func TestAdminNodePatchMultiHost(t *testing.T) {
 	patchReq := adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/edge", map[string]any{
 		"hosts": []map[string]any{
 			{"host": "example.net", "selected": true},
-			{"host": "203.0.113.5", "selected": false},
+			{"host": "203.0.113.5", "tag": "backup", "selected": false},
 		},
 	})
 	patchRec := httptest.NewRecorder()
@@ -693,7 +693,7 @@ func TestAdminNodePatchMultiHost(t *testing.T) {
 	if len(node.Hosts) != 2 || node.Hosts[0].Host != "example.net" || !node.Hosts[0].Selected {
 		t.Fatalf("hosts = %#v", node.Hosts)
 	}
-	if node.Hosts[1].Host != "203.0.113.5" || node.Hosts[1].Selected {
+	if node.Hosts[1].Host != "203.0.113.5" || node.Hosts[1].Tag != "backup" || node.Hosts[1].Selected {
 		t.Fatalf("second host = %#v", node.Hosts[1])
 	}
 
@@ -875,6 +875,73 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 	}
 	if proxy.ListenPort != 39091 || proxy.Enabled || proxy.TrafficMultiplier != 1.5 {
 		t.Fatalf("proxy = %#v", proxy)
+	}
+}
+
+func TestAdminRenamesNodeAndProxyWithoutBreakingAgentIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	issued, err := store.IssueNodeToken(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessBefore, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	nodeReq := adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/azus", map[string]any{
+		"name": "edge-primary",
+	})
+	nodeRec := httptest.NewRecorder()
+	router.ServeHTTP(nodeRec, nodeReq)
+	if nodeRec.Code != http.StatusOK {
+		t.Fatalf("rename node status = %d, body = %s", nodeRec.Code, nodeRec.Body.String())
+	}
+	var renamedNode adminNode
+	if err := json.NewDecoder(nodeRec.Body).Decode(&renamedNode); err != nil {
+		t.Fatal(err)
+	}
+	if renamedNode.Name != "edge-primary" {
+		t.Fatalf("renamed node = %#v", renamedNode)
+	}
+
+	proxyReq := adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/azus/proxies/vless-39090", map[string]any{
+		"name":     "home",
+		"short_id": " A1B2 ",
+	})
+	proxyRec := httptest.NewRecorder()
+	router.ServeHTTP(proxyRec, proxyReq)
+	if proxyRec.Code != http.StatusOK {
+		t.Fatalf("rename proxy status = %d, body = %s", proxyRec.Code, proxyRec.Body.String())
+	}
+	var renamedProxy adminProxy
+	if err := json.NewDecoder(proxyRec.Body).Decode(&renamedProxy); err != nil {
+		t.Fatal(err)
+	}
+	if renamedProxy.NodeName != "edge-primary" || renamedProxy.Name != "home" || renamedProxy.ShortID != "a1b2" {
+		t.Fatalf("renamed proxy = %#v", renamedProxy)
+	}
+	accessAfter, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accessAfter.AuthName != accessBefore.AuthName || accessAfter.CredentialJSON != accessBefore.CredentialJSON {
+		t.Fatalf("access identity changed: before=%#v after=%#v", accessBefore, accessAfter)
+	}
+
+	configReq := httptest.NewRequest(http.MethodGet, "/api/node/config", nil)
+	configReq.Header.Set("X-BoxFleet-Node", "azus")
+	configReq.Header.Set("Authorization", "Bearer "+issued.Token)
+	configRec := httptest.NewRecorder()
+	router.ServeHTTP(configRec, configReq)
+	if configRec.Code != http.StatusOK {
+		t.Fatalf("old agent identity status = %d, body = %s", configRec.Code, configRec.Body.String())
+	}
+	if got := configRec.Header().Get(model.CanonicalNodeNameHeader); got != "edge-primary" {
+		t.Fatalf("canonical node header = %q", got)
 	}
 }
 

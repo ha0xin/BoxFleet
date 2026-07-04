@@ -914,6 +914,9 @@ func (a *Agent) FetchConfigVersioned(ctx context.Context) (ConfigResponse, error
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return ConfigResponse{}, fmt.Errorf("fetch config: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
+	if err := a.adoptCanonicalNodeName(resp.Header.Get(model.CanonicalNodeNameHeader)); err != nil {
+		return ConfigResponse{}, err
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return ConfigResponse{}, err
@@ -980,6 +983,23 @@ func (a *Agent) postJSON(ctx context.Context, path string, payload any) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("post %s: %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
 	}
+	if err := a.adoptCanonicalNodeName(resp.Header.Get(model.CanonicalNodeNameHeader)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Agent) adoptCanonicalNodeName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || name == a.Config.NodeName {
+		return nil
+	}
+	next := a.Config
+	next.NodeName = name
+	if err := WriteConfig(next.AgentConfigPath, next); err != nil {
+		return fmt.Errorf("persist canonical node name %q: %w", name, err)
+	}
+	a.Config = next
 	return nil
 }
 

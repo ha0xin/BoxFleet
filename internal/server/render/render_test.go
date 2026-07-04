@@ -2,6 +2,7 @@ package render
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,11 @@ func TestRenderNodeInfo(t *testing.T) {
 	if info.Proxies[0].Flow != db.VLESSRealityFlowVision {
 		t.Fatalf("flow = %q", info.Proxies[0].Flow)
 	}
+	if info.Proxies[0].Name != "vless-39090" ||
+		info.Proxies[0].ProxyName != "vless-39090" ||
+		info.Proxies[0].HostTag != "" {
+		t.Fatalf("unexpected profile identity: %#v", info.Proxies[0])
+	}
 }
 
 func TestRenderNodeInfoMultiHost(t *testing.T) {
@@ -106,8 +112,8 @@ func TestRenderNodeInfoMultiHost(t *testing.T) {
 		Status: "active",
 		Hosts: []db.NodeHost{
 			{Host: "azus.example.net", Selected: true},
-			{Host: "203.0.113.10", Selected: true},
-			{Host: "2606:4700::1", Selected: false},
+			{Host: "203.0.113.10", Tag: "ipv4", Selected: true},
+			{Host: "2606:4700::1", Tag: "ipv6", Selected: false},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -120,15 +126,17 @@ func TestRenderNodeInfoMultiHost(t *testing.T) {
 	if len(info.Proxies) != 2 {
 		t.Fatalf("want 2 per-host profiles, got %d: %#v", len(info.Proxies), info.Proxies)
 	}
+	names := map[string]bool{}
 	servers := map[string]bool{}
 	for _, p := range info.Proxies {
 		servers[p.Server] = true
-		if !strings.Contains(p.Name, "@") {
-			t.Fatalf("multi-host profile name should be disambiguated, got %q", p.Name)
-		}
+		names[p.Name] = true
 	}
 	if !servers["azus.example.net"] || !servers["203.0.113.10"] || servers["2606:4700::1"] {
 		t.Fatalf("unexpected servers: %#v", servers)
+	}
+	if !names["vless-39090"] || !names["vless-39090-ipv4"] {
+		t.Fatalf("unexpected names: %#v", names)
 	}
 }
 
@@ -155,7 +163,7 @@ func TestRenderMihomoProxyProvider(t *testing.T) {
 		t.Fatalf("proxies = %d, want 1:\n%s", len(provider.Proxies), raw)
 	}
 	proxy := provider.Proxies[0]
-	if proxy["name"] != "azus / vless-39090" ||
+	if proxy["name"] != "vless-39090" ||
 		proxy["type"] != "vless" ||
 		proxy["server"] != "203.0.113.10" ||
 		proxy["port"] != 39090 ||
@@ -185,7 +193,7 @@ func TestRenderMihomoProxyProviderMultiHostAndDisabled(t *testing.T) {
 		Status: "active",
 		Hosts: []db.NodeHost{
 			{Host: "azus.example.net", Selected: true},
-			{Host: "2606:4700::1", Selected: true},
+			{Host: "2606:4700::1", Tag: "v6", Selected: true},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -204,8 +212,8 @@ func TestRenderMihomoProxyProviderMultiHostAndDisabled(t *testing.T) {
 	if len(provider.Proxies) != 2 {
 		t.Fatalf("proxies = %d, want 2:\n%s", len(provider.Proxies), raw)
 	}
-	if provider.Proxies[0]["name"] != "azus / vless-39090 @ azus.example.net" ||
-		provider.Proxies[1]["name"] != "azus / vless-39090 @ 2606:4700::1" {
+	if provider.Proxies[0]["name"] != "vless-39090" ||
+		provider.Proxies[1]["name"] != "vless-39090-v6" {
 		t.Fatalf("unexpected names: %q, %q", provider.Proxies[0]["name"], provider.Proxies[1]["name"])
 	}
 
@@ -218,6 +226,119 @@ func TestRenderMihomoProxyProviderMultiHostAndDisabled(t *testing.T) {
 	}
 	if string(raw) != "proxies: []\n" {
 		t.Fatalf("disabled access provider = %q, want empty proxies", raw)
+	}
+}
+
+func TestRenderMihomoProxyProviderLegacyUntaggedAdditionalHost(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "boxfleet.db")
+	store, err := db.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedVLESSRealityFixture(t, ctx, store)
+
+	// Existing hosts_json rows created before host tags remain renderable.
+	rawDB, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawDB.Close()
+	if _, err := rawDB.ExecContext(ctx, `
+UPDATE nodes
+SET hosts_json = '[{"host":"azus.example.net","selected":true},{"host":"203.0.113.10","selected":true}]'
+WHERE name = 'azus'`); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ConnectionInfoForUser(ctx, store, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Nodes[0].Proxies[1].Name; got != "vless-39090-203.0.113.10" {
+		t.Fatalf("legacy profile name = %q", got)
+	}
+}
+
+func TestRenderMihomoProxyProviderRejectsDuplicateFinalNames(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	if _, err := store.UpdateNode(ctx, db.UpdateNodeParams{
+		Name:   "azus",
+		Status: "active",
+		Hosts: []db.NodeHost{
+			{Host: "azus.example.net", Selected: true},
+			{Host: "2606:4700::1", Tag: "v6", Selected: true},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{
+		NodeName:     "azus",
+		Name:         "vless-39090-v6",
+		Protocol:     db.ProtocolVLESSReality,
+		Listen:       "0.0.0.0",
+		ListenPort:   39091,
+		Transport:    db.TransportTCP,
+		Enabled:      true,
+		SettingsJSON: `{"server_name":"www.amazon.com","reality_private_key":"private-key","reality_public_key":"public-key","short_id":"","handshake_server":"www.amazon.com","handshake_port":443}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueAccessParams{
+		UserName:  "alice",
+		NodeName:  "azus",
+		ProxyName: "vless-39090-v6",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := RenderMihomoProxyProvider(ctx, store, "alice")
+	if err == nil || !strings.Contains(err.Error(), `Mihomo profile name "vless-39090-v6" conflicts`) {
+		t.Fatalf("expected final profile name conflict, got %v", err)
+	}
+}
+
+func TestRenderClientConfigSelectsTaggedProfile(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+	if _, err := store.UpdateNode(ctx, db.UpdateNodeParams{
+		Name:   "azus",
+		Status: "active",
+		Hosts: []db.NodeHost{
+			{Host: "azus.example.net", Selected: true},
+			{Host: "2606:4700::1", Tag: "v6", Selected: true},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := RenderClientConfig(ctx, store, ClientConfigParams{
+		UserName:  "alice",
+		NodeName:  "azus",
+		ProxyName: "vless-39090-v6",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	outbound := config["outbounds"].([]any)[0].(map[string]any)
+	if outbound["server"] != "2606:4700::1" {
+		t.Fatalf("selected server = %v", outbound["server"])
 	}
 }
 

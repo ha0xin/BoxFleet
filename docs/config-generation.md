@@ -120,6 +120,22 @@ information stay symmetric.
 Use an even-length value such as `01234567`; this matches the current
 `sing-box` hex decoder behavior used during `sing-box check`.
 
+The value can be changed independently of the Reality key pair. It is trimmed
+and normalized to lowercase before storage; changing it affects the next
+rendered node config and the dynamic Mihomo provider response.
+
+## Mihomo Profile Names
+
+The proxy's canonical name is the base profile name. For a node's primary host
+without a tag, the name is simply `<proxy>`. A tagged host uses
+`<proxy>-<host-tag>`; legacy supplemental hosts without tags fall back to
+`<proxy>-<raw-host>`.
+
+Additional hosts require a tag whenever a node is edited, including hosts that
+are not currently selected. Tags are unique within a node, case-insensitively.
+Legacy rows without tags remain readable. Rendering rejects duplicate final
+Mihomo names rather than emitting an ambiguous provider document.
+
 ### Shadowsocks 2022
 
 This is a planned renderer shape. The current tested render/apply path is VLESS
@@ -223,7 +239,7 @@ user>>>AUTH_NAME>>>traffic>>>downlink
 
 Before publishing a config version, the server should validate:
 
-- Proxy names are unique per node.
+- Proxy names are globally unique.
 - Built-in outbound tags are not overwritten.
 - Proxy listener conflicts are valid for the network layer.
 - Every route profile references an existing outbound tag.

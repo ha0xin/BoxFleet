@@ -103,7 +103,11 @@ func (db *DB) PublishConfig(ctx context.Context, nodeName string, raw []byte) (P
 }
 
 func (db *DB) GetTargetConfig(ctx context.Context, nodeName string) (ConfigVersion, error) {
-	version, err := db.q.GetTargetConfigByNodeName(ctx, normalizeName(nodeName))
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return ConfigVersion{}, err
+	}
+	version, err := db.q.GetTargetConfigByNodeName(ctx, node.Name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ConfigVersion{}, fmt.Errorf("node %q has no published target config", nodeName)
@@ -114,7 +118,11 @@ func (db *DB) GetTargetConfig(ctx context.Context, nodeName string) (ConfigVersi
 }
 
 func (db *DB) GetNodeConfigStatus(ctx context.Context, nodeName string) (NodeConfigStatus, error) {
-	row, err := db.q.GetNodeConfigStatusByNodeName(ctx, normalizeName(nodeName))
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return NodeConfigStatus{}, err
+	}
+	row, err := db.q.GetNodeConfigStatusByNodeName(ctx, node.Name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return NodeConfigStatus{}, fmt.Errorf("node %q not found", nodeName)
@@ -137,7 +145,7 @@ func (db *DB) GetNodeConfigStatus(ctx context.Context, nodeName string) (NodeCon
 	if row.LastApplyStatus.Valid {
 		status.LastApplyStatus = row.LastApplyStatus.String
 	}
-	heartbeat, err := db.q.LatestNodeHeartbeatByNodeName(ctx, normalizeName(nodeName))
+	heartbeat, err := db.q.LatestNodeHeartbeatByNodeName(ctx, node.Name)
 	if err == nil {
 		status.LatestHeartbeat = sql.NullString{String: heartbeat.ReportedAt, Valid: true}
 		status.AgentVersion = heartbeat.AgentVersion

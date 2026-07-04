@@ -382,6 +382,8 @@ function proxyDetails(node: string, proxy: ConnectionProxy): string {
   return JSON.stringify(
     {
       name: proxy.name,
+      proxy_name: proxy.proxy_name,
+      host_tag: proxy.host_tag,
       node,
       type: proxy.type,
       server: proxy.server,

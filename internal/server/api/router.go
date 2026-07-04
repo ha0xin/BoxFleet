@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/haoxin/boxfleet/internal/model"
 	"github.com/haoxin/boxfleet/internal/server/db"
 	"github.com/haoxin/boxfleet/internal/server/install"
 	"github.com/haoxin/boxfleet/internal/server/render"
@@ -286,7 +287,7 @@ func authenticateNode(w http.ResponseWriter, r *http.Request, store *db.DB) (str
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return "", false
 	}
-	ok, err := store.VerifyNodeToken(r.Context(), nodeName, rawToken)
+	canonicalName, ok, err := store.AuthenticateNodeToken(r.Context(), nodeName, rawToken)
 	if err != nil {
 		http.Error(w, "token verification failed", http.StatusInternalServerError)
 		return "", false
@@ -295,7 +296,8 @@ func authenticateNode(w http.ResponseWriter, r *http.Request, store *db.DB) (str
 		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
 		return "", false
 	}
-	return nodeName, true
+	w.Header().Set(model.CanonicalNodeNameHeader, canonicalName)
+	return canonicalName, true
 }
 
 func bearerToken(header string) string {

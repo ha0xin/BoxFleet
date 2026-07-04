@@ -70,7 +70,10 @@ func (db *DB) IssueNodeToken(ctx context.Context, nodeName string) (IssuedNodeTo
 	return IssuedNodeToken{NodeName: node.Name, Token: rawToken}, nil
 }
 
-func (db *DB) VerifyNodeToken(ctx context.Context, nodeName, rawToken string) (bool, error) {
+// AuthenticateNodeToken verifies a node token presented with either the
+// canonical node name or one of its aliases. On success it returns the current
+// canonical name.
+func (db *DB) AuthenticateNodeToken(ctx context.Context, nodeName, rawToken string) (string, bool, error) {
 	if tokenDigest, ok := token.Digest(rawToken); ok {
 		row, err := db.q.GetActiveNodeTokenByDigest(ctx, store.GetActiveNodeTokenByDigestParams{
 			NodeName:    normalizeName(nodeName),
@@ -78,22 +81,22 @@ func (db *DB) VerifyNodeToken(ctx context.Context, nodeName, rawToken string) (b
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return false, nil
+				return "", false, nil
 			}
-			return false, err
+			return "", false, err
 		}
 		if !token.Verify(row.TokenHash, rawToken) {
-			return false, nil
+			return "", false, nil
 		}
 		if err := db.q.MarkNodeTokenUsed(ctx, row.ID); err != nil {
-			return false, err
+			return "", false, err
 		}
-		return true, nil
+		return row.NodeName, true, nil
 	}
 
 	rows, err := db.q.ListActiveNodeTokensByNodeName(ctx, normalizeName(nodeName))
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	checkedLegacy := 0
 	for _, row := range rows {
@@ -106,12 +109,17 @@ func (db *DB) VerifyNodeToken(ctx context.Context, nodeName, rawToken string) (b
 		checkedLegacy++
 		if token.Verify(row.TokenHash, rawToken) {
 			if err := db.q.MarkNodeTokenUsed(ctx, row.ID); err != nil {
-				return false, err
+				return "", false, err
 			}
-			return true, nil
+			return row.NodeName, true, nil
 		}
 	}
-	return false, nil
+	return "", false, nil
+}
+
+func (db *DB) VerifyNodeToken(ctx context.Context, nodeName, rawToken string) (bool, error) {
+	_, ok, err := db.AuthenticateNodeToken(ctx, nodeName, rawToken)
+	return ok, err
 }
 
 func (db *DB) RevokeNodeTokens(ctx context.Context, nodeName string) error {

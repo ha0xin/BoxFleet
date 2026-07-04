@@ -2,7 +2,6 @@ package render
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,15 +34,18 @@ type ConnectionInfo struct {
 }
 
 type NodeInfoProxy struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Server     string `json:"server"`
-	ServerPort int    `json:"server_port"`
-	UUID       string `json:"uuid"`
-	Flow       string `json:"flow"`
-	ServerName string `json:"server_name"`
-	PublicKey  string `json:"public_key"`
-	ShortID    string `json:"short_id"`
+	Name          string `json:"name"`
+	ProxyName     string `json:"proxy_name"`
+	HostTag       string `json:"host_tag"`
+	Type          string `json:"type"`
+	Server        string `json:"server"`
+	ServerPort    int    `json:"server_port"`
+	UUID          string `json:"uuid"`
+	Flow          string `json:"flow"`
+	ServerName    string `json:"server_name"`
+	PublicKey     string `json:"public_key"`
+	ShortID       string `json:"short_id"`
+	isPrimaryHost bool
 }
 
 type mihomoProxyProvider struct {
@@ -291,10 +293,26 @@ func RenderClientConfig(ctx context.Context, store *db.DB, params ClientConfigPa
 		return nil, err
 	}
 	var selected *NodeInfoProxy
+	// Prefer an exact final profile name. This lets callers select tagged and
+	// legacy multi-host profiles while keeping the historical --proxy behavior
+	// for a canonical proxy name.
 	for i := range info.Proxies {
 		if info.Proxies[i].Name == params.ProxyName {
 			selected = &info.Proxies[i]
 			break
+		}
+	}
+	if selected == nil {
+		for i := range info.Proxies {
+			if info.Proxies[i].ProxyName != params.ProxyName {
+				continue
+			}
+			if selected == nil || info.Proxies[i].isPrimaryHost {
+				selected = &info.Proxies[i]
+			}
+			if info.Proxies[i].isPrimaryHost {
+				break
+			}
 		}
 	}
 	if selected == nil {
@@ -364,7 +382,6 @@ func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName 
 	// domain plus several IPv4/IPv6 addresses). Fall back to the view's single
 	// public_host if the node row can't be loaded or has no selected host.
 	hosts := selectedNodeHosts(ctx, store, nodeName, accesses[0].NodePublicHost)
-	multiHost := len(hosts) > 1
 	info := NodeInfo{User: accesses[0].ProxyUserName, Node: accesses[0].NodeName}
 	for _, access := range accesses {
 		if access.Protocol != db.ProtocolVLESSReality {
@@ -375,27 +392,28 @@ func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName 
 			return NodeInfo{}, err
 		}
 		for _, host := range hosts {
-			name := access.ProxyName
-			if multiHost {
-				// Disambiguate the per-host profiles so callers (and config
-				// rendering, which matches on Name) can pick a specific address.
-				name = access.ProxyName + " @ " + host
-			}
+			name := mihomoProfileName(access.ProxyName, host)
 			info.Proxies = append(info.Proxies, NodeInfoProxy{
-				Name:       name,
-				Type:       access.Protocol,
-				Server:     host,
-				ServerPort: access.ListenPort,
-				UUID:       userCredential.UUID,
-				Flow:       userCredential.Flow,
-				ServerName: settings.ServerName,
-				PublicKey:  settings.RealityPublicKey,
-				ShortID:    settings.ShortID,
+				Name:          name,
+				ProxyName:     access.ProxyName,
+				HostTag:       host.Tag,
+				Type:          access.Protocol,
+				Server:        host.Host,
+				ServerPort:    access.ListenPort,
+				UUID:          userCredential.UUID,
+				Flow:          userCredential.Flow,
+				ServerName:    settings.ServerName,
+				PublicKey:     settings.RealityPublicKey,
+				ShortID:       settings.ShortID,
+				isPrimaryHost: host.Primary,
 			})
 		}
 	}
 	if len(info.Proxies) == 0 {
 		return NodeInfo{}, fmt.Errorf("user %q has no supported proxy accesses on node %q", userName, nodeName)
+	}
+	if err := validateUniqueProfileNames(info.Proxies); err != nil {
+		return NodeInfo{}, err
 	}
 	return info, nil
 }
@@ -446,28 +464,74 @@ func ConnectionInfoForUser(ctx context.Context, store *db.DB, userName string) (
 		}
 		info.Nodes = append(info.Nodes, nodeInfo)
 	}
+	allProfiles := make([]NodeInfoProxy, 0)
+	for _, node := range info.Nodes {
+		allProfiles = append(allProfiles, node.Proxies...)
+	}
+	if err := validateUniqueProfileNames(allProfiles); err != nil {
+		return ConnectionInfo{}, err
+	}
 	return info, nil
+}
+
+type selectedNodeHost struct {
+	Host    string
+	Tag     string
+	Primary bool
 }
 
 // selectedNodeHosts returns the addresses that should each get a client profile:
 // the node's hosts marked selected, in order. It degrades gracefully to the
 // supplied fallback (the proxy view's public_host) if the node can't be loaded
 // or nothing is selected, so rendering never produces an empty server address.
-func selectedNodeHosts(ctx context.Context, store *db.DB, nodeName, fallback string) []string {
+func selectedNodeHosts(ctx context.Context, store *db.DB, nodeName, fallback string) []selectedNodeHost {
 	node, err := store.GetNode(ctx, nodeName)
 	if err != nil {
-		return []string{fallback}
+		return []selectedNodeHost{{Host: fallback, Primary: true}}
 	}
-	hosts := make([]string, 0, len(node.Hosts))
-	for _, h := range node.Hosts {
+	hosts := make([]selectedNodeHost, 0, len(node.Hosts))
+	for i, h := range node.Hosts {
 		if h.Selected {
-			hosts = append(hosts, h.Host)
+			hosts = append(hosts, selectedNodeHost{
+				Host:    h.Host,
+				Tag:     h.Tag,
+				Primary: i == 0,
+			})
 		}
 	}
 	if len(hosts) == 0 {
-		return []string{fallback}
+		return []selectedNodeHost{{Host: fallback, Primary: true}}
 	}
 	return hosts
+}
+
+func mihomoProfileName(proxyName string, host selectedNodeHost) string {
+	if host.Tag != "" {
+		return proxyName + "-" + host.Tag
+	}
+	if !host.Primary {
+		// Compatibility for hosts written before host tags were introduced.
+		return proxyName + "-" + host.Host
+	}
+	return proxyName
+}
+
+func validateUniqueProfileNames(proxies []NodeInfoProxy) error {
+	seen := make(map[string]NodeInfoProxy, len(proxies))
+	for _, proxy := range proxies {
+		if previous, ok := seen[proxy.Name]; ok {
+			return fmt.Errorf(
+				"Mihomo profile name %q conflicts between %s (%s) and %s (%s)",
+				proxy.Name,
+				previous.ProxyName,
+				previous.Server,
+				proxy.ProxyName,
+				proxy.Server,
+			)
+		}
+		seen[proxy.Name] = proxy
+	}
+	return nil
 }
 
 func RenderNodeInfo(ctx context.Context, store *db.DB, userName, nodeName string) ([]byte, error) {
@@ -492,7 +556,7 @@ func RenderMihomoProxyProvider(ctx context.Context, store *db.DB, userName strin
 	for _, node := range info.Nodes {
 		for _, proxy := range node.Proxies {
 			provider.Proxies = append(provider.Proxies, mihomoVLESSProxy{
-				Name:              node.Node + " / " + proxy.Name,
+				Name:              proxy.Name,
 				Type:              "vless",
 				Server:            proxy.Server,
 				Port:              proxy.ServerPort,
@@ -530,9 +594,11 @@ func parseVLESSReality(access db.ProxyAccess) (vlessRealitySettings, db.VLESSRea
 	if settings.RealityPublicKey == "" {
 		return vlessRealitySettings{}, db.VLESSRealityCredential{}, fmt.Errorf("settings for %s missing reality_public_key", access.ProxyName)
 	}
-	if err := validateRealityShortID(settings.ShortID); err != nil {
+	normalizedShortID, err := db.NormalizeRealityShortID(settings.ShortID)
+	if err != nil {
 		return vlessRealitySettings{}, db.VLESSRealityCredential{}, fmt.Errorf("settings for %s invalid short_id: %w", access.ProxyName, err)
 	}
+	settings.ShortID = normalizedShortID
 	if settings.HandshakeServer == "" {
 		settings.HandshakeServer = settings.ServerName
 	}
@@ -550,14 +616,4 @@ func parseVLESSReality(access db.ProxyAccess) (vlessRealitySettings, db.VLESSRea
 		userCredential.Flow = db.VLESSRealityFlowVision
 	}
 	return settings, userCredential, nil
-}
-
-func validateRealityShortID(shortID string) error {
-	if len(shortID) > 8 {
-		return fmt.Errorf("expected 0 to 8 hexadecimal digits")
-	}
-	if _, err := hex.DecodeString(shortID); err != nil {
-		return err
-	}
-	return nil
 }

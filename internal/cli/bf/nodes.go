@@ -75,10 +75,29 @@ func nodeCommand() *cobra.Command {
 	})
 	cmd.AddCommand(nodeStatusCommand("enable", "active"))
 	cmd.AddCommand(nodeStatusCommand("disable", "disabled"))
+	cmd.AddCommand(nodeRenameCommand())
 	cmd.AddCommand(nodeDeleteCommand())
 	cmd.AddCommand(nodeTokenCommand())
 	cmd.AddCommand(nodeBootstrapCommand())
 	return cmd
+}
+
+func nodeRenameCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <current-name> <new-name>",
+		Short: "Rename a node while preserving its old name as an alias",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
+				node, err := store.RenameNode(ctx, args[0], args[1])
+				if err != nil {
+					return err
+				}
+				printNode(cmd, node)
+				return nil
+			})
+		},
+	}
 }
 
 func nodeTokenCommand() *cobra.Command {

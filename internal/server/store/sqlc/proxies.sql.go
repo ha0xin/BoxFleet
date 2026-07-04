@@ -76,10 +76,59 @@ func (q *Queries) CreateProxy(ctx context.Context, arg CreateProxyParams) error 
 	return err
 }
 
+const createProxyNameAlias = `-- name: CreateProxyNameAlias :exec
+INSERT INTO proxy_name_aliases (alias, proxy_id)
+VALUES (?1, ?2)
+`
+
+type CreateProxyNameAliasParams struct {
+	Alias   string `json:"alias"`
+	ProxyID string `json:"proxy_id"`
+}
+
+func (q *Queries) CreateProxyNameAlias(ctx context.Context, arg CreateProxyNameAliasParams) error {
+	_, err := q.db.ExecContext(ctx, createProxyNameAlias, arg.Alias, arg.ProxyID)
+	return err
+}
+
+const deleteProxyNameAlias = `-- name: DeleteProxyNameAlias :exec
+DELETE FROM proxy_name_aliases
+WHERE alias = ?1 AND proxy_id = ?2
+`
+
+type DeleteProxyNameAliasParams struct {
+	Alias   string `json:"alias"`
+	ProxyID string `json:"proxy_id"`
+}
+
+func (q *Queries) DeleteProxyNameAlias(ctx context.Context, arg DeleteProxyNameAliasParams) error {
+	_, err := q.db.ExecContext(ctx, deleteProxyNameAlias, arg.Alias, arg.ProxyID)
+	return err
+}
+
 const getProxyByNodeAndName = `-- name: GetProxyByNodeAndName :one
 SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, created_at, updated_at
 FROM proxy_details
-WHERE node_name = ?1 AND name = ?2
+WHERE node_id = (
+    SELECT n.id
+    FROM nodes n
+    WHERE n.name = ?1
+       OR n.id = (
+         SELECT node_id
+         FROM node_name_aliases
+         WHERE alias = ?1
+       )
+  )
+  AND id = (
+    SELECT p.id
+    FROM proxies p
+    WHERE p.name = ?2
+       OR p.id = (
+         SELECT proxy_id
+         FROM proxy_name_aliases
+         WHERE alias = ?2
+       )
+  )
 `
 
 type GetProxyByNodeAndNameParams struct {
@@ -110,6 +159,24 @@ func (q *Queries) GetProxyByNodeAndName(ctx context.Context, arg GetProxyByNodeA
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getProxyIDByNameOrAlias = `-- name: GetProxyIDByNameOrAlias :one
+SELECT id
+FROM proxies
+WHERE name = ?1
+   OR id = (
+     SELECT proxy_id
+     FROM proxy_name_aliases
+     WHERE alias = ?1
+   )
+`
+
+func (q *Queries) GetProxyIDByNameOrAlias(ctx context.Context, name string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getProxyIDByNameOrAlias, name)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listProxies = `-- name: ListProxies :many
@@ -205,6 +272,27 @@ func (q *Queries) ListProxiesByNodeName(ctx context.Context, nodeName string) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const renameProxyByID = `-- name: RenameProxyByID :execrows
+UPDATE proxies
+SET
+  name = ?1,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+`
+
+type RenameProxyByIDParams struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+func (q *Queries) RenameProxyByID(ctx context.Context, arg RenameProxyByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameProxyByID, arg.Name, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setProxyEnabled = `-- name: SetProxyEnabled :execrows

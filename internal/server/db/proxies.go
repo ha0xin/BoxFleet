@@ -113,6 +113,11 @@ func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy,
 	if err := db.validateProxyListener(ctx, node.Name, proxy, ""); err != nil {
 		return Proxy{}, err
 	}
+	if _, err := db.q.GetProxyIDByNameOrAlias(ctx, proxy.Name); err == nil {
+		return Proxy{}, fmt.Errorf("proxy name %q is already in use", proxy.Name)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Proxy{}, err
+	}
 	proxyID, err := id.New("prx")
 	if err != nil {
 		return Proxy{}, err
@@ -146,6 +151,34 @@ func (db *DB) UpdateProxy(ctx context.Context, params UpdateProxyParams) (Proxy,
 	if err != nil {
 		return Proxy{}, err
 	}
+	currentName := params.Name
+	params.Name = existing.Name
+	return db.UpdateProxyByName(ctx, node.Name, currentName, params)
+}
+
+// UpdateProxyByName atomically updates a proxy selected by currentName.
+// Params.Name is the desired globally unique canonical name and may rename the
+// proxy in the same transaction.
+func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName string, params UpdateProxyParams) (Proxy, error) {
+	lookupNodeName := normalizeName(nodeName)
+	if lookupNodeName == "" {
+		lookupNodeName = normalizeName(params.NodeName)
+	}
+	if lookupNodeName == "" {
+		return Proxy{}, errors.New("node name is required")
+	}
+	node, err := db.GetNode(ctx, lookupNodeName)
+	if err != nil {
+		return Proxy{}, err
+	}
+	currentName = normalizeName(currentName)
+	if currentName == "" {
+		return Proxy{}, errors.New("current proxy name is required")
+	}
+	existing, err := db.GetProxy(ctx, node.Name, currentName)
+	if err != nil {
+		return Proxy{}, err
+	}
 	proxy, err := normalizeProxyParams(CreateProxyParams{
 		NodeName:          node.Name,
 		Name:              params.Name,
@@ -166,26 +199,126 @@ func (db *DB) UpdateProxy(ctx context.Context, params UpdateProxyParams) (Proxy,
 	if err := db.validateProxyListener(ctx, node.Name, proxy, existing.ID); err != nil {
 		return Proxy{}, err
 	}
-	affected, err := db.q.UpdateProxy(ctx, store.UpdateProxyParams{
-		Listen:            proxy.Listen,
-		ListenPort:        int64(proxy.ListenPort),
-		Transport:         proxy.Transport,
-		Enabled:           boolToInt64(proxy.Enabled),
-		TrafficMultiplier: proxy.TrafficMultiplier,
-		SettingsJson:      proxy.SettingsJSON,
-		InboundRulesJson:  proxy.InboundRulesJSON,
-		OutboundRulesJson: proxy.OutboundRulesJSON,
-		RouteRulesJson:    proxy.RouteRulesJSON,
-		NodeID:            node.ID,
-		Name:              proxy.Name,
+	err = db.withTx(ctx, func(qtx *store.Queries) error {
+		current, err := qtx.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
+			NodeName: node.Name,
+			Name:     currentName,
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("proxy %q on node %q not found", currentName, node.Name)
+			}
+			return err
+		}
+		if current.ID != existing.ID {
+			return fmt.Errorf("proxy %q changed while it was being updated", currentName)
+		}
+		if err := renameProxyTx(ctx, qtx, existing.ID, existing.Name, proxy.Name); err != nil {
+			return err
+		}
+		affected, err := qtx.UpdateProxy(ctx, store.UpdateProxyParams{
+			Listen:            proxy.Listen,
+			ListenPort:        int64(proxy.ListenPort),
+			Transport:         proxy.Transport,
+			Enabled:           boolToInt64(proxy.Enabled),
+			TrafficMultiplier: proxy.TrafficMultiplier,
+			SettingsJson:      proxy.SettingsJSON,
+			InboundRulesJson:  proxy.InboundRulesJSON,
+			OutboundRulesJson: proxy.OutboundRulesJSON,
+			RouteRulesJson:    proxy.RouteRulesJSON,
+			NodeID:            node.ID,
+			Name:              proxy.Name,
+		})
+		if err != nil {
+			return err
+		}
+		return requireAffected(affected, "proxy", currentName+"@"+node.Name)
 	})
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := requireAffected(affected, "proxy", proxy.Name+"@"+node.Name); err != nil {
+	return db.GetProxy(ctx, node.Name, proxy.Name)
+}
+
+func renameProxyTx(ctx context.Context, qtx *store.Queries, proxyID, currentName, newName string) error {
+	if currentName == newName {
+		return nil
+	}
+	ownerID, err := qtx.GetProxyIDByNameOrAlias(ctx, newName)
+	switch {
+	case err == nil && ownerID != proxyID:
+		return fmt.Errorf("proxy name %q is already in use", newName)
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	case err == nil:
+		if err := qtx.DeleteProxyNameAlias(ctx, store.DeleteProxyNameAliasParams{
+			Alias:   newName,
+			ProxyID: proxyID,
+		}); err != nil {
+			return err
+		}
+	}
+	if err := qtx.CreateProxyNameAlias(ctx, store.CreateProxyNameAliasParams{
+		Alias:   currentName,
+		ProxyID: proxyID,
+	}); err != nil {
+		return err
+	}
+	affected, err := qtx.RenameProxyByID(ctx, store.RenameProxyByIDParams{
+		Name: newName,
+		ID:   proxyID,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAffected(affected, "proxy", currentName)
+}
+
+// RenameProxy changes a proxy's globally unique canonical name while preserving
+// its prior name as an alias. Access auth names and credentials are ID-based and
+// are deliberately left untouched.
+func (db *DB) RenameProxy(ctx context.Context, nodeName, oldName, newName string) (Proxy, error) {
+	nodeName = normalizeName(nodeName)
+	oldName = normalizeName(oldName)
+	newName = normalizeName(newName)
+	if oldName == "" {
+		return Proxy{}, errors.New("proxy name is required")
+	}
+	if newName == "" {
+		return Proxy{}, errors.New("new proxy name is required")
+	}
+	if err := validateNameForAuth(newName, "proxy"); err != nil {
 		return Proxy{}, err
 	}
-	return db.GetProxy(ctx, node.Name, proxy.Name)
+	var proxyID string
+	err := db.withTx(ctx, func(qtx *store.Queries) error {
+		existing, err := qtx.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
+			NodeName: nodeName,
+			Name:     oldName,
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("proxy %q on node %q not found", oldName, nodeName)
+			}
+			return err
+		}
+		proxyID = existing.ID
+		if existing.Name == newName {
+			return nil
+		}
+		return renameProxyTx(ctx, qtx, existing.ID, existing.Name, newName)
+	})
+	if err != nil {
+		return Proxy{}, err
+	}
+	proxy, err := db.GetProxy(ctx, nodeName, newName)
+	if err != nil {
+		return Proxy{}, err
+	}
+	if proxy.ID != proxyID {
+		return Proxy{}, fmt.Errorf("renamed proxy %q resolved to an unexpected record", newName)
+	}
+	return proxy, nil
 }
 
 func (db *DB) validateProxyListener(ctx context.Context, nodeName string, next Proxy, ignoreID string) error {
@@ -236,7 +369,11 @@ func transportsOverlap(left, right string) bool {
 
 func (db *DB) ListProxies(ctx context.Context, nodeName string) ([]Proxy, error) {
 	if nodeName != "" {
-		rows, err := db.q.ListProxiesByNodeName(ctx, normalizeName(nodeName))
+		node, err := db.GetNode(ctx, nodeName)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := db.q.ListProxiesByNodeName(ctx, node.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -258,6 +395,13 @@ func (db *DB) ListProxies(ctx context.Context, nodeName string) ([]Proxy, error)
 }
 
 func (db *DB) ListProxiesPage(ctx context.Context, filter ProxyFilter) (ProxyPage, error) {
+	if strings.TrimSpace(filter.NodeName) != "" {
+		node, err := db.GetNode(ctx, filter.NodeName)
+		if err != nil {
+			return ProxyPage{}, err
+		}
+		filter.NodeName = node.Name
+	}
 	limit := pageLimit(filter.Limit, 50)
 	offset := pageOffset(filter.Offset)
 	where, args := proxyPageWhere(filter)
@@ -406,10 +550,14 @@ func (db *DB) SetProxyEnabled(ctx context.Context, nodeName, name string, enable
 	if err != nil {
 		return err
 	}
+	proxy, err := db.GetProxy(ctx, node.Name, name)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetProxyEnabled(ctx, store.SetProxyEnabledParams{
 		Enabled: boolToInt64(enabled),
 		NodeID:  node.ID,
-		Name:    normalizeName(name),
+		Name:    proxy.Name,
 	})
 	if err != nil {
 		return err
@@ -460,6 +608,12 @@ func normalizeProxyParams(params CreateProxyParams) (Proxy, error) {
 	settingsJSON, err := validJSONOrDefault(params.SettingsJSON, "{}", "settings_json")
 	if err != nil {
 		return Proxy{}, err
+	}
+	if protocol == ProtocolVLESSReality {
+		settingsJSON, err = normalizeVLESSRealitySettingsJSON(settingsJSON)
+		if err != nil {
+			return Proxy{}, err
+		}
 	}
 	inboundRulesJSON, err := validJSONOrDefault(params.InboundRulesJSON, "[]", "inbound_rules_json")
 	if err != nil {

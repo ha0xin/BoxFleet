@@ -40,6 +40,7 @@ bf user node-info <name> --format json
 bf node create <name> --host <host>
 bf node list
 bf node show <name>
+bf node rename <current-name> <new-name>
 bf node disable <name>          # pause: agent stops sing-box, keeps reporting; token intact
 bf node enable <name>
 bf node delete <name>           # decommission: disable + revoke the node's tokens
@@ -52,6 +53,10 @@ bf node bootstrap <name> --ssh <ssh-target> --server-url <url> --agent-bin <path
 tokens (the record is kept). `bf node disable` is a reversible pause that leaves
 the token valid so the node can be re-enabled later. See "Node lifecycle" in
 `docs/architecture.md`.
+
+Renaming changes the canonical node name and retains the previous name as an
+alias. Existing agent tokens remain valid; the server returns the new canonical
+name to the agent, which persists it in `agent.json`.
 
 The Web UI's Nodes page also has a simplified Add Node flow. Enter a node name,
 copy the generated command, and run it on the node:
@@ -75,6 +80,8 @@ bf proxy create ss2022 --node <node> --port 8388 --method 2022-blake3-aes-128-gc
 bf proxy create hy2 --node <node> --port 8443 --cert-path <path> --key-path <path> --up-mbps 100 --down-mbps 100
 bf proxy list --node <node>
 bf proxy show <name> --node <node>
+bf proxy rename <current-name> <new-name> --node <node>
+bf proxy set-short-id <name> <short-id> --node <node>
 bf proxy disable <name> --node <node>
 bf proxy enable <name> --node <node>
 bf proxy delete <name> --node <node>
@@ -84,6 +91,11 @@ bf proxy delete <name> --node <node>
 protocol: VLESS Reality uses TCP, Hysteria2 uses UDP, and Shadowsocks 2022 uses
 TCP+UDP. The stored transport is shown in lists because listener conflict
 validation depends on it.
+
+Proxy names are globally unique because they are also the base Mihomo profile
+name. Rename retains the old name as an alias and does not change existing
+access UUIDs or `auth_name` values. Reality short IDs are normalized to lowercase
+and must be empty or an even-length hexadecimal value of at most 8 characters.
 
 The current tested render/apply path is VLESS Reality. Shadowsocks 2022 and
 Hysteria2 can be represented as proxy rows, but full access issuing, rendering,

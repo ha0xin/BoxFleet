@@ -21,6 +21,7 @@ WHERE t.revoked_at IS NULL;
 SELECT
   t.id,
   t.node_id,
+  n.name AS node_name,
   t.token_hash,
   t.token_digest,
   t.created_at,
@@ -28,7 +29,14 @@ SELECT
   t.revoked_at
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (
+    n.name = sqlc.arg(node_name)
+    OR n.id = (
+      SELECT node_id
+      FROM node_name_aliases
+      WHERE alias = sqlc.arg(node_name)
+    )
+  )
   AND t.revoked_at IS NULL
   AND t.token_digest = sqlc.arg(token_digest);
 
@@ -36,6 +44,7 @@ WHERE n.name = sqlc.arg(node_name)
 SELECT
   t.id,
   t.node_id,
+  n.name AS node_name,
   t.token_hash,
   t.token_digest,
   t.created_at,
@@ -43,7 +52,14 @@ SELECT
   t.revoked_at
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (
+    n.name = sqlc.arg(node_name)
+    OR n.id = (
+      SELECT node_id
+      FROM node_name_aliases
+      WHERE alias = sqlc.arg(node_name)
+    )
+  )
   AND t.revoked_at IS NULL
 ORDER BY t.created_at DESC;
 

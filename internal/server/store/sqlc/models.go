@@ -83,6 +83,12 @@ type NodeHeartbeat struct {
 	CreatedAt      string `json:"created_at"`
 }
 
+type NodeNameAlias struct {
+	Alias     string `json:"alias"`
+	NodeID    string `json:"node_id"`
+	CreatedAt string `json:"created_at"`
+}
+
 type NodeOutbound struct {
 	ID           string `json:"id"`
 	NodeID       string `json:"node_id"`
@@ -179,6 +185,12 @@ type ProxyDetail struct {
 	RouteRulesJson    string  `json:"route_rules_json"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+}
+
+type ProxyNameAlias struct {
+	Alias     string `json:"alias"`
+	ProxyID   string `json:"proxy_id"`
+	CreatedAt string `json:"created_at"`
 }
 
 type ProxyUser struct {

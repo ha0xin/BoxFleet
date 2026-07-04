@@ -72,9 +72,13 @@ func (db *DB) ListUserNodeBindings(ctx context.Context, userName string) ([]User
 }
 
 func (db *DB) GetUserNodeBinding(ctx context.Context, userName, nodeName string) (UserNodeBinding, error) {
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return UserNodeBinding{}, err
+	}
 	binding, err := db.q.GetUserNodeBinding(ctx, store.GetUserNodeBindingParams{
 		UserName: normalizeName(userName),
-		NodeName: normalizeName(nodeName),
+		NodeName: node.Name,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -228,6 +228,13 @@ func (db *DB) ListRecentLogEvents(ctx context.Context, limit int64) ([]LogEvent,
 }
 
 func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (LogEventPage, error) {
+	if strings.TrimSpace(filter.NodeName) != "" {
+		node, err := db.GetNode(ctx, filter.NodeName)
+		if err != nil {
+			return LogEventPage{}, err
+		}
+		filter.NodeName = node.Name
+	}
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -510,8 +517,12 @@ func (db *DB) ListRecentLogEventsByNode(ctx context.Context, nodeName string, li
 	if limit <= 0 {
 		limit = 50
 	}
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
 	return db.q.ListRecentLogEventsByNode(ctx, store.ListRecentLogEventsByNodeParams{
-		NodeName: normalizeName(nodeName),
+		NodeName: node.Name,
 		Limit:    limit,
 	})
 }
@@ -530,8 +541,12 @@ func (db *DB) ListRecentRawLogEntriesByNode(ctx context.Context, nodeName string
 	if limit <= 0 {
 		limit = 50
 	}
+	node, err := db.GetNode(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
 	return db.q.ListRecentRawLogEntriesByNode(ctx, store.ListRecentRawLogEntriesByNodeParams{
-		NodeName: normalizeName(nodeName),
+		NodeName: node.Name,
 		Limit:    limit,
 	})
 }

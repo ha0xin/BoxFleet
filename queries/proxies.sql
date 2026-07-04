@@ -43,7 +43,51 @@ ORDER BY node_name, listen_port, name;
 -- name: GetProxyByNodeAndName :one
 SELECT *
 FROM proxy_details
-WHERE node_name = sqlc.arg(node_name) AND name = sqlc.arg(name);
+WHERE node_id = (
+    SELECT n.id
+    FROM nodes n
+    WHERE n.name = sqlc.arg(node_name)
+       OR n.id = (
+         SELECT node_id
+         FROM node_name_aliases
+         WHERE alias = sqlc.arg(node_name)
+       )
+  )
+  AND id = (
+    SELECT p.id
+    FROM proxies p
+    WHERE p.name = sqlc.arg(name)
+       OR p.id = (
+         SELECT proxy_id
+         FROM proxy_name_aliases
+         WHERE alias = sqlc.arg(name)
+       )
+  );
+
+-- name: GetProxyIDByNameOrAlias :one
+SELECT id
+FROM proxies
+WHERE name = sqlc.arg(name)
+   OR id = (
+     SELECT proxy_id
+     FROM proxy_name_aliases
+     WHERE alias = sqlc.arg(name)
+   );
+
+-- name: CreateProxyNameAlias :exec
+INSERT INTO proxy_name_aliases (alias, proxy_id)
+VALUES (sqlc.arg(alias), sqlc.arg(proxy_id));
+
+-- name: DeleteProxyNameAlias :exec
+DELETE FROM proxy_name_aliases
+WHERE alias = sqlc.arg(alias) AND proxy_id = sqlc.arg(proxy_id);
+
+-- name: RenameProxyByID :execrows
+UPDATE proxies
+SET
+  name = sqlc.arg(name),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id);
 
 -- name: UpdateProxy :execrows
 UPDATE proxies

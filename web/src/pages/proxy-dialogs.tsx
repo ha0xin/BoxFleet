@@ -21,6 +21,12 @@ const proxyFormSchema = z.object({
   // (empty → NaN, which fails the min check).
   listen_port: z.number({ error: "Required" }).int().min(1, "1-65535").max(65535, "1-65535"),
   server_name: z.string(),
+  short_id: z
+    .string()
+    .trim()
+    .refine((value) => /^(?:[0-9a-fA-F]{2}){0,4}$/.test(value), {
+      message: "Use 0–8 hexadecimal characters with an even length"
+    }),
   // Backend rewrites 0 → 1.0, so reject 0 here to avoid a silent mismatch.
   traffic_multiplier: z.number({ error: "Required" }).gt(0, "Must be greater than 0"),
   enabled: z.boolean()
@@ -32,6 +38,16 @@ function parseServerName(settingsJSON: string): string {
   try {
     const parsed = JSON.parse(settingsJSON) as { server_name?: string };
     return parsed?.server_name ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function parseShortID(proxy: AdminProxy): string {
+  if (typeof proxy.short_id === "string") return proxy.short_id;
+  try {
+    const parsed = JSON.parse(proxy.settings_json) as { short_id?: string };
+    return parsed?.short_id ?? "";
   } catch {
     return "";
   }
@@ -67,11 +83,20 @@ function defaults(state: Exclude<ProxyDialogState, null>): ProxyFormValues {
       name: p.name,
       listen_port: p.listen_port,
       server_name: parseServerName(p.settings_json),
+      short_id: parseShortID(p),
       traffic_multiplier: p.traffic_multiplier,
       enabled: p.enabled
     };
   }
-  return { node_name: "", name: "", listen_port: 443, server_name: "", traffic_multiplier: 1, enabled: true };
+  return {
+    node_name: "",
+    name: "",
+    listen_port: 443,
+    server_name: "",
+    short_id: "",
+    traffic_multiplier: 1,
+    enabled: true
+  };
 }
 
 export function ProxyFormDialog({
@@ -121,7 +146,8 @@ export function ProxyFormDialog({
         return req(`/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies`, {
           method: "POST",
           body: JSON.stringify({
-            name: values.name,
+            name: values.name.trim(),
+            short_id: values.short_id.trim().toLowerCase(),
             listen_port: values.listen_port,
             traffic_multiplier: values.traffic_multiplier,
             enabled: values.enabled,
@@ -137,6 +163,8 @@ export function ProxyFormDialog({
         {
           method: "PATCH",
           body: JSON.stringify({
+            name: values.name.trim(),
+            short_id: values.short_id.trim().toLowerCase(),
             listen_port: values.listen_port,
             traffic_multiplier: values.traffic_multiplier,
             enabled: values.enabled,
@@ -158,7 +186,8 @@ export function ProxyFormDialog({
           {isEdit ? `Edit ${state.proxy.name}` : "Create proxy"}
         </Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          VLESS-Reality inbound. Reality keys are generated server-side.
+          VLESS-Reality inbound. Reality keys are generated server-side. Name and Reality changes require
+          publishing the node configuration.
         </Dialog.Description>
 
         {mutation.isError ? (
@@ -184,8 +213,6 @@ export function ProxyFormDialog({
           <Input
             label="Name"
             placeholder="tokyo-reality"
-            disabled={isEdit}
-            readOnly={isEdit}
             error={errors.name?.message}
             {...form.register("name")}
           />
@@ -215,6 +242,16 @@ export function ProxyFormDialog({
             {...form.register("server_name")}
           />
 
+          {isEdit ? (
+            <Input
+              label="Reality short ID"
+              placeholder="01234567 (optional)"
+              labelTooltip="Empty or an even-length hexadecimal value of at most 8 characters."
+              error={errors.short_id?.message}
+              {...form.register("short_id")}
+            />
+          ) : null}
+
           <Switch
             label="Enabled"
             controlFirst={false}
@@ -235,4 +272,3 @@ export function ProxyFormDialog({
     </Dialog.Root>
   );
 }
-

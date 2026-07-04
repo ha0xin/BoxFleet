@@ -17,6 +17,8 @@ The executable draft lives in `migrations/`. `010_init.sql` is the public
 baseline; later migrations are append-only (e.g.
 `012_remove_proxy_user_traffic_multiplier.sql`). Migration
 `014_subscription_tokens.sql` adds revocable Mihomo proxy-provider links.
+Migration `015_names_and_aliases.sql` adds canonical rename aliases and makes
+proxy names globally unique.
 Regenerate sqlc after editing queries or the schema snapshot.
 
 ## Core Tables
@@ -57,7 +59,7 @@ revoked_at
 id
 name                      unique
 public_host               primary host; mirrors hosts_json[0]
-hosts_json                JSON [{"host":..,"selected":..}, ..] (migration 013)
+hosts_json                JSON [{"host":..,"tag":..,"selected":..}, ..]
 api_base_url
 status                    pending | active | disabled | degraded
 sing_box_version
@@ -73,6 +75,13 @@ and sorting stay on a single column. Each host marked `selected` produces its ow
 client connection profile (`render.NodeInfoForUser`); the first host is always
 present and at least one host is always selected (`db.normalizeNodeHosts`). Rows
 written before migration 013 fall back to `[{public_host, selected:true}]`.
+Additional hosts require a case-insensitively unique tag on update; legacy
+multi-host rows without tags are accepted until they are edited.
+
+`node_name_aliases` maps every retained historical name to the stable node ID.
+A rename changes `nodes.name` transactionally and keeps the old name as an
+alias, so existing URLs, CLI references, and agent credentials can resolve to
+the current canonical name.
 
 Status semantics (see "Node Lifecycle" in `docs/architecture.md`):
 
@@ -109,7 +118,7 @@ A concrete proxy entry on one node.
 ```text
 id
 node_id
-name                      unique per node
+name                      globally unique
 protocol                  vless_reality | shadowsocks_2022 | hysteria2
 listen
 listen_port
@@ -139,6 +148,9 @@ shadowsocks_2022  -> tcp_udp
 
 The UI may show transport as read-only diagnostic data because it explains
 listener conflict checks.
+
+`proxy_name_aliases` maps retained historical names to the stable proxy ID.
+Renaming a proxy does not rewrite `proxy_accesses.auth_name` or credentials.
 
 Examples of `settings_json`:
 

@@ -33,8 +33,12 @@ func (db *DB) RecordSystemLogs(ctx context.Context, report SystemLogReport) erro
 
 func (db *DB) ListRecentSystemLogs(ctx context.Context, nodeName string, limit int64) ([]SystemLog, error) {
 	if nodeName != "" {
+		node, err := db.GetNode(ctx, nodeName)
+		if err != nil {
+			return nil, err
+		}
 		rows, err := db.q.ListRecentSystemLogsByNode(ctx, store.ListRecentSystemLogsByNodeParams{
-			NodeName: normalizeName(nodeName),
+			NodeName: node.Name,
 			Limit:    limit,
 		})
 		if err != nil {

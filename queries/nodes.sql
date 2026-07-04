@@ -43,7 +43,37 @@ SELECT
   created_at,
   updated_at
 FROM nodes
-WHERE name = sqlc.arg(name);
+WHERE name = sqlc.arg(name)
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = sqlc.arg(name)
+   );
+
+-- name: GetNodeIDByNameOrAlias :one
+SELECT id
+FROM nodes
+WHERE name = sqlc.arg(name)
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = sqlc.arg(name)
+   );
+
+-- name: CreateNodeNameAlias :exec
+INSERT INTO node_name_aliases (alias, node_id)
+VALUES (sqlc.arg(alias), sqlc.arg(node_id));
+
+-- name: DeleteNodeNameAlias :exec
+DELETE FROM node_name_aliases
+WHERE alias = sqlc.arg(alias) AND node_id = sqlc.arg(node_id);
+
+-- name: RenameNodeByID :execrows
+UPDATE nodes
+SET
+  name = sqlc.arg(name),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id);
 
 -- name: SetNodeStatus :execrows
 UPDATE nodes

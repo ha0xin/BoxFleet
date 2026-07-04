@@ -2,7 +2,7 @@ package bf
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"github.com/haoxin/boxfleet/internal/secret"
@@ -20,9 +20,87 @@ func proxyCommand() *cobra.Command {
 	cmd.AddCommand(create)
 	cmd.AddCommand(proxyListCommand())
 	cmd.AddCommand(proxyShowCommand())
+	cmd.AddCommand(proxyRenameCommand())
+	cmd.AddCommand(proxySetShortIDCommand())
 	cmd.AddCommand(proxyStatusCommand("enable", true))
 	cmd.AddCommand(proxyStatusCommand("disable", false))
 	cmd.AddCommand(proxyStatusCommand("delete", false))
+	return cmd
+}
+
+func proxyRenameCommand() *cobra.Command {
+	var nodeName string
+	cmd := &cobra.Command{
+		Use:   "rename <current-name> <new-name>",
+		Short: "Rename a proxy while preserving its old name as an alias",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
+				proxy, err := store.RenameProxy(ctx, nodeName, args[0], args[1])
+				if err != nil {
+					return err
+				}
+				printProxy(cmd, proxy)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&nodeName, "node", "", "node name")
+	_ = cmd.MarkFlagRequired("node")
+	return cmd
+}
+
+func proxySetShortIDCommand() *cobra.Command {
+	var nodeName string
+	cmd := &cobra.Command{
+		Use:   "set-short-id <proxy> <short-id>",
+		Short: "Set a VLESS Reality short ID",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
+				proxy, err := store.GetProxy(ctx, nodeName, args[0])
+				if err != nil {
+					return err
+				}
+				if proxy.Protocol != db.ProtocolVLESSReality {
+					return fmt.Errorf("proxy %q is %s, not %s", proxy.Name, proxy.Protocol, db.ProtocolVLESSReality)
+				}
+				shortID, err := db.NormalizeRealityShortID(args[1])
+				if err != nil {
+					return err
+				}
+				var settings map[string]any
+				if err := json.Unmarshal([]byte(proxy.SettingsJSON), &settings); err != nil {
+					return fmt.Errorf("parse settings for %s: %w", proxy.Name, err)
+				}
+				settings["short_id"] = shortID
+				settingsJSON, err := json.Marshal(settings)
+				if err != nil {
+					return err
+				}
+				updated, err := store.UpdateProxy(ctx, db.UpdateProxyParams{
+					NodeName:          proxy.NodeName,
+					Name:              proxy.Name,
+					Listen:            proxy.Listen,
+					ListenPort:        proxy.ListenPort,
+					Transport:         proxy.Transport,
+					Enabled:           proxy.Enabled,
+					TrafficMultiplier: proxy.TrafficMultiplier,
+					SettingsJSON:      string(settingsJSON),
+					InboundRulesJSON:  proxy.InboundRulesJSON,
+					OutboundRulesJSON: proxy.OutboundRulesJSON,
+					RouteRulesJSON:    proxy.RouteRulesJSON,
+				})
+				if err != nil {
+					return err
+				}
+				printProxy(cmd, updated)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&nodeName, "node", "", "node name")
+	_ = cmd.MarkFlagRequired("node")
 	return cmd
 }
 
@@ -47,9 +125,11 @@ func createVLESSRealityCommand() *cobra.Command {
 				}
 				shortID = generated
 			}
-			if err := validateRealityShortID(shortID); err != nil {
+			normalizedShortID, err := db.NormalizeRealityShortID(shortID)
+			if err != nil {
 				return err
 			}
+			shortID = normalizedShortID
 			keyPair, err := secret.RealityKeyPairX25519()
 			if err != nil {
 				return err
@@ -85,16 +165,6 @@ func createVLESSRealityCommand() *cobra.Command {
 	_ = cmd.MarkFlagRequired("node")
 	_ = cmd.MarkFlagRequired("sni")
 	return cmd
-}
-
-func validateRealityShortID(shortID string) error {
-	if len(shortID) > 8 {
-		return fmt.Errorf("short-id must be 0 to 8 hex characters")
-	}
-	if _, err := hex.DecodeString(shortID); err != nil {
-		return fmt.Errorf("short-id must be valid hex accepted by sing-box: %w", err)
-	}
-	return nil
 }
 
 func createSS2022Command() *cobra.Command {

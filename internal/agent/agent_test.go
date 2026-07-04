@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/haoxin/boxfleet/internal/model"
 )
 
 func TestWriteLoadConfigDefaults(t *testing.T) {
@@ -58,6 +60,38 @@ func TestFetchConfigVersioned(t *testing.T) {
 	raw := response.Data
 	if string(raw) != `{"inbounds":[]}` {
 		t.Fatalf("config = %s", raw)
+	}
+}
+
+func TestFetchConfigAdoptsCanonicalNodeName(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "agent.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-BoxFleet-Node") != "old-name" {
+			t.Fatalf("node header = %q", r.Header.Get("X-BoxFleet-Node"))
+		}
+		w.Header().Set(model.CanonicalNodeNameHeader, "new-name")
+		_, _ = w.Write([]byte(`{"inbounds":[]}`))
+	}))
+	defer server.Close()
+
+	a := New(Config{
+		NodeName:        "old-name",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		AgentConfigPath: configPath,
+	})
+	if _, err := a.FetchConfigVersioned(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if a.Config.NodeName != "new-name" {
+		t.Fatalf("in-memory node name = %q", a.Config.NodeName)
+	}
+	loaded, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.NodeName != "new-name" {
+		t.Fatalf("persisted node name = %q", loaded.NodeName)
 	}
 }
 
