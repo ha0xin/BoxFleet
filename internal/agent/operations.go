@@ -127,12 +127,13 @@ func (a *Agent) runClaimedOperation(ctx context.Context, state *OperationState) 
 	a.maintenanceMu.Lock()
 	result, executeErr := a.executeNodeOperation(opCtx, state, &cancelRequested)
 	a.maintenanceMu.Unlock()
+	// Capture a real parent/lease cancellation before stopping the lease
+	// monitor. Calling cancel(nil) records context.Canceled as the cause, which
+	// must not replace a concrete executor error such as a version mismatch.
+	executeErr = operationExecutionError(opCtx, executeErr)
 	cancel(nil)
 	if errors.Is(executeErr, ErrAgentRestartRequired) {
 		return ErrAgentRestartRequired
-	}
-	if cause := context.Cause(opCtx); cause != nil && executeErr != nil {
-		executeErr = cause
 	}
 	select {
 	case leaseErr := <-leaseErrors:
@@ -176,6 +177,16 @@ func (a *Agent) runClaimedOperation(ctx context.Context, state *OperationState) 
 		return err
 	}
 	return a.ClearOperationState()
+}
+
+func operationExecutionError(ctx context.Context, executeErr error) error {
+	if executeErr == nil {
+		return nil
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	return executeErr
 }
 
 func operationResultCommitted(result map[string]any) bool {

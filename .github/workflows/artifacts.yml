@@ -73,10 +73,13 @@ jobs:
           git -C /tmp/sing-box checkout "$SING_BOX_REVISION"
           (
             cd /tmp/sing-box
-            sing_box_ldflags="$(cat release/LDFLAGS)"
+            sing_box_version="${SING_BOX_REVISION#v}"
+            sing_box_ldflags="-X 'github.com/sagernet/sing-box/constant.Version=${sing_box_version}' $(cat release/LDFLAGS) -s -w -buildid="
             CGO_ENABLED=0 go build -trimpath -tags "$SING_BOX_TAGS" -ldflags "$sing_box_ldflags" -o "$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" ./cmd/sing-box
           )
-          "$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" version | grep with_v2ray_api
+          sing_box_version_output="$("$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" version)"
+          grep -F "sing-box version ${SING_BOX_REVISION#v}" <<<"$sing_box_version_output"
+          grep -F 'with_v2ray_api' <<<"$sing_box_version_output"
 
       - name: Package artifacts
         shell: bash

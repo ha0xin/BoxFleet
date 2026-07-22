@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,31 @@ import (
 
 	"github.com/haoxin/boxfleet/internal/model"
 )
+
+func TestOperationExecutionErrorPreservesExecutorFailureDuringCleanup(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	executorErr := errors.New("candidate sing-box version mismatch")
+
+	got := operationExecutionError(ctx, executorErr)
+	cancel(nil)
+
+	if !errors.Is(got, executorErr) {
+		t.Fatalf("operationExecutionError() = %v, want executor error %v", got, executorErr)
+	}
+}
+
+func TestOperationExecutionErrorUsesExistingCancellationCause(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	leaseErr := errors.New("operation lease lost")
+	cancel(leaseErr)
+
+	got := operationExecutionError(ctx, errors.New("command interrupted"))
+	if !errors.Is(got, leaseErr) {
+		t.Fatalf("operationExecutionError() = %v, want cancellation cause %v", got, leaseErr)
+	}
+}
 
 func TestOperationEventOutboxRetriesExactPayload(t *testing.T) {
 	t.Parallel()
