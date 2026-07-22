@@ -43,8 +43,9 @@ requested time window, rather than total telemetry history:
 
 - Traffic summaries read `traffic_usage_totals`; ingestion updates the rollup
   in the same transaction as the raw delta.
-- Node and publish status read `node_latest_heartbeats`; each heartbeat advances
-  the per-node pointer transactionally.
+- Node and publish status read `node_latest_heartbeats`; each heartbeat replaces
+  the prior row and advances the per-node pointer transactionally, so steady
+  state retains only one heartbeat row per node.
 - The first Network Events page filters by its visible time window and uses the
   partial visible-event index.
 - Network Events action, node, user, and combined node/user filters use partial

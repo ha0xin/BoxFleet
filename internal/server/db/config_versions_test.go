@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 )
 
@@ -329,6 +331,65 @@ func TestRecordHeartbeatActivatesPendingNode(t *testing.T) {
 	}
 	if got.Status != "disabled" {
 		t.Fatalf("disabled node reactivated to %q", got.Status)
+	}
+}
+
+func TestRecordHeartbeatRetainsOnlyLatestPerNode(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	for _, name := range []string{"azus", "edge"} {
+		if _, err := store.CreateNode(ctx, name, "203.0.113.10", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.RecordHeartbeat(ctx, Heartbeat{
+		NodeName:     "azus",
+		AgentVersion: "v1",
+		Status:       "ok",
+		MemoryBytes:  1,
+		ReportedAt:   "2026-07-22T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHeartbeat(ctx, Heartbeat{
+		NodeName:     "edge",
+		AgentVersion: "edge-v1",
+		Status:       "ok",
+		ReportedAt:   "2026-07-22T00:00:30Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordHeartbeat(ctx, Heartbeat{
+		NodeName:     "azus",
+		AgentVersion: "v2",
+		Status:       "disabled",
+		MemoryBytes:  2,
+		ReportedAt:   "2026-07-22T00:01:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := store.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_heartbeats`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("heartbeat rows = %d, want one per node (2)", count)
+	}
+
+	latest, err := store.q.LatestNodeHeartbeatByNodeName(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.AgentVersion != "v2" || latest.Status != "disabled" || latest.MemoryBytes != 2 || latest.ReportedAt != "2026-07-22T00:01:00Z" {
+		t.Fatalf("latest heartbeat = %#v", latest)
+	}
+
+	var foreignKeyViolation string
+	err = store.sql.QueryRowContext(ctx, `PRAGMA foreign_key_check`).Scan(&foreignKeyViolation)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("foreign key check returned violation %q: %v", foreignKeyViolation, err)
 	}
 }
 

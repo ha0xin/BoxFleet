@@ -250,6 +250,14 @@ func (db *DB) RecordHeartbeat(ctx context.Context, heartbeat Heartbeat) error {
 		}); err != nil {
 			return err
 		}
+		// Heartbeats are append-and-replace: delete only the row currently pointed
+		// to as latest, then point at the new row. ON DELETE CASCADE temporarily
+		// removes the pointer inside this transaction; readers keep seeing the old
+		// committed state until the replacement pointer commits. Deleting exactly
+		// one row also keeps legacy backlog cleanup out of the request path.
+		if err := q.DeleteCurrentNodeHeartbeat(ctx, node.ID); err != nil {
+			return err
+		}
 		if err := q.UpsertNodeLatestHeartbeat(ctx, store.UpsertNodeLatestHeartbeatParams{
 			NodeID:      node.ID,
 			HeartbeatID: heartbeatID,

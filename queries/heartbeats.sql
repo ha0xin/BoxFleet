@@ -30,6 +30,14 @@ ON CONFLICT(node_id) DO UPDATE SET
   heartbeat_id = excluded.heartbeat_id,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
 
+-- name: DeleteCurrentNodeHeartbeat :exec
+DELETE FROM node_heartbeats
+WHERE id = (
+  SELECT heartbeat_id
+  FROM node_latest_heartbeats latest
+  WHERE latest.node_id = sqlc.arg(target_node_id)
+);
+
 -- name: TouchNodeSeen :exec
 UPDATE nodes
 SET

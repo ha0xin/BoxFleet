@@ -65,6 +65,20 @@ func (q *Queries) CreateNodeHeartbeat(ctx context.Context, arg CreateNodeHeartbe
 	return err
 }
 
+const deleteCurrentNodeHeartbeat = `-- name: DeleteCurrentNodeHeartbeat :exec
+DELETE FROM node_heartbeats
+WHERE id = (
+  SELECT heartbeat_id
+  FROM node_latest_heartbeats latest
+  WHERE latest.node_id = ?1
+)
+`
+
+func (q *Queries) DeleteCurrentNodeHeartbeat(ctx context.Context, targetNodeID string) error {
+	_, err := q.db.ExecContext(ctx, deleteCurrentNodeHeartbeat, targetNodeID)
+	return err
+}
+
 const latestNodeHeartbeatByNodeName = `-- name: LatestNodeHeartbeatByNodeName :one
 SELECT
   h.id,
