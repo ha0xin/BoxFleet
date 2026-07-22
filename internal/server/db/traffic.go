@@ -99,6 +99,14 @@ func (db *DB) RecordTrafficReport(ctx context.Context, report TrafficReport) err
 			}); err != nil {
 				return err
 			}
+			if err := q.UpsertTrafficUsageTotal(ctx, store.UpsertTrafficUsageTotalParams{
+				ProxyUserID:        credential.ProxyUserID,
+				Direction:          delta.Direction,
+				RawBytesDelta:      delta.RawBytesDelta,
+				BillableBytesDelta: billable,
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

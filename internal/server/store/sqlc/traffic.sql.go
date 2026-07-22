@@ -181,12 +181,11 @@ const sumTrafficByAllUsers = `-- name: SumTrafficByAllUsers :many
 SELECT
   u.name AS user_name,
   d.direction,
-  CAST(COALESCE(SUM(d.raw_bytes_delta), 0) AS INTEGER) AS raw_bytes,
-  CAST(COALESCE(SUM(d.billable_bytes_delta), 0) AS INTEGER) AS billable_bytes
-FROM traffic_usage_deltas d
+  d.raw_bytes,
+  d.billable_bytes
+FROM traffic_usage_totals d
 JOIN proxy_users u ON u.id = d.proxy_user_id
 WHERE u.deleted_at IS NULL
-GROUP BY u.name, d.direction
 ORDER BY u.name, d.direction
 `
 
@@ -229,13 +228,12 @@ const sumTrafficByUser = `-- name: SumTrafficByUser :many
 SELECT
   u.name AS user_name,
   d.direction,
-  CAST(COALESCE(SUM(d.raw_bytes_delta), 0) AS INTEGER) AS raw_bytes,
-  CAST(COALESCE(SUM(d.billable_bytes_delta), 0) AS INTEGER) AS billable_bytes
-FROM traffic_usage_deltas d
+  d.raw_bytes,
+  d.billable_bytes
+FROM traffic_usage_totals d
 JOIN proxy_users u ON u.id = d.proxy_user_id
 WHERE u.name = ?1
   AND u.deleted_at IS NULL
-GROUP BY u.name, d.direction
 ORDER BY d.direction
 `
 
@@ -272,4 +270,39 @@ func (q *Queries) SumTrafficByUser(ctx context.Context, userName string) ([]SumT
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertTrafficUsageTotal = `-- name: UpsertTrafficUsageTotal :exec
+INSERT INTO traffic_usage_totals (
+  proxy_user_id,
+  direction,
+  raw_bytes,
+  billable_bytes
+) VALUES (
+  ?1,
+  ?2,
+  ?3,
+  ?4
+)
+ON CONFLICT(proxy_user_id, direction) DO UPDATE SET
+  raw_bytes = traffic_usage_totals.raw_bytes + excluded.raw_bytes,
+  billable_bytes = traffic_usage_totals.billable_bytes + excluded.billable_bytes,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+`
+
+type UpsertTrafficUsageTotalParams struct {
+	ProxyUserID        string `json:"proxy_user_id"`
+	Direction          string `json:"direction"`
+	RawBytesDelta      int64  `json:"raw_bytes_delta"`
+	BillableBytesDelta int64  `json:"billable_bytes_delta"`
+}
+
+func (q *Queries) UpsertTrafficUsageTotal(ctx context.Context, arg UpsertTrafficUsageTotalParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTrafficUsageTotal,
+		arg.ProxyUserID,
+		arg.Direction,
+		arg.RawBytesDelta,
+		arg.BillableBytesDelta,
+	)
+	return err
 }

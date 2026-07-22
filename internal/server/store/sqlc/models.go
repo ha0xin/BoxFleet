@@ -84,6 +84,12 @@ type NodeHeartbeat struct {
 	CreatedAt      string `json:"created_at"`
 }
 
+type NodeLatestHeartbeat struct {
+	NodeID      string `json:"node_id"`
+	HeartbeatID string `json:"heartbeat_id"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type NodeNameAlias struct {
 	Alias     string `json:"alias"`
 	NodeID    string `json:"node_id"`
@@ -285,6 +291,14 @@ type TrafficUsageDelta struct {
 	CounterEpoch        int64          `json:"counter_epoch"`
 	ObservedAt          string         `json:"observed_at"`
 	CreatedAt           string         `json:"created_at"`
+}
+
+type TrafficUsageTotal struct {
+	ProxyUserID   string `json:"proxy_user_id"`
+	Direction     string `json:"direction"`
+	RawBytes      int64  `json:"raw_bytes"`
+	BillableBytes int64  `json:"billable_bytes"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type UserNodeBinding struct {

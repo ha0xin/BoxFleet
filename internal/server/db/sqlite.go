@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 )
 
 const sqliteDriver = "sqlite3"
+const sqliteMaxOpenConnections = 4
 
 type DB struct {
 	sql *sql.DB
@@ -55,12 +57,12 @@ func OpenSQLite(path string) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("database path is required")
 	}
-	sqlDB, err := sql.Open(sqliteDriver, path)
+	sqlDB, err := sql.Open(sqliteDriver, sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetMaxOpenConns(sqliteMaxOpenConnections)
+	sqlDB.SetMaxIdleConns(sqliteMaxOpenConnections)
 	sqlDB.SetConnMaxLifetime(0)
 
 	db := &DB{sql: sqlDB, q: store.New(sqlDB)}
@@ -71,6 +73,12 @@ func OpenSQLite(path string) (*DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+func sqliteDSN(path string) string {
+	escaped := strings.ReplaceAll(url.PathEscape(path), "%2F", "/")
+	return "file:" + escaped +
+		"?_foreign_keys=on&_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000"
 }
 
 func (db *DB) Close() error {

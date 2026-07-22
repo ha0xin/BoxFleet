@@ -45,6 +45,7 @@ const PublishContext = createContext<PublishContextValue | null>(null);
 type Phase = "browsing" | "publishing" | "applying" | "celebrating" | "error";
 
 const CELEBRATE_MS = 2600;
+const INITIAL_CONFIG_CHECK_DELAY_MS = 5000;
 // How long to wait for published nodes to apply before declaring the apply
 // incomplete (an offline node never reports applied or failed).
 const APPLY_TIMEOUT_MS = 120_000;
@@ -66,15 +67,26 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>("browsing");
   const [isDiffOpen, setDiffOpen] = useState(false);
+  const [configCheckEnabled, setConfigCheckEnabled] = useState(false);
   // Node names this operation actually published. Convergence is judged only
   // over these, so an unrelated node stuck in a prior failed/pending state can
   // neither falsely fail nor indefinitely block this publish.
   const publishedNodesRef = useRef<Set<string>>(new Set());
 
+  // Config rendering is substantially heavier than ordinary page reads. Let the
+  // active route become usable first, then perform one background check. Admin
+  // mutations invalidate this query explicitly, so polling every few seconds is
+  // unnecessary and used to create continuous SQLite queue pressure.
+  useEffect(() => {
+    const timer = setTimeout(() => setConfigCheckEnabled(true), INITIAL_CONFIG_CHECK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
   const changesQuery = useQuery({
     queryKey: ["admin", "config-changes"],
     queryFn: () => request<ConfigChangesResponse>("/api/admin/config/changes"),
-    refetchInterval: 15_000
+    enabled: configCheckEnabled,
+    staleTime: Infinity
   });
   const changes = useMemo(() => changesQuery.data?.changed ?? [], [changesQuery.data]);
   // Surface a failing /config/changes instead of silently reading as idle: a

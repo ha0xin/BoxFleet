@@ -1,22 +1,28 @@
 import { GearSixIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Banner, Loader, Sidebar, Text } from "@cloudflare/kumo";
 
 import { AppPageHeader } from "@/components/app-page-header";
 import { PublishStatusProvider } from "@/publish/publish-status";
+import type { AdminRequest } from "@/publish/publish-status";
 import { PublishDiffDialog } from "@/publish/publish-diff-dialog";
 import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
-import { NetworkEventsPage } from "./pages/network-events";
-import { NodesPage } from "./pages/nodes";
-import { OverviewPage } from "./pages/overview";
-import { ProxiesPage } from "./pages/proxies";
-import { SettingsPage } from "./pages/settings";
-import { SystemLogsPage } from "./pages/system-logs";
-import { UsersPage } from "./pages/users";
 import type { Overview } from "./types";
+
+const NetworkEventsPage = lazy(() =>
+  import("./pages/network-events").then((module) => ({ default: module.NetworkEventsPage }))
+);
+const NodesPage = lazy(() => import("./pages/nodes").then((module) => ({ default: module.NodesPage })));
+const OverviewPage = lazy(() => import("./pages/overview").then((module) => ({ default: module.OverviewPage })));
+const ProxiesPage = lazy(() => import("./pages/proxies").then((module) => ({ default: module.ProxiesPage })));
+const SettingsPage = lazy(() => import("./pages/settings").then((module) => ({ default: module.SettingsPage })));
+const SystemLogsPage = lazy(() =>
+  import("./pages/system-logs").then((module) => ({ default: module.SystemLogsPage }))
+);
+const UsersPage = lazy(() => import("./pages/users").then((module) => ({ default: module.UsersPage })));
 
 function adminRequestPath(path: string): string {
   if (!path.startsWith("/api/admin")) {
@@ -86,34 +92,15 @@ function App() {
     setAuthVersion((value) => value + 1);
   }
 
-  const overviewQuery = useQuery({
-    queryKey: ["admin", "overview", authVersion],
-    queryFn: () => request<Overview>("/api/admin/overview")
-  });
-
-  const overview = overviewQuery.data ?? null;
-  const loading = overviewQuery.isLoading;
-  const error = overviewQuery.error;
-
   return (
     <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         <PublishStatusProvider request={request}>
-          {error ? (
-            <div className="px-6 pt-6">
-              <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} />
-            </div>
-          ) : null}
-
-          {loading && !overview ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader size={20} />
-            </div>
-          ) : (
+          <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/" element={<OverviewPage overview={overview} />} />
+              <Route path="/" element={<OverviewRoute request={request} authVersion={authVersion} />} />
               <Route path="/nodes" element={<NodesPage request={request} />} />
               <Route path="/proxies" element={<ProxiesPage request={request} />} />
               <Route path="/users" element={<UsersPage request={request} />} />
@@ -136,12 +123,42 @@ function App() {
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          )}
+          </Suspense>
 
           <PublishDiffDialog />
         </PublishStatusProvider>
       </main>
     </Sidebar.Provider>
+  );
+}
+
+function OverviewRoute({ request, authVersion }: { request: AdminRequest; authVersion: number }) {
+  const overviewQuery = useQuery({
+    queryKey: ["admin", "overview", authVersion],
+    queryFn: () => request<Overview>("/api/admin/overview")
+  });
+
+  if (overviewQuery.error) {
+    return (
+      <div className="px-6 pt-6">
+        <Banner
+          variant="error"
+          title={overviewQuery.error instanceof Error ? overviewQuery.error.message : "Request failed"}
+        />
+      </div>
+    );
+  }
+  if (overviewQuery.isLoading && !overviewQuery.data) {
+    return <PageLoader />;
+  }
+  return <OverviewPage overview={overviewQuery.data ?? null} />;
+}
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center py-16">
+      <Loader size={20} />
+    </div>
   );
 }
 

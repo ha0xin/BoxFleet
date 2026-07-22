@@ -133,15 +133,6 @@ LEFT JOIN config_versions current ON current.id = s.current_config_version_id
 WHERE n.name = sqlc.arg(node_name);
 
 -- name: ListNodeConfigStatuses :many
-WITH latest_heartbeats AS (
-  SELECT h.*
-  FROM node_heartbeats h
-  JOIN (
-    SELECT node_id, MAX(created_at) AS created_at
-    FROM node_heartbeats
-    GROUP BY node_id
-  ) latest ON latest.node_id = h.node_id AND latest.created_at = h.created_at
-)
 SELECT
   n.id AS node_id,
   n.name AS node_name,
@@ -161,7 +152,8 @@ FROM nodes n
 LEFT JOIN node_config_status s ON s.node_id = n.id
 LEFT JOIN config_versions target ON target.id = s.target_config_version_id
 LEFT JOIN config_versions current ON current.id = s.current_config_version_id
-LEFT JOIN latest_heartbeats h ON h.node_id = n.id
+LEFT JOIN node_latest_heartbeats latest ON latest.node_id = n.id
+LEFT JOIN node_heartbeats h ON h.id = latest.heartbeat_id
 ORDER BY n.name;
 
 -- name: GetTargetConfigByNodeName :one

@@ -23,6 +23,13 @@ INSERT INTO node_heartbeats (
   sqlc.arg(reported_at)
 );
 
+-- name: UpsertNodeLatestHeartbeat :exec
+INSERT INTO node_latest_heartbeats (node_id, heartbeat_id)
+VALUES (sqlc.arg(node_id), sqlc.arg(heartbeat_id))
+ON CONFLICT(node_id) DO UPDATE SET
+  heartbeat_id = excluded.heartbeat_id,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+
 -- name: TouchNodeSeen :exec
 UPDATE nodes
 SET
@@ -44,8 +51,8 @@ SELECT
   h.payload_json,
   h.reported_at,
   h.created_at
-FROM node_heartbeats h
-JOIN nodes n ON n.id = h.node_id
+FROM node_latest_heartbeats latest
+JOIN node_heartbeats h ON h.id = latest.heartbeat_id
+JOIN nodes n ON n.id = latest.node_id
 WHERE n.name = sqlc.arg(node_name)
-ORDER BY h.created_at DESC
 LIMIT 1;

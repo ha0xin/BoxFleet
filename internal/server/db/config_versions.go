@@ -235,33 +235,41 @@ func (db *DB) RecordHeartbeat(ctx context.Context, heartbeat Heartbeat) error {
 	if err != nil {
 		return err
 	}
-	if err := db.q.CreateNodeHeartbeat(ctx, store.CreateNodeHeartbeatParams{
-		ID:             heartbeatID,
-		NodeID:         node.ID,
-		AgentVersion:   heartbeat.AgentVersion,
-		SingBoxVersion: heartbeat.SingBoxVersion,
-		Status:         heartbeat.Status,
-		MemoryBytes:    heartbeat.MemoryBytes,
-		RxBytes:        heartbeat.RxBytes,
-		TxBytes:        heartbeat.TxBytes,
-		PayloadJson:    string(payload),
-		ReportedAt:     reportedAt,
-	}); err != nil {
-		return err
-	}
-	// First authenticated heartbeat completes enrollment: a pending node has
-	// reported in, so promote it to active. The conditional UPDATE (WHERE
-	// status='pending') makes this race-safe — if an admin disabled the node
-	// between GetNode above and here, it affects 0 rows and never reactivates it.
-	if node.Status == "pending" {
-		if _, err := db.q.PromotePendingNodeToActive(ctx, node.Name); err != nil {
+	return db.withTx(ctx, func(q *store.Queries) error {
+		if err := q.CreateNodeHeartbeat(ctx, store.CreateNodeHeartbeatParams{
+			ID:             heartbeatID,
+			NodeID:         node.ID,
+			AgentVersion:   heartbeat.AgentVersion,
+			SingBoxVersion: heartbeat.SingBoxVersion,
+			Status:         heartbeat.Status,
+			MemoryBytes:    heartbeat.MemoryBytes,
+			RxBytes:        heartbeat.RxBytes,
+			TxBytes:        heartbeat.TxBytes,
+			PayloadJson:    string(payload),
+			ReportedAt:     reportedAt,
+		}); err != nil {
 			return err
 		}
-	}
-	return db.q.TouchNodeSeen(ctx, store.TouchNodeSeenParams{
-		LastSeenAt:     sql.NullString{String: reportedAt, Valid: true},
-		SingBoxVersion: heartbeat.SingBoxVersion,
-		NodeID:         node.ID,
+		if err := q.UpsertNodeLatestHeartbeat(ctx, store.UpsertNodeLatestHeartbeatParams{
+			NodeID:      node.ID,
+			HeartbeatID: heartbeatID,
+		}); err != nil {
+			return err
+		}
+		// First authenticated heartbeat completes enrollment: a pending node has
+		// reported in, so promote it to active. The conditional UPDATE (WHERE
+		// status='pending') makes this race-safe — if an admin disabled the node
+		// between GetNode above and here, it affects 0 rows and never reactivates it.
+		if node.Status == "pending" {
+			if _, err := q.PromotePendingNodeToActive(ctx, node.Name); err != nil {
+				return err
+			}
+		}
+		return q.TouchNodeSeen(ctx, store.TouchNodeSeenParams{
+			LastSeenAt:     sql.NullString{String: reportedAt, Valid: true},
+			SingBoxVersion: heartbeat.SingBoxVersion,
+			NodeID:         node.ID,
+		})
 	})
 }
 

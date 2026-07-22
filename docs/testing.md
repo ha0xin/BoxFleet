@@ -151,6 +151,11 @@ current lifecycle test starts a local `boxfleet-server` on `127.0.0.1:18081`,
 starts the Vite dev server on `127.0.0.1:4173`, and drives the admin UI through
 node/user/proxy creation, access grant/revoke, and soft-delete visibility.
 
+Performance releases also follow [`performance.md`](performance.md). CI query
+plan tests protect bounded traffic, heartbeat, and Network Events reads; the
+documented P95 targets are verified against a production-shaped database on the
+release host because absolute timings are hardware-dependent.
+
 The Playwright config uses `/usr/bin/google-chrome-stable` by default to avoid
 downloading a browser. Override it if needed:
 

@@ -60,8 +60,8 @@ type LogEventDetail struct {
 }
 
 type logEventsPageParams struct {
-	NodeName  string
-	UserName  string
+	NodeID    string
+	UserID    string
 	Action    string
 	Search    string
 	StartTime string
@@ -228,12 +228,21 @@ func (db *DB) ListRecentLogEvents(ctx context.Context, limit int64) ([]LogEvent,
 }
 
 func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (LogEventPage, error) {
+	nodeID := ""
 	if strings.TrimSpace(filter.NodeName) != "" {
 		node, err := db.GetNode(ctx, filter.NodeName)
 		if err != nil {
 			return LogEventPage{}, err
 		}
-		filter.NodeName = node.Name
+		nodeID = node.ID
+	}
+	userID := ""
+	if strings.TrimSpace(filter.UserName) != "" {
+		user, err := db.GetProxyUser(ctx, filter.UserName)
+		if err != nil {
+			return LogEventPage{}, err
+		}
+		userID = user.ID
 	}
 	limit := filter.Limit
 	if limit <= 0 {
@@ -247,8 +256,8 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 		offset = 0
 	}
 	params := logEventsPageParams{
-		NodeName:  normalizeName(filter.NodeName),
-		UserName:  normalizeName(filter.UserName),
+		NodeID:    nodeID,
+		UserID:    userID,
 		Action:    strings.TrimSpace(filter.Action),
 		Search:    strings.TrimSpace(filter.Search),
 		StartTime: strings.TrimSpace(filter.Start),
@@ -292,13 +301,13 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams) (int64, []store.ListLogEventsPageRow, error) {
 	where := []string{"e.proxy_user_id IS NOT NULL"}
 	args := make([]any, 0, 4)
-	if params.NodeName != "" {
-		where = append(where, "n.name = ?")
-		args = append(args, params.NodeName)
+	if params.NodeID != "" {
+		where = append(where, "e.node_id = ?")
+		args = append(args, params.NodeID)
 	}
-	if params.UserName != "" {
-		where = append(where, "u.name = ?")
-		args = append(args, params.UserName)
+	if params.UserID != "" {
+		where = append(where, "e.proxy_user_id = ?")
+		args = append(args, params.UserID)
 	}
 	if params.Action != "" {
 		where = append(where, "LOWER(e.action) = LOWER(?)")
@@ -318,11 +327,15 @@ func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams
 		args = append(args, params.EndTime)
 	}
 	whereSQL := strings.Join(where, " AND ")
+	countJoins := ""
+	if params.Search != "" {
+		countJoins = `
+JOIN nodes n ON n.id = e.node_id
+JOIN proxy_users u ON u.id = e.proxy_user_id`
+	}
 	countQuery := `
 SELECT COUNT(*)
-FROM log_events e
-JOIN nodes n ON n.id = e.node_id
-JOIN proxy_users u ON u.id = e.proxy_user_id
+FROM log_events e` + countJoins + `
 WHERE ` + whereSQL
 	var total int64
 	if err := db.sql.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {

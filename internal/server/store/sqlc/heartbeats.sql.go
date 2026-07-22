@@ -78,10 +78,10 @@ SELECT
   h.payload_json,
   h.reported_at,
   h.created_at
-FROM node_heartbeats h
-JOIN nodes n ON n.id = h.node_id
+FROM node_latest_heartbeats latest
+JOIN node_heartbeats h ON h.id = latest.heartbeat_id
+JOIN nodes n ON n.id = latest.node_id
 WHERE n.name = ?1
-ORDER BY h.created_at DESC
 LIMIT 1
 `
 
@@ -121,5 +121,23 @@ type TouchNodeSeenParams struct {
 
 func (q *Queries) TouchNodeSeen(ctx context.Context, arg TouchNodeSeenParams) error {
 	_, err := q.db.ExecContext(ctx, touchNodeSeen, arg.LastSeenAt, arg.SingBoxVersion, arg.NodeID)
+	return err
+}
+
+const upsertNodeLatestHeartbeat = `-- name: UpsertNodeLatestHeartbeat :exec
+INSERT INTO node_latest_heartbeats (node_id, heartbeat_id)
+VALUES (?1, ?2)
+ON CONFLICT(node_id) DO UPDATE SET
+  heartbeat_id = excluded.heartbeat_id,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+`
+
+type UpsertNodeLatestHeartbeatParams struct {
+	NodeID      string `json:"node_id"`
+	HeartbeatID string `json:"heartbeat_id"`
+}
+
+func (q *Queries) UpsertNodeLatestHeartbeat(ctx context.Context, arg UpsertNodeLatestHeartbeatParams) error {
+	_, err := q.db.ExecContext(ctx, upsertNodeLatestHeartbeat, arg.NodeID, arg.HeartbeatID)
 	return err
 }

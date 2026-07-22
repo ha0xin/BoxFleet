@@ -302,6 +302,15 @@ CREATE INDEX IF NOT EXISTS idx_traffic_usage_node_observed
 CREATE INDEX IF NOT EXISTS idx_traffic_usage_auth_node_observed
   ON traffic_usage_deltas(auth_name, node_id, observed_at);
 
+CREATE TABLE IF NOT EXISTS traffic_usage_totals (
+  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+  direction TEXT NOT NULL CHECK (direction IN ('uplink', 'downlink')),
+  raw_bytes INTEGER NOT NULL DEFAULT 0 CHECK (raw_bytes >= 0),
+  billable_bytes INTEGER NOT NULL DEFAULT 0 CHECK (billable_bytes >= 0),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (proxy_user_id, direction)
+);
+
 CREATE TABLE IF NOT EXISTS node_heartbeats (
   id TEXT PRIMARY KEY,
   node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -318,6 +327,12 @@ CREATE TABLE IF NOT EXISTS node_heartbeats (
 
 CREATE INDEX IF NOT EXISTS idx_node_heartbeats_node_created
   ON node_heartbeats(node_id, created_at);
+
+CREATE TABLE IF NOT EXISTS node_latest_heartbeats (
+  node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+  heartbeat_id TEXT NOT NULL UNIQUE REFERENCES node_heartbeats(id) ON DELETE CASCADE,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 
 CREATE TABLE IF NOT EXISTS raw_log_entries (
   id TEXT PRIMARY KEY,
@@ -385,6 +400,10 @@ CREATE INDEX IF NOT EXISTS idx_log_events_user_created
 
 CREATE INDEX IF NOT EXISTS idx_log_events_window_end
   ON log_events(window_end);
+
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_window
+  ON log_events(window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_log_events_created_window
   ON log_events(created_at DESC, window_end DESC, id DESC);
