@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre={{ quote .AgentGuardPath }} guard --config {{ quote .AgentConfigPath }}
 ExecStart={{ quote .AgentPath }} run --config {{ quote .AgentConfigPath }}
 Restart={{ .Restart }}
 RestartSec={{ .RestartSec }}

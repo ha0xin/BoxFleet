@@ -84,10 +84,45 @@ jobs:
           set -euo pipefail
           chmod 0755 dist/artifacts/*
           boxfleet_version="${{ steps.version.outputs.value }}"
+          agent_name="boxfleet-agent-${boxfleet_version}-linux-amd64"
+          sing_box_name="sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64"
+          agent_sha256="$(sha256sum "dist/artifacts/${agent_name}" | awk '{print $1}')"
+          sing_box_sha256="$(sha256sum "dist/artifacts/${sing_box_name}" | awk '{print $1}')"
+          agent_size="$(stat -c '%s' "dist/artifacts/${agent_name}")"
+          sing_box_size="$(stat -c '%s' "dist/artifacts/${sing_box_name}")"
+          jq -n \
+            --arg release "$boxfleet_version" \
+            --arg agent_version "$boxfleet_version" \
+            --arg agent_name "$agent_name" \
+            --arg agent_sha256 "$agent_sha256" \
+            --argjson agent_size "$agent_size" \
+            --arg sing_box_version "${{ steps.version.outputs.sing_box }}" \
+            --arg sing_box_name "$sing_box_name" \
+            --arg sing_box_sha256 "$sing_box_sha256" \
+            --argjson sing_box_size "$sing_box_size" \
+            '{
+              release: $release,
+              platforms: {
+                "linux/amd64": {
+                  agent: {
+                    version: $agent_version,
+                    name: $agent_name,
+                    sha256: $agent_sha256,
+                    size: $agent_size
+                  },
+                  sing_box: {
+                    version: $sing_box_version,
+                    name: $sing_box_name,
+                    sha256: $sing_box_sha256,
+                    size: $sing_box_size
+                  }
+                }
+              }
+            }' > dist/boxfleet-update.json
           tar -C dist/artifacts -czf "dist/boxfleet-${boxfleet_version}-linux-amd64.tar.gz" .
           (
             cd dist
-            sha256sum "boxfleet-${boxfleet_version}-linux-amd64.tar.gz" artifacts/* > SHA256SUMS
+            sha256sum "boxfleet-${boxfleet_version}-linux-amd64.tar.gz" boxfleet-update.json artifacts/* > SHA256SUMS
           )
 
       - name: Upload workflow artifact
@@ -97,6 +132,7 @@ jobs:
           path: |
             dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz
             dist/SHA256SUMS
+            dist/boxfleet-update.json
             dist/artifacts/*
           if-no-files-found: error
           retention-days: 30
@@ -109,6 +145,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz \
             dist/SHA256SUMS \
+            dist/boxfleet-update.json \
             dist/artifacts/bf-${{ steps.version.outputs.value }}-linux-amd64 \
             dist/artifacts/boxfleet-server-${{ steps.version.outputs.value }}-linux-amd64 \
             dist/artifacts/boxfleet-agent-${{ steps.version.outputs.value }}-linux-amd64 \

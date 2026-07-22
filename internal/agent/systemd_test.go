@@ -10,6 +10,7 @@ func TestRenderSystemdUnitsQuotesPaths(t *testing.T) {
 		SingBoxPath:       "/opt/boxfleet/bin/sing box",
 		SingBoxConfig:     "/etc/boxfleet/sing-box.json",
 		AgentPath:         "/opt/boxfleet/bin/boxfleet-agent",
+		AgentGuardPath:    "/opt/boxfleet/libexec/boxfleet-agent-guard",
 		AgentConfigPath:   "/etc/boxfleet/agent config.json",
 		Restart:           "on-failure",
 		RestartSec:        "3s",
@@ -31,5 +32,8 @@ func TestRenderSystemdUnitsQuotesPaths(t *testing.T) {
 	}
 	if !strings.Contains(unit, `ExecStart="/opt/boxfleet/bin/boxfleet-agent" run --config "/etc/boxfleet/agent config.json"`) {
 		t.Fatalf("agent unit did not quote ExecStart args:\n%s", unit)
+	}
+	if !strings.Contains(unit, `ExecStartPre="/opt/boxfleet/libexec/boxfleet-agent-guard" guard --config "/etc/boxfleet/agent config.json"`) {
+		t.Fatalf("agent unit did not configure rollback guard:\n%s", unit)
 	}
 }

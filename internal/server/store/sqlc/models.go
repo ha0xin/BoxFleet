@@ -47,6 +47,11 @@ type LogEvent struct {
 	CreatedAt    string         `json:"created_at"`
 }
 
+type LogEventSearchDocument struct {
+	ID      int64  `json:"id"`
+	EventID string `json:"event_id"`
+}
+
 type Node struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`
@@ -96,6 +101,47 @@ type NodeNameAlias struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type NodeOperation struct {
+	ID                       string         `json:"id"`
+	NodeID                   string         `json:"node_id"`
+	Kind                     string         `json:"kind"`
+	Status                   string         `json:"status"`
+	Phase                    string         `json:"phase"`
+	PayloadJson              string         `json:"payload_json"`
+	ResultJson               string         `json:"result_json"`
+	IdempotencyKey           string         `json:"idempotency_key"`
+	RequiredCapabilitiesJson string         `json:"required_capabilities_json"`
+	Attempt                  int64          `json:"attempt"`
+	LeaseTokenHash           sql.NullString `json:"lease_token_hash"`
+	LeaseExpiresAt           sql.NullString `json:"lease_expires_at"`
+	CancelRequested          int64          `json:"cancel_requested"`
+	NotBefore                sql.NullString `json:"not_before"`
+	ExpiresAt                sql.NullString `json:"expires_at"`
+	RequestedBy              string         `json:"requested_by"`
+	RequestedAt              string         `json:"requested_at"`
+	ClaimedAt                sql.NullString `json:"claimed_at"`
+	StartedAt                sql.NullString `json:"started_at"`
+	FinishedAt               sql.NullString `json:"finished_at"`
+	UpdatedAt                string         `json:"updated_at"`
+	Error                    string         `json:"error"`
+	RetryOf                  sql.NullString `json:"retry_of"`
+}
+
+type NodeOperationEvent struct {
+	ID          string `json:"id"`
+	OperationID string `json:"operation_id"`
+	Attempt     int64  `json:"attempt"`
+	Sequence    int64  `json:"sequence"`
+	Status      string `json:"status"`
+	Phase       string `json:"phase"`
+	Message     string `json:"message"`
+	DetailsJson string `json:"details_json"`
+	ResultJson  string `json:"result_json"`
+	Error       string `json:"error"`
+	ReportedAt  string `json:"reported_at"`
+	CreatedAt   string `json:"created_at"`
+}
+
 type NodeOutbound struct {
 	ID           string `json:"id"`
 	NodeID       string `json:"node_id"`
@@ -114,6 +160,38 @@ type NodeToken struct {
 	CreatedAt   string         `json:"created_at"`
 	LastUsedAt  sql.NullString `json:"last_used_at"`
 	RevokedAt   sql.NullString `json:"revoked_at"`
+}
+
+type NodeUpdateCampaign struct {
+	ID             string         `json:"id"`
+	Release        string         `json:"release"`
+	ComponentsJson string         `json:"components_json"`
+	Status         string         `json:"status"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	SpecHash       string         `json:"spec_hash"`
+	BatchSize      int64          `json:"batch_size"`
+	CurrentBatch   int64          `json:"current_batch"`
+	RequestedBy    string         `json:"requested_by"`
+	RequestedAt    string         `json:"requested_at"`
+	StartedAt      sql.NullString `json:"started_at"`
+	FinishedAt     sql.NullString `json:"finished_at"`
+	UpdatedAt      string         `json:"updated_at"`
+	Error          string         `json:"error"`
+}
+
+type NodeUpdateCampaignMember struct {
+	CampaignID  string         `json:"campaign_id"`
+	NodeID      string         `json:"node_id"`
+	Position    int64          `json:"position"`
+	BatchNumber int64          `json:"batch_number"`
+	Kind        string         `json:"kind"`
+	PayloadJson string         `json:"payload_json"`
+	OperationID sql.NullString `json:"operation_id"`
+	Status      string         `json:"status"`
+	Error       string         `json:"error"`
+	StartedAt   sql.NullString `json:"started_at"`
+	FinishedAt  sql.NullString `json:"finished_at"`
+	UpdatedAt   string         `json:"updated_at"`
 }
 
 type Proxy struct {

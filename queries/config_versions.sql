@@ -147,7 +147,8 @@ SELECT
   s.updated_at,
   h.reported_at AS latest_heartbeat,
   h.agent_version,
-  COALESCE(h.sing_box_version, n.sing_box_version) AS sing_box_version
+  COALESCE(h.sing_box_version, n.sing_box_version) AS sing_box_version,
+  h.payload_json AS heartbeat_payload_json
 FROM nodes n
 LEFT JOIN node_config_status s ON s.node_id = n.id
 LEFT JOIN config_versions target ON target.id = s.target_config_version_id

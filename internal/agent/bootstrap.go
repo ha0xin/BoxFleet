@@ -54,11 +54,7 @@ func installCurrentBinary(target string) error {
 	if samePath(current, target) {
 		return nil
 	}
-	raw, err := os.ReadFile(current)
-	if err != nil {
-		return err
-	}
-	return atomicWrite(target, raw, defaultBinaryFilePerm)
+	return atomicCopyFile(current, target, defaultBinaryFilePerm)
 }
 
 func samePath(a, b string) bool {

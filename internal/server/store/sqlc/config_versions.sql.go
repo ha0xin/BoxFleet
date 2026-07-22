@@ -268,7 +268,8 @@ SELECT
   s.updated_at,
   h.reported_at AS latest_heartbeat,
   h.agent_version,
-  COALESCE(h.sing_box_version, n.sing_box_version) AS sing_box_version
+  COALESCE(h.sing_box_version, n.sing_box_version) AS sing_box_version,
+  h.payload_json AS heartbeat_payload_json
 FROM nodes n
 LEFT JOIN node_config_status s ON s.node_id = n.id
 LEFT JOIN config_versions target ON target.id = s.target_config_version_id
@@ -293,6 +294,7 @@ type ListNodeConfigStatusesRow struct {
 	LatestHeartbeat        sql.NullString `json:"latest_heartbeat"`
 	AgentVersion           sql.NullString `json:"agent_version"`
 	SingBoxVersion         string         `json:"sing_box_version"`
+	HeartbeatPayloadJson   sql.NullString `json:"heartbeat_payload_json"`
 }
 
 func (q *Queries) ListNodeConfigStatuses(ctx context.Context) ([]ListNodeConfigStatusesRow, error) {
@@ -319,6 +321,7 @@ func (q *Queries) ListNodeConfigStatuses(ctx context.Context) ([]ListNodeConfigS
 			&i.LatestHeartbeat,
 			&i.AgentVersion,
 			&i.SingBoxVersion,
+			&i.HeartbeatPayloadJson,
 		); err != nil {
 			return nil, err
 		}

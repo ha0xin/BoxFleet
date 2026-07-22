@@ -14,10 +14,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/renameio/v2"
 	"github.com/google/uuid"
 
 	"github.com/haoxin/boxfleet/internal/model"
@@ -44,26 +47,31 @@ const (
 )
 
 type Config struct {
-	NodeName        string `json:"node_name"`
-	Token           string `json:"token"`
-	ServerURL       string `json:"server_url"`
-	SingBoxURL      string `json:"sing_box_url"`
-	InstallDir      string `json:"install_dir"`
-	SingBoxPath     string `json:"sing_box_path"`
-	SingBoxConfig   string `json:"sing_box_config"`
-	SingBoxService  string `json:"sing_box_service"`
-	AgentPath       string `json:"agent_path"`
-	AgentConfigPath string `json:"agent_config_path"`
-	AgentService    string `json:"agent_service"`
-	PollInterval    string `json:"poll_interval"`
-	StatePath       string `json:"state_path"`
-	V2RayAPIAddress string `json:"v2ray_api_address"`
+	NodeName            string `json:"node_name"`
+	Token               string `json:"token"`
+	ServerURL           string `json:"server_url"`
+	SingBoxURL          string `json:"sing_box_url"`
+	InstallDir          string `json:"install_dir"`
+	SingBoxPath         string `json:"sing_box_path"`
+	SingBoxConfig       string `json:"sing_box_config"`
+	SingBoxService      string `json:"sing_box_service"`
+	AgentPath           string `json:"agent_path"`
+	AgentGuardPath      string `json:"agent_guard_path"`
+	AgentGuardStatePath string `json:"agent_guard_state_path"`
+	AgentConfigPath     string `json:"agent_config_path"`
+	AgentService        string `json:"agent_service"`
+	PollInterval        string `json:"poll_interval"`
+	StatePath           string `json:"state_path"`
+	OperationStatePath  string `json:"operation_state_path"`
+	V2RayAPIAddress     string `json:"v2ray_api_address"`
 }
 
 type Agent struct {
-	Config Config
-	Runner Runner
-	Client *http.Client
+	Config          Config
+	Runner          Runner
+	Client          *http.Client
+	TrafficReporter func(context.Context) error
+	maintenanceMu   sync.Mutex
 }
 
 type ConfigResponse struct {
@@ -220,6 +228,12 @@ func (c *Config) ApplyDefaults() {
 	if c.AgentPath == "" {
 		c.AgentPath = filepath.Join(c.InstallDir, "bin", "boxfleet-agent")
 	}
+	if c.AgentGuardPath == "" {
+		c.AgentGuardPath = filepath.Join(c.InstallDir, "libexec", "boxfleet-agent-guard")
+	}
+	if c.AgentGuardStatePath == "" {
+		c.AgentGuardStatePath = filepath.Join(c.InstallDir, "state", "agent-update-guard.json")
+	}
 	if c.AgentConfigPath == "" {
 		c.AgentConfigPath = DefaultConfigPath
 	}
@@ -231,6 +245,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.StatePath == "" {
 		c.StatePath = filepath.Join(c.InstallDir, "state", "agent-state.json")
+	}
+	if c.OperationStatePath == "" {
+		c.OperationStatePath = filepath.Join(c.InstallDir, "state", "operation-state.json")
 	}
 	if c.V2RayAPIAddress == "" {
 		c.V2RayAPIAddress = DefaultV2RayAPIAddress
@@ -266,6 +283,9 @@ func (a *Agent) Check(ctx context.Context) error {
 	if err := a.CheckSingBoxV2RayAPI(ctx); err != nil {
 		return err
 	}
+	if err := a.ensureAgentGuardBinary(); err != nil {
+		return err
+	}
 	if _, err := os.Stat(a.Config.SingBoxConfig); err == nil {
 		return a.Runner.Run(ctx, a.Config.SingBoxPath, "check", "-c", a.Config.SingBoxConfig)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -281,6 +301,9 @@ func (a *Agent) Install(ctx context.Context) error {
 		}
 	}
 	if err := a.CheckSingBoxV2RayAPI(ctx); err != nil {
+		return err
+	}
+	if err := a.ensureAgentGuardBinary(); err != nil {
 		return err
 	}
 	if err := a.InstallSystemdUnits(); err != nil {
@@ -319,26 +342,16 @@ func (a *Agent) CheckSingBoxV2RayAPI(ctx context.Context) error {
 }
 
 func (a *Agent) DownloadSingBox(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.Config.SingBoxURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := a.client().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download sing-box: %s", resp.Status)
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, resp.Body); err != nil {
-		return err
-	}
-	return atomicWrite(a.Config.SingBoxPath, buf.Bytes(), defaultBinaryFilePerm)
+	return a.streamUnverifiedBinary(ctx, a.Config.SingBoxURL, a.Config.SingBoxPath)
 }
 
 func (a *Agent) Once(ctx context.Context) error {
+	a.maintenanceMu.Lock()
+	defer a.maintenanceMu.Unlock()
+	return a.once(ctx)
+}
+
+func (a *Agent) once(ctx context.Context) error {
 	response, err := a.FetchConfigVersioned(ctx)
 	if err != nil {
 		return err
@@ -489,18 +502,36 @@ func (a *Agent) Run(ctx context.Context) error {
 	if interval <= 0 {
 		interval = DefaultPollInterval
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if err := a.Once(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
+	if err := a.Once(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
+	} else if err := a.ConfirmAgentUpdateGuard(); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent confirm update guard failed: %v\n", err)
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errorsOut := make(chan error, 2)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				errorsOut <- context.Cause(runCtx)
+				return
+			case <-ticker.C:
+				if err := a.Once(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+					fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
+				}
+			}
+		}
+	}()
+	go func() { errorsOut <- a.RunOperations(runCtx) }()
+	err = <-errorsOut
+	cancel()
+	if err == nil {
+		return context.Cause(runCtx)
+	}
+	return err
 }
 
 func (a *Agent) ReportTraffic(ctx context.Context) error {
@@ -952,6 +983,9 @@ func (a *Agent) ReportHeartbeat(ctx context.Context, response ConfigResponse, st
 	}
 	payload := model.Heartbeat{
 		AgentVersion:         Version,
+		AgentGOOS:            runtime.GOOS,
+		AgentGOARCH:          runtime.GOARCH,
+		Capabilities:         agentCapabilities(),
 		SingBoxVersion:       singBoxVersion,
 		Status:               status,
 		CurrentConfigVersion: response.VersionID,
@@ -1014,6 +1048,7 @@ func (a *Agent) InstallSystemdUnits() error {
 		SingBoxPath:       a.Config.SingBoxPath,
 		SingBoxConfig:     a.Config.SingBoxConfig,
 		AgentPath:         a.Config.AgentPath,
+		AgentGuardPath:    a.Config.AgentGuardPath,
 		AgentConfigPath:   a.Config.AgentConfigPath,
 		Restart:           "on-failure",
 		RestartSec:        "3s",
@@ -1029,10 +1064,10 @@ func (a *Agent) InstallSystemdUnits() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join("/etc/systemd/system", a.Config.SingBoxService), []byte(singBoxUnit), 0o644); err != nil {
+	if err := atomicWrite(filepath.Join("/etc/systemd/system", a.Config.SingBoxService), []byte(singBoxUnit), 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join("/etc/systemd/system", a.Config.AgentService), []byte(agentUnit), 0o644)
+	return atomicWrite(filepath.Join("/etc/systemd/system", a.Config.AgentService), []byte(agentUnit), 0o644)
 }
 
 func (a *Agent) client() *http.Client {
@@ -1073,22 +1108,5 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return renameio.WriteFile(path, data, perm)
 }

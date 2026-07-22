@@ -44,6 +44,10 @@ Cover:
 - unique constraints
 - foreign-key constraints
 - not-found errors
+- operation idempotency conflicts, single-active constraints, lease expiry, and
+  exact terminal-event replay
+- update-campaign canary/batch release, failure pause, retry lineage, and later
+  batch containment
 
 These tests should exercise the `internal/server/db` facade, not the generated
 `sqlc` package directly. The generated package is tested indirectly by the
@@ -92,6 +96,12 @@ Use fakes for:
 - filesystem writes
 - command runner for `sing-box check`
 - service reloader
+
+Managed update tests additionally use `httptest.Server` and temporary install
+directories to prove Range resume, direct-to-file download, checksum failure
+cleanup, versioned switching, disabled-node stop semantics, sing-box health
+rollback, and the three-start agent guard. Never invoke a real `systemctl` from
+these tests.
 
 Real remote `sing-box` checks belong in the deployment smoke flow, not unit or
 integration tests.

@@ -38,6 +38,10 @@ func main() {
 		runAgentCommand("run", func(ctx context.Context, a *agent.Agent) error {
 			return a.Run(ctx)
 		})
+	case "guard":
+		runAgentCommand("guard", func(_ context.Context, a *agent.Agent) error {
+			return a.RunAgentGuard()
+		})
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -81,6 +85,7 @@ Usage:
   boxfleet-agent bootstrap <boxfleet-bootstrap:string>
   boxfleet-agent install [--config /etc/boxfleet/agent.json]
   boxfleet-agent run [--config /etc/boxfleet/agent.json]
+  boxfleet-agent guard [--config /etc/boxfleet/agent.json]
   boxfleet-agent once [--config /etc/boxfleet/agent.json]
   boxfleet-agent check [--config /etc/boxfleet/agent.json]
   boxfleet-agent version`)

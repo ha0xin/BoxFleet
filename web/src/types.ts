@@ -22,8 +22,96 @@ export type AdminNode = {
   apply_error?: string;
   latest_heartbeat?: string;
   agent_version?: string;
+  agent_goos?: string;
+  agent_goarch?: string;
+  capabilities?: string[];
+  active_operation?: NodeOperation;
   has_active_token?: boolean;
   deleted_at: string;
+};
+
+export type NodeOperationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
+
+export type NodeOperation = {
+  id: string;
+  node_id: string;
+  kind: string;
+  status: NodeOperationStatus;
+  phase: string;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+  idempotency_key: string;
+  required_capabilities: string[];
+  attempt: number;
+  lease_expires_at?: string;
+  cancel_requested: boolean;
+  requested_at: string;
+  started_at?: string;
+  finished_at?: string;
+  updated_at: string;
+  error?: string;
+};
+
+export type NodeOperationEvent = {
+  id: string;
+  operation_id: string;
+  attempt: number;
+  sequence: number;
+  status: NodeOperationStatus;
+  phase: string;
+  message?: string;
+  details: Record<string, unknown>;
+  result: Record<string, unknown>;
+  error?: string;
+  reported_at: string;
+};
+
+export type NodeOperationDetail = {
+  operation: NodeOperation;
+  events: NodeOperationEvent[];
+};
+
+export type AdminRelease = {
+  repo: string;
+  boxfleet_version: string;
+  sing_box_version: string;
+  updates_enabled: boolean;
+  update_error?: string;
+};
+
+export type NodeUpdateCampaignMember = {
+  campaign_id: string;
+  node_id: string;
+  node_name: string;
+  position: number;
+  batch_number: number;
+  kind: string;
+  operation_id?: string;
+  status: string;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+  updated_at: string;
+};
+
+export type NodeUpdateCampaign = {
+  id: string;
+  release: string;
+  components: string[];
+  status: "queued" | "running" | "paused" | "succeeded" | "cancelled";
+  idempotency_key: string;
+  batch_size: number;
+  current_batch: number;
+  requested_at: string;
+  started_at?: string;
+  finished_at?: string;
+  updated_at: string;
+  error?: string;
+};
+
+export type NodeUpdateCampaignDetail = {
+  campaign: NodeUpdateCampaign;
+  members: NodeUpdateCampaignMember[];
 };
 
 export type ConfigChange = {
@@ -197,6 +285,8 @@ export type Overview = {
     repo: string;
     boxfleet_version: string;
     sing_box_version: string;
+    updates_enabled?: boolean;
+    update_error?: string;
   };
 };
 

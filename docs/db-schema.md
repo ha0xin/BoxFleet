@@ -23,6 +23,8 @@ Migration `016_soft_delete.sql` adds reversible soft deletion for users, nodes,
 proxies, and proxy accesses. Default inventory and operational queries exclude
 rows whose `deleted_at` is set; admin `deleted=true` views expose them for
 restore.
+Migration `020_node_operations.sql` adds durable node operations, immutable
+progress events, and canary/batched update campaigns.
 Regenerate sqlc after editing queries or the schema snapshot.
 
 ## Core Tables
@@ -114,6 +116,25 @@ created_at
 last_used_at
 revoked_at
 ```
+
+### node_operations and node_operation_events
+
+`node_operations` is the durable command queue. A partial unique index allows
+only one `queued`/`running` operation per node. It stores the typed kind,
+server-selected payload, required capabilities, idempotency key, attempt,
+hashed lease token, lease/expiry timestamps, cancellation flag, phase, result,
+error, and optional `retry_of` relation.
+
+`node_operation_events` is append-only progress per `(operation, attempt,
+sequence)`. Exact replay of an accepted event is idempotent, including a
+terminal event whose HTTP response was lost.
+
+### node_update_campaigns and node_update_campaign_members
+
+One active campaign releases exactly one canary, followed by bounded batches.
+Members retain order, batch, fixed payload, current child operation, and error.
+Failed campaigns remain `paused` until explicitly retried or cancelled; a new
+child preserves the failed operation through `retry_of`.
 
 ## Proxies And Access
 

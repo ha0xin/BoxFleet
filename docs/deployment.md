@@ -45,6 +45,7 @@ The release workflow uploads:
 - `boxfleet-agent-<boxfleet-version>-linux-amd64`
 - `sing-box-v1.13.13-linux-amd64` built with `with_v2ray_api`
 - `boxfleet-<boxfleet-version>-linux-amd64.tar.gz`
+- `boxfleet-update.json`
 - `SHA256SUMS`
 
 The release workflow builds `sing-box` from pinned upstream tag `v1.13.13` with
@@ -77,6 +78,12 @@ sudo install -m 0755 "bf-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/bf
 sudo install -m 0755 "boxfleet-server-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/boxfleet-server
 sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db init
 ```
+
+The running server normally reads `boxfleet-update.json` and its fixed assets
+from the matching GitHub Release. For an air-gapped or local mirror, copy the
+catalog plus its `artifacts/` directory to one directory and add
+`--artifact-dir /opt/boxfleet/releases/<version>` to the server command. The
+server serves only that directory under `/artifacts`.
 
 Create a systemd unit for the management server:
 
@@ -173,6 +180,78 @@ GET /api/node/config
 When the target version or hash changes, the agent writes a candidate config,
 runs `sing-box check`, atomically replaces the active config, restarts
 `sing-box`, and reports the result.
+
+## Managed Operations And Updates
+
+Privileged commands use a separate outbound HTTPS long poll:
+
+```text
+POST /api/node/operations/claim   (45-second wait)
+```
+
+The server stores every operation, lease, progress event, retry, and rollout
+member in SQLite. An in-memory notification only wakes a waiting request early;
+it is never the durable queue. The 45-second wait is below Cloudflare's
+120-second proxy read timeout and the Tunnel `keepAliveTimeout` default of 90
+seconds. Preserve POST requests and disable caching on `/api/node/*`; do not set
+a reverse-proxy timeout below 55 seconds.
+
+The Nodes page compares heartbeat versions with the formal server release. A
+single update can select agent, sing-box, or both. `Update all` releases one
+online active canary, then batches of at most two; a failure pauses expansion.
+After repairing the cause, `Retry failed batch` creates explicit `retry_of`
+operations. Offline nodes keep queued work. A paused/disabled node may update,
+but its sing-box service remains stopped throughout and after the update.
+
+Downloads stream directly into
+`/opt/boxfleet/downloads/<operation>/...partial`; the agent never buffers a
+binary in memory. Immutable partial downloads may resume. Exact size and SHA256
+are checked before the candidate is installed under
+`/opt/boxfleet/releases/<component>/<version>/`; stable paths in
+`/opt/boxfleet/bin` are atomically switched symlinks.
+
+Before a sing-box switch, the agent persists pending traffic and checks the
+current config with the candidate. A failed restart restores and verifies the
+previous sing-box target. Agent updates use a stable
+`/opt/boxfleet/libexec/boxfleet-agent-guard` in systemd `ExecStartPre`; three
+failed candidate starts restore the prior agent target.
+
+See [`node-operations.md`](node-operations.md) for the complete protocol and
+state model.
+
+### One-time transition for existing nodes
+
+Legacy agents do not know the claim endpoint, so they cannot receive their
+first managed self-update. Install one formal operations-capable release
+manually on every existing node:
+
+```bash
+BOXFLEET_VERSION=v0.5.0
+curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"
+curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+sudo install -m 0755 "boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/boxfleet-agent
+sudo systemctl restart boxfleet-agent.service
+```
+
+Wait for “Manual agent upgrade required” to disappear from the Nodes page
+before starting a rollout. No `update_protocol` migration is needed; heartbeat
+capability names are the compatibility contract.
+
+### Operational inspection
+
+```bash
+systemctl status boxfleet-agent boxfleet-sing-box --no-pager
+readlink -f /opt/boxfleet/bin/boxfleet-agent
+readlink -f /opt/boxfleet/bin/boxfleet-agent.previous
+readlink -f /opt/boxfleet/bin/sing-box
+sudo test -f /opt/boxfleet/state/operation-state.json && sudo cat /opt/boxfleet/state/operation-state.json
+sudo test -f /opt/boxfleet/state/agent-update-guard.json && sudo cat /opt/boxfleet/state/agent-update-guard.json
+```
+
+Do not delete a local operation state file while its server operation is active.
+Use safe cancel in the UI and wait for a terminal event. The `.previous` link
+and immutable release targets remain available for emergency inspection.
 
 ## Verify
 

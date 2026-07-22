@@ -292,50 +292,31 @@ UI work is the Traffic page.
    - For frontend-only changes, `npm --prefix web run build` is the minimum;
      use Playwright screenshots/geometry checks for layout-sensitive Kumo work.
 
-## Planned: Agent Self-Update (UI-triggered)
+## Node Operations And Managed Updates (implemented)
 
-Agreed design, not yet built. Today agents never self-update: `install.sh`
-injects the running server version so *new* nodes download a matching
-`boxfleet-agent` from the GitHub Release, but an already-bootstrapped agent has
-no self-update path (`internal/agent/agent.go` only knows its service name).
+The Nodes page now shows agent and sing-box current → target versions,
+capability gaps, offline queued work, live phases/errors, single-node Update,
+and canary `Update all`. This is a durable operation queue, not a config header
+flag. See `docs/node-operations.md` for the contract and `docs/deployment.md`
+for the one-time transition of legacy agents.
 
-Target UX: after the server is upgraded, the Web UI shows the new version and an
-**Update** button per node plus an **Update all** action; clicking it makes that
-node's agent upgrade itself on its next poll.
+Key implementation files:
 
-Confirmed decisions:
+- `migrations/020_node_operations.sql`, `queries/node_operations.sql`, and
+  `queries/node_update_campaigns.sql` — operations, exact event outbox, leases,
+  retries, and rollout members.
+- `internal/server/api/node_operations.go`, `update_catalog.go`, and
+  `update_campaigns.go` — 45-second long poll, fixed assets, cancellation,
+  canary/batch progression, failure pause, and failed-batch retry.
+- `internal/agent/operations.go`, `updater.go`, and `update_guard.go` — local
+  checkpoint/outbox, streaming resume/checksum, versioned symlinks, sing-box
+  rollback, and the agent restart guard.
+- `web/src/pages/node-update-dialogs.tsx` and `nodes.tsx` — progress/error UI and
+  rollout controls using native Kumo components.
 
-- **Target version is pinned to the server version** (the release bundles a
-  matching agent). A node is "outdated" when its reported `agent_version`
-  differs from the server version. No free-form version entry.
-- Phase the work: **Phase 1** (low risk) exposes the server version to the UI
-  and shows "update available" per node by comparing to `agent_version` — no
-  action yet. **Phase 2** adds the trigger + agent self-update + buttons.
-- **No automatic rollback in v1** — SHA256-verify the download, sanity-check the
-  new binary (`<new> version`) before swapping, keep a backup of the old binary,
-  and document manual recovery. A `systemd OnFailure`-driven auto-rollback is a
-  later v2 consideration.
-
-Proposed mechanism (pull-based, matching the agent-only-pulls architecture):
-
-1. Admin clicks Update → server marks the node "agent-update requested" (a new
-   nodes column / flag). "Update all" flags every outdated active node.
-2. On the next `GET /api/node/config` poll, if the flag is set and the reported
-   version differs, the response carries a directive header
-   (`X-BoxFleet-Agent-Update: <server-version>`).
-3. The agent downloads `boxfleet-agent-<version>-linux-amd64` from the Release
-   (same source as `install.sh`), SHA-verifies it, backs up + atomically
-   replaces its own binary, and `systemctl restart boxfleet-agent`.
-4. After restart the agent's heartbeat reports the new version; the server
-   clears the flag once `agent_version == server-version` (version match is the
-   ack, so it cannot loop).
-
-Risks to keep in mind when building Phase 2:
-
-- A broken new binary leaves that node's agent down with no remote fix (the
-  agent is the thing that updates) — hence SHA-verify + sanity-check + backup,
-  and **test on one node first**.
-- Sequence the self-update so it does not interrupt an in-flight config apply.
+There is no `update_protocol` field. Named capabilities negotiate compatibility.
+Generic admin commands cannot inject an update URL; only the matching formal
+`boxfleet-update.json` catalog can create an update.
 
 ## Known Caveats
 

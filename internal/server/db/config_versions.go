@@ -36,6 +36,9 @@ type NodeConfigStatus struct {
 	UpdatedAt              sql.NullString
 	LatestHeartbeat        sql.NullString
 	AgentVersion           string
+	AgentGOOS              string
+	AgentGOARCH            string
+	Capabilities           []string
 	SingBoxVersion         string
 }
 
@@ -150,6 +153,7 @@ func (db *DB) GetNodeConfigStatus(ctx context.Context, nodeName string) (NodeCon
 		status.LatestHeartbeat = sql.NullString{String: heartbeat.ReportedAt, Valid: true}
 		status.AgentVersion = heartbeat.AgentVersion
 		status.SingBoxVersion = heartbeat.SingBoxVersion
+		applyHeartbeatCapabilities(&status, heartbeat.PayloadJson)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return NodeConfigStatus{}, err
 	}
@@ -179,12 +183,25 @@ func (db *DB) ListNodeConfigStatuses(ctx context.Context) ([]NodeConfigStatus, e
 			AgentVersion:           row.AgentVersion.String,
 			SingBoxVersion:         row.SingBoxVersion,
 		}
+		if row.HeartbeatPayloadJson.Valid {
+			applyHeartbeatCapabilities(&status, row.HeartbeatPayloadJson.String)
+		}
 		if row.LastApplyStatus.Valid {
 			status.LastApplyStatus = row.LastApplyStatus.String
 		}
 		out = append(out, status)
 	}
 	return out, nil
+}
+
+func applyHeartbeatCapabilities(status *NodeConfigStatus, payload string) {
+	var heartbeat model.Heartbeat
+	if json.Unmarshal([]byte(payload), &heartbeat) != nil {
+		return
+	}
+	status.AgentGOOS = heartbeat.AgentGOOS
+	status.AgentGOARCH = heartbeat.AgentGOARCH
+	status.Capabilities = normalizeCapabilities(heartbeat.Capabilities)
 }
 
 func (db *DB) RecordApplyResult(ctx context.Context, result ApplyResult) error {

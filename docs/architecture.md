@@ -74,6 +74,11 @@ implementations:
 - react-hook-form and zod for frontend form state and validation.
 - date-fns and react-day-picker for frontend time formatting and date/range
   picking.
+- cavaliergopher/grab for streaming/resumable binary downloads and SHA256
+  verification.
+- google/renameio for durable atomic files and symlink switches.
+- sethvargo/go-retry for context-aware retry/backoff with jitter.
+- golang.org/x/mod/semver for release/version validation.
 
 The Web UI is built from `web/` and emitted into ignored generated files under
 `internal/server/webui/assets/generated`, where it is embedded into
@@ -105,6 +110,11 @@ days.
   report only positive deltas.
 - Report node health, version, memory, interface counters, and raw recent log
   deltas. Protocol-specific log parsing belongs on the server side.
+- Long-poll for durable typed operations, renew an opaque lease, persist an
+  exact progress outbox, and resume the same operation after process restarts.
+- Install server-selected agent/sing-box assets as versioned binaries using
+  streaming downloads. Keep disabled nodes disabled, preserve traffic before a
+  sing-box restart, and automatically restore failed candidates.
 - Avoid public management surfaces by default. A future node maintenance port
   should bind to localhost or a private interface such as Tailscale, not the
   public internet.

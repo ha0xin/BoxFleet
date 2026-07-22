@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+ExecStartPre=/opt/boxfleet/libexec/boxfleet-agent-guard guard --config /etc/boxfleet/agent.json
 ExecStart=/opt/boxfleet/bin/boxfleet-agent run --config /etc/boxfleet/agent.json
 Restart=always
 RestartSec=10s

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowsClockwiseIcon,
+  ArrowRightIcon,
   CheckCircleIcon,
   DotsThreeIcon,
   DownloadSimpleIcon,
@@ -14,9 +15,9 @@ import {
   SortDescendingIcon,
   TrashIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Banner, Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
 
-import type { AdminNode, AdminNodesResponse } from "../types";
+import type { AdminNode, AdminNodesResponse, AdminRelease, NodeUpdateCampaignDetail } from "../types";
 import {
   adminPath,
   formatNodeVersion,
@@ -29,11 +30,16 @@ import {
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
+import { NodeUpdateDialog, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type NodeFilter = "all" | "active" | "disabled" | "degraded" | "deleted";
 type NodeSort = "name" | "status" | "public_host" | "last_seen_at" | "sing_box_version";
 type SortDirection = "asc" | "desc";
+type UpdateDialogState =
+  | { mode: "node"; node: AdminNode; components?: Array<"agent" | "sing_box"> }
+  | { mode: "all"; campaign?: NodeUpdateCampaignDetail }
+  | null;
 
 function queryString(params: Record<string, string | number | undefined>) {
   const query = new URLSearchParams();
@@ -51,6 +57,57 @@ function nodeStatusFilter(filter: NodeFilter): string | undefined {
 
 function nodeTimestamp(node: AdminNode): string {
   return node.latest_heartbeat || node.last_seen_at;
+}
+
+function hasCapability(node: AdminNode, capability: string) {
+  return node.capabilities?.includes(capability) ?? false;
+}
+
+function nodeIsOffline(node: AdminNode) {
+  const value = nodeTimestamp(node);
+  if (!value) return true;
+  return Date.now() - new Date(value).getTime() > 3 * 60 * 1000;
+}
+
+function VersionTarget({ current, target }: { current?: string; target: string }) {
+	const displayCurrent = current?.match(/v?\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?/i)?.[0] ?? current;
+  if (!current || versionsEqual(current, target)) {
+    return <span className="whitespace-nowrap text-kumo-subtle" title={current}>{displayCurrent || "n/a"}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
+      <span className="text-kumo-subtle" title={current}>{displayCurrent}</span>
+      <ArrowRightIcon className="size-3.5 text-kumo-inactive" />
+      <span className="font-medium text-kumo-default">{target}</span>
+    </span>
+  );
+}
+
+function nodeUpdateStatus(node: AdminNode, release?: AdminRelease) {
+  if (node.active_operation) {
+    if (node.active_operation.status === "queued" && nodeIsOffline(node)) {
+      return { label: "Queued — waiting for node", className: "text-kumo-warning" };
+    }
+    return {
+      label: node.active_operation.phase.replaceAll("_", " "),
+      className: node.active_operation.status === "running" ? "text-kumo-info" : "text-kumo-warning"
+    };
+  }
+  if (!release?.updates_enabled) return { label: "Unavailable", className: "text-kumo-inactive" };
+  if (!hasCapability(node, "operations.v1")) {
+    return { label: "Manual agent upgrade required", className: "text-kumo-warning" };
+  }
+  const agentOutdated = !versionsEqual(node.agent_version, release.boxfleet_version);
+  const singBoxOutdated = !versionsEqual(node.sing_box_version, release.sing_box_version);
+  const canUpdateAgent = agentOutdated && hasCapability(node, "update.agent.v1");
+  const canUpdateSingBox = singBoxOutdated && hasCapability(node, "update.sing_box.v1");
+  if (canUpdateAgent || canUpdateSingBox) {
+    return { label: nodeIsOffline(node) ? "Available · offline" : "Available", className: "text-kumo-info" };
+  }
+  if (agentOutdated || singBoxOutdated) {
+    return { label: "Manual component upgrade required", className: "text-kumo-warning" };
+  }
+  return { label: "Up to date", className: "text-kumo-success" };
 }
 
 function SortHead({
@@ -87,7 +144,7 @@ function SortHead({
 function TableEmpty({ children }: { children: string }) {
   return (
     <Table.Row>
-      <Table.Cell colSpan={8}>
+      <Table.Cell colSpan={9}>
         <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
       </Table.Cell>
     </Table.Row>
@@ -103,6 +160,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
   const [sort, setSortValue] = useState<NodeSort>("name");
   const [direction, setDirection] = useState<SortDirection>("asc");
   const [dialog, setDialog] = useState<NodeDialogState>(null);
+  const [updateDialog, setUpdateDialog] = useState<UpdateDialogState>(null);
 
   const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
     req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
@@ -149,12 +207,26 @@ export function NodesPage({ request }: { request: AdminRequest }) {
   const nodesQuery = useQuery({
     queryKey: ["admin", "nodes-page", perPage, offset, search, filter, sort, direction],
     queryFn: () => request<AdminNodesResponse>(path),
-    placeholderData: (previous) => previous
+    placeholderData: (previous) => previous,
+    refetchInterval: (query) =>
+      query.state.data?.nodes.some((node) => node.active_operation) ? 2000 : 15000
+  });
+  const releaseQuery = useQuery({
+    queryKey: ["admin", "release"],
+    queryFn: () => request<AdminRelease>("/api/admin/release"),
+    staleTime: 5 * 60 * 1000
+  });
+  const campaignQuery = useQuery({
+    queryKey: ["admin", "node-update-campaign", "current"],
+    queryFn: () => request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current"),
+    refetchInterval: (query) => (query.state.data ? 2000 : 15000)
   });
   const pageData = nodesQuery.data;
   const nodes = pageData?.nodes ?? [];
   const total = pageData?.total ?? 0;
   const error = nodesQuery.error instanceof Error ? nodesQuery.error.message : "Request failed.";
+  const release = releaseQuery.data;
+  const campaign = campaignQuery.data;
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
@@ -167,13 +239,37 @@ export function NodesPage({ request }: { request: AdminRequest }) {
           title="Nodes"
           description="Operate edge nodes, config versions, heartbeats, and proxy placement."
           actions={
-            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "enroll" })}>
-              Enroll
-            </Button>
+            <Fragment>
+              <Button
+                variant="secondary"
+                icon={DownloadSimpleIcon}
+                disabled={!release?.updates_enabled}
+                onClick={() => setUpdateDialog({ mode: "all", campaign })}
+              >
+                Update all
+              </Button>
+              <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "enroll" })}>
+                Enroll
+              </Button>
+            </Fragment>
           }
         />
 
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+          {campaign ? (
+            <Banner
+              variant={campaign.campaign.status === "paused" ? "error" : "default"}
+              title={campaign.campaign.status === "paused" ? "Update rollout paused" : `Update rollout · batch ${Math.max(campaign.campaign.current_batch, 0)}`}
+              description={campaign.campaign.error || `${campaign.members.filter((member) => member.status === "succeeded").length} of ${campaign.members.length} nodes completed.`}
+              action={
+                <Button variant="secondary" size="sm" onClick={() => setUpdateDialog({ mode: "all", campaign })}>
+                  View rollout
+                </Button>
+              }
+            />
+          ) : release?.update_error ? (
+            <Banner variant="secondary" title="Managed updates unavailable" description={release.update_error} />
+          ) : null}
           <section className="flex flex-col gap-3">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -252,11 +348,12 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                     <Table.Row>
                       <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} className="hidden 2xl:table-cell" />
                       <Table.Head>Agent</Table.Head>
                       <SortHead label="sing-box" column="sing_box_version" sort={sort} direction={direction} setSort={setSort} />
-                      <Table.Head>Config</Table.Head>
-                      <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} />
+                      <Table.Head className="hidden 2xl:table-cell">Config</Table.Head>
+                      <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} className="hidden 2xl:table-cell" />
+                      <Table.Head>Update</Table.Head>
                       <Table.Head className="text-right">
                         <span className="sr-only">Actions</span>
                       </Table.Head>
@@ -267,7 +364,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                       <TableEmpty>{error}</TableEmpty>
                     ) : nodesQuery.isLoading ? (
                       <Table.Row>
-                        <Table.Cell colSpan={8}>
+                        <Table.Cell colSpan={9}>
                           <div className="flex min-h-32 items-center justify-center">
                             <Loader size={20} />
                           </div>
@@ -283,7 +380,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                         return (
                           <Table.Row key={node.id}>
                             <Table.Cell>
-                              <div className="flex min-w-48 items-center gap-2">
+                              <div className="flex min-w-44 items-center gap-2">
                                 <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
                                 <Link href={adminPath(`/nodes?node=${encodeURIComponent(node.name)}`)} variant="current" className={rowLinkClassName}>
                                   <span className="truncate">{node.name}</span>
@@ -296,7 +393,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                 {health.label}
                               </span>
                             </Table.Cell>
-                            <Table.Cell>
+                            <Table.Cell className="hidden 2xl:table-cell">
                               <span className="whitespace-nowrap text-kumo-subtle">
                                 {node.public_host || node.api_base_url || "n/a"}
                                 {node.hosts && node.hosts.length > 1 ? (
@@ -305,19 +402,43 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                               </span>
                             </Table.Cell>
                             <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">{node.agent_version || "n/a"}</span>
+                              <VersionTarget current={node.agent_version} target={release?.boxfleet_version ?? node.agent_version ?? "n/a"} />
                             </Table.Cell>
                             <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">{node.sing_box_version || "n/a"}</span>
+                              <VersionTarget current={node.sing_box_version} target={release?.sing_box_version ?? node.sing_box_version ?? "n/a"} />
                             </Table.Cell>
-                            <Table.Cell>
+                            <Table.Cell className="hidden 2xl:table-cell">
                               <span className="whitespace-nowrap text-kumo-subtle">{formatNodeVersion(node)}</span>
                             </Table.Cell>
-                            <Table.Cell>
+                            <Table.Cell className="hidden 2xl:table-cell">
                               <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
                             </Table.Cell>
+                            <Table.Cell>
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${nodeUpdateStatus(node, release).className}`}>
+                                <span className="size-1.5 rounded-full bg-current" />
+                                {nodeUpdateStatus(node, release).label}
+                              </span>
+                            </Table.Cell>
                             <Table.Cell className="text-right">
-                              <DropdownMenu>
+                              <div className="inline-flex items-center gap-1">
+                                {node.active_operation ? (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setUpdateDialog({ mode: "node", node })}
+                                  >
+                                    View
+                                  </Button>
+                                ) : release?.updates_enabled &&
+                                  hasCapability(node, "operations.v1") &&
+                                  ((!versionsEqual(node.agent_version, release.boxfleet_version) && hasCapability(node, "update.agent.v1")) ||
+                                    (!versionsEqual(node.sing_box_version, release.sing_box_version) && hasCapability(node, "update.sing_box.v1"))) &&
+                                  !node.deleted_at && node.has_active_token !== false ? (
+                                  <Button size="sm" onClick={() => setUpdateDialog({ mode: "node", node })}>
+                                    Update
+                                  </Button>
+                                ) : null}
+                                <DropdownMenu>
                                 <DropdownMenu.Trigger
                                   render={
                                     <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${node.name}`}>
@@ -332,6 +453,25 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                     </DropdownMenu.Item>
                                   ) : (
                                     <>
+                                  {node.active_operation ? (
+                                    <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node })}>
+                                      View update
+                                    </DropdownMenu.Item>
+                                  ) : release?.updates_enabled && hasCapability(node, "operations.v1") ? (
+                                    <>
+                                      {!versionsEqual(node.agent_version, release.boxfleet_version) && hasCapability(node, "update.agent.v1") ? (
+                                        <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node, components: ["agent"] })}>
+                                          Update agent
+                                        </DropdownMenu.Item>
+                                      ) : null}
+                                      {!versionsEqual(node.sing_box_version, release.sing_box_version) && hasCapability(node, "update.sing_box.v1") ? (
+                                        <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node, components: ["sing_box"] })}>
+                                          Update sing-box
+                                        </DropdownMenu.Item>
+                                      ) : null}
+                                      <DropdownMenu.Separator />
+                                    </>
+                                  ) : null}
                                   <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", node })}>
                                     Edit
                                   </DropdownMenu.Item>
@@ -366,7 +506,8 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                     </>
                                   )}
                                 </DropdownMenu.Content>
-                              </DropdownMenu>
+                                </DropdownMenu>
+                              </div>
                             </Table.Cell>
                           </Table.Row>
                         );
@@ -406,6 +547,24 @@ export function NodesPage({ request }: { request: AdminRequest }) {
       ) : null}
       {dialog?.mode === "reenroll" ? (
         <ReenrollNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
+      ) : null}
+      {updateDialog?.mode === "node" && release ? (
+        <NodeUpdateDialog
+          request={request}
+          node={updateDialog.node}
+          release={release}
+          initialComponents={updateDialog.components}
+          initialOperation={updateDialog.node.active_operation}
+          onClose={() => setUpdateDialog(null)}
+        />
+      ) : null}
+      {updateDialog?.mode === "all" && release ? (
+        <UpdateAllDialog
+          request={request}
+          release={release}
+          initialCampaign={updateDialog.campaign}
+          onClose={() => setUpdateDialog(null)}
+        />
       ) : null}
     </div>
   );

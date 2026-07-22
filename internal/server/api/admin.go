@@ -49,23 +49,29 @@ type adminRelease struct {
 	Repo            string `json:"repo"`
 	BoxFleetVersion string `json:"boxfleet_version"`
 	SingBoxVersion  string `json:"sing_box_version"`
+	UpdatesEnabled  bool   `json:"updates_enabled"`
+	UpdateError     string `json:"update_error,omitempty"`
 }
 
 type adminNode struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	PublicHost      string `json:"public_host"`
-	APIBaseURL      string `json:"api_base_url"`
-	Status          string `json:"status"`
-	SingBoxVersion  string `json:"sing_box_version"`
-	LastSeenAt      string `json:"last_seen_at"`
-	DeletedAt       string `json:"deleted_at"`
-	TargetVersion   string `json:"target_version,omitempty"`
-	CurrentVersion  string `json:"current_version,omitempty"`
-	ApplyStatus     string `json:"apply_status,omitempty"`
-	ApplyError      string `json:"apply_error,omitempty"`
-	LatestHeartbeat string `json:"latest_heartbeat,omitempty"`
-	AgentVersion    string `json:"agent_version,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	PublicHost      string            `json:"public_host"`
+	APIBaseURL      string            `json:"api_base_url"`
+	Status          string            `json:"status"`
+	SingBoxVersion  string            `json:"sing_box_version"`
+	LastSeenAt      string            `json:"last_seen_at"`
+	DeletedAt       string            `json:"deleted_at"`
+	TargetVersion   string            `json:"target_version,omitempty"`
+	CurrentVersion  string            `json:"current_version,omitempty"`
+	ApplyStatus     string            `json:"apply_status,omitempty"`
+	ApplyError      string            `json:"apply_error,omitempty"`
+	LatestHeartbeat string            `json:"latest_heartbeat,omitempty"`
+	AgentVersion    string            `json:"agent_version,omitempty"`
+	AgentGOOS       string            `json:"agent_goos,omitempty"`
+	AgentGOARCH     string            `json:"agent_goarch,omitempty"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
+	ActiveOperation *db.NodeOperation `json:"active_operation,omitempty"`
 	// HasActiveToken distinguishes a reversible pause (disabled, token intact)
 	// from a decommission (disabled, tokens revoked) so the UI does not offer to
 	// re-enable a node whose agent could never authenticate.
@@ -1361,12 +1367,24 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	for _, name := range tokenNames {
 		hasToken[name] = true
 	}
+	activeOperations, err := store.ListActiveNodeOperations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	operationByNodeID := make(map[string]db.NodeOperation, len(activeOperations))
+	for _, operation := range activeOperations {
+		operationByNodeID[operation.NodeID] = operation
+	}
 	out := make([]adminNode, 0, len(nodes))
 	for _, node := range nodes {
 		// Base off adminNodeFromNode so list responses carry the same fields as
 		// single-node responses (notably Hosts) instead of a divergent literal.
 		item := adminNodeFromNode(node)
 		item.HasActiveToken = hasToken[node.Name]
+		if operation, ok := operationByNodeID[node.ID]; ok {
+			operationCopy := operation
+			item.ActiveOperation = &operationCopy
+		}
 		if status, ok := statusByNode[node.Name]; ok {
 			statusItem := adminNodeFromStatus(status)
 			item.TargetVersion = statusItem.TargetVersion
@@ -1375,6 +1393,9 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 			item.ApplyError = statusItem.ApplyError
 			item.LatestHeartbeat = statusItem.LatestHeartbeat
 			item.AgentVersion = statusItem.AgentVersion
+			item.AgentGOOS = statusItem.AgentGOOS
+			item.AgentGOARCH = statusItem.AgentGOARCH
+			item.Capabilities = statusItem.Capabilities
 			item.SingBoxVersion = statusItem.SingBoxVersion
 		}
 		out = append(out, item)
@@ -1605,6 +1626,9 @@ func adminNodeFromStatus(status db.NodeConfigStatus) adminNode {
 		ApplyError:      status.LastApplyError,
 		LatestHeartbeat: nullString(status.LatestHeartbeat),
 		AgentVersion:    status.AgentVersion,
+		AgentGOOS:       status.AgentGOOS,
+		AgentGOARCH:     status.AgentGOARCH,
+		Capabilities:    status.Capabilities,
 		SingBoxVersion:  status.SingBoxVersion,
 	}
 }

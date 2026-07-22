@@ -17,6 +17,7 @@ type systemdUnitData struct {
 	SingBoxPath       string
 	SingBoxConfig     string
 	AgentPath         string
+	AgentGuardPath    string
 	AgentConfigPath   string
 	Restart           string
 	RestartSec        string
