@@ -348,11 +348,11 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                     <Table.Row>
                       <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} className="hidden 2xl:table-cell" />
+                      <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
                       <Table.Head>Agent</Table.Head>
                       <SortHead label="sing-box" column="sing_box_version" sort={sort} direction={direction} setSort={setSort} />
-                      <Table.Head className="hidden 2xl:table-cell">Config</Table.Head>
-                      <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} className="hidden 2xl:table-cell" />
+                      <Table.Head>Config</Table.Head>
+                      <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} className="hidden xl:table-cell" />
                       <Table.Head>Update</Table.Head>
                       <Table.Head className="text-right">
                         <span className="sr-only">Actions</span>
@@ -393,7 +393,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                 {health.label}
                               </span>
                             </Table.Cell>
-                            <Table.Cell className="hidden 2xl:table-cell">
+                            <Table.Cell>
                               <span className="whitespace-nowrap text-kumo-subtle">
                                 {node.public_host || node.api_base_url || "n/a"}
                                 {node.hosts && node.hosts.length > 1 ? (
@@ -407,10 +407,10 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                             <Table.Cell>
                               <VersionTarget current={node.sing_box_version} target={release?.sing_box_version ?? node.sing_box_version ?? "n/a"} />
                             </Table.Cell>
-                            <Table.Cell className="hidden 2xl:table-cell">
+                            <Table.Cell>
                               <span className="whitespace-nowrap text-kumo-subtle">{formatNodeVersion(node)}</span>
                             </Table.Cell>
-                            <Table.Cell className="hidden 2xl:table-cell">
+                            <Table.Cell className="hidden xl:table-cell">
                               <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
                             </Table.Cell>
                             <Table.Cell>
