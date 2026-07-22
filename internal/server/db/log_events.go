@@ -365,7 +365,10 @@ FROM log_events e
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE ` + whereSQL + `
-ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
+-- Event time is both the operator-facing chronology and the leading range
+-- column of the filter indexes. Ordering by ingestion time here forced SQLite
+-- to materialize and sort every matching event before returning one page.
+ORDER BY e.window_end DESC, e.window_start DESC, e.id DESC
 LIMIT ?
 OFFSET ?`
 	sqlRows, err := db.sql.QueryContext(ctx, listQuery, listArgs...)
