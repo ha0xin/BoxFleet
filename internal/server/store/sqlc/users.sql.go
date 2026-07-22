@@ -53,10 +53,12 @@ SELECT
   status,
   global_quota_bytes,
   expire_at,
+  deleted_at,
   created_at,
   updated_at
 FROM proxy_users
 WHERE name = ?1
+  AND deleted_at IS NULL
 `
 
 func (q *Queries) GetProxyUserByName(ctx context.Context, name string) (ProxyUser, error) {
@@ -69,10 +71,109 @@ func (q *Queries) GetProxyUserByName(ctx context.Context, name string) (ProxyUse
 		&i.Status,
 		&i.GlobalQuotaBytes,
 		&i.ExpireAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getProxyUserByNameIncludingDeleted = `-- name: GetProxyUserByNameIncludingDeleted :one
+SELECT id, name, display_name, status, global_quota_bytes, expire_at, deleted_at, created_at, updated_at
+FROM proxy_users
+WHERE name = ?1
+`
+
+func (q *Queries) GetProxyUserByNameIncludingDeleted(ctx context.Context, name string) (ProxyUser, error) {
+	row := q.db.QueryRowContext(ctx, getProxyUserByNameIncludingDeleted, name)
+	var i ProxyUser
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.DisplayName,
+		&i.Status,
+		&i.GlobalQuotaBytes,
+		&i.ExpireAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listDeletedProxyUsersWithProxyCounts = `-- name: ListDeletedProxyUsersWithProxyCounts :many
+SELECT
+  u.id,
+  u.name,
+  u.display_name,
+  u.status,
+  u.global_quota_bytes,
+  u.expire_at,
+  u.deleted_at,
+  u.created_at,
+  u.updated_at,
+  COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS proxy_count
+FROM proxy_users u
+LEFT JOIN proxy_accesses a ON a.proxy_user_id = u.id
+WHERE u.deleted_at IS NOT NULL
+GROUP BY
+  u.id,
+  u.name,
+  u.display_name,
+  u.status,
+  u.global_quota_bytes,
+  u.expire_at,
+  u.deleted_at,
+  u.created_at,
+  u.updated_at
+ORDER BY u.name
+`
+
+type ListDeletedProxyUsersWithProxyCountsRow struct {
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	DisplayName      string         `json:"display_name"`
+	Status           string         `json:"status"`
+	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
+	ExpireAt         sql.NullString `json:"expire_at"`
+	DeletedAt        sql.NullString `json:"deleted_at"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	ProxyCount       int64          `json:"proxy_count"`
+}
+
+func (q *Queries) ListDeletedProxyUsersWithProxyCounts(ctx context.Context) ([]ListDeletedProxyUsersWithProxyCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletedProxyUsersWithProxyCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeletedProxyUsersWithProxyCountsRow
+	for rows.Next() {
+		var i ListDeletedProxyUsersWithProxyCountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.DisplayName,
+			&i.Status,
+			&i.GlobalQuotaBytes,
+			&i.ExpireAt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProxyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listProxyUsers = `-- name: ListProxyUsers :many
@@ -83,9 +184,11 @@ SELECT
   status,
   global_quota_bytes,
   expire_at,
+  deleted_at,
   created_at,
   updated_at
 FROM proxy_users
+WHERE deleted_at IS NULL
 ORDER BY name
 `
 
@@ -105,6 +208,7 @@ func (q *Queries) ListProxyUsers(ctx context.Context) ([]ProxyUser, error) {
 			&i.Status,
 			&i.GlobalQuotaBytes,
 			&i.ExpireAt,
+			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -129,11 +233,13 @@ SELECT
   u.status,
   u.global_quota_bytes,
   u.expire_at,
+  u.deleted_at,
   u.created_at,
   u.updated_at,
-  COUNT(a.id) AS proxy_count
+  COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS proxy_count
 FROM proxy_users u
 LEFT JOIN proxy_accesses a ON a.proxy_user_id = u.id
+WHERE u.deleted_at IS NULL
 GROUP BY
   u.id,
   u.name,
@@ -141,6 +247,7 @@ GROUP BY
   u.status,
   u.global_quota_bytes,
   u.expire_at,
+  u.deleted_at,
   u.created_at,
   u.updated_at
 ORDER BY u.name
@@ -153,6 +260,7 @@ type ListProxyUsersWithProxyCountsRow struct {
 	Status           string         `json:"status"`
 	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
 	ExpireAt         sql.NullString `json:"expire_at"`
+	DeletedAt        sql.NullString `json:"deleted_at"`
 	CreatedAt        string         `json:"created_at"`
 	UpdatedAt        string         `json:"updated_at"`
 	ProxyCount       int64          `json:"proxy_count"`
@@ -174,6 +282,7 @@ func (q *Queries) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ListProx
 			&i.Status,
 			&i.GlobalQuotaBytes,
 			&i.ExpireAt,
+			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ProxyCount,
@@ -191,12 +300,30 @@ func (q *Queries) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ListProx
 	return items, nil
 }
 
+const restoreProxyUser = `-- name: RestoreProxyUser :execrows
+UPDATE proxy_users
+SET
+  deleted_at = NULL,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?1
+  AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) RestoreProxyUser(ctx context.Context, name string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, restoreProxyUser, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProxyUserDisplayName = `-- name: SetProxyUserDisplayName :execrows
 UPDATE proxy_users
 SET
   display_name = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?2
+  AND deleted_at IS NULL
 `
 
 type SetProxyUserDisplayNameParams struct {
@@ -218,6 +345,7 @@ SET
   expire_at = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?2
+  AND deleted_at IS NULL
 `
 
 type SetProxyUserExpireParams struct {
@@ -239,6 +367,7 @@ SET
   global_quota_bytes = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?2
+  AND deleted_at IS NULL
 `
 
 type SetProxyUserQuotaParams struct {
@@ -260,6 +389,7 @@ SET
   status = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?2
+  AND deleted_at IS NULL
 `
 
 type SetProxyUserStatusParams struct {
@@ -269,6 +399,24 @@ type SetProxyUserStatusParams struct {
 
 func (q *Queries) SetProxyUserStatus(ctx context.Context, arg SetProxyUserStatusParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProxyUserStatus, arg.Status, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const softDeleteProxyUser = `-- name: SoftDeleteProxyUser :execrows
+UPDATE proxy_users
+SET
+  status = 'disabled',
+  deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteProxyUser(ctx context.Context, name string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteProxyUser, name)
 	if err != nil {
 		return 0, err
 	}

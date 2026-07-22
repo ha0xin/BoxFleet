@@ -49,7 +49,8 @@ const nodes: AdminNode[] = [
     apply_status: "applied",
     latest_heartbeat: iso(20_000),
     agent_version: "0.4.1",
-    has_active_token: true
+    has_active_token: true,
+    deleted_at: ""
   },
   {
     id: "node_frankfurt",
@@ -64,7 +65,8 @@ const nodes: AdminNode[] = [
     apply_status: "pending",
     latest_heartbeat: iso(45_000),
     agent_version: "0.4.1",
-    has_active_token: true
+    has_active_token: true,
+    deleted_at: ""
   },
   {
     id: "node_singapore",
@@ -80,7 +82,8 @@ const nodes: AdminNode[] = [
     apply_error: "sing-box check failed: timeout dialing reality handshake",
     latest_heartbeat: iso(3 * HOUR),
     agent_version: "0.3.9",
-    has_active_token: true
+    has_active_token: true,
+    deleted_at: ""
   },
   {
     // Paused (disabled but token intact) — the row menu offers Enable.
@@ -93,7 +96,8 @@ const nodes: AdminNode[] = [
     last_seen_at: iso(2 * HOUR),
     latest_heartbeat: iso(2 * HOUR),
     agent_version: "0.4.1",
-    has_active_token: true
+    has_active_token: true,
+    deleted_at: ""
   },
   {
     // Decommissioned (disabled, tokens revoked) — menu shows re-enroll, not Enable.
@@ -105,7 +109,8 @@ const nodes: AdminNode[] = [
     sing_box_version: "1.9.0",
     last_seen_at: iso(5 * DAY),
     agent_version: "0.3.9",
-    has_active_token: false
+    has_active_token: false,
+    deleted_at: ""
   }
 ];
 
@@ -117,7 +122,8 @@ const users: AdminUser[] = [
     status: "active",
     global_quota_bytes: 500 * GiB,
     expire_at: iso(-30 * DAY),
-    proxy_count: 3
+    proxy_count: 3,
+    deleted_at: ""
   },
   {
     id: "user_bob",
@@ -126,7 +132,8 @@ const users: AdminUser[] = [
     status: "active",
     global_quota_bytes: 200 * GiB,
     expire_at: iso(-7 * DAY),
-    proxy_count: 2
+    proxy_count: 2,
+    deleted_at: ""
   },
   {
     id: "user_carol",
@@ -135,7 +142,8 @@ const users: AdminUser[] = [
     status: "disabled",
     global_quota_bytes: 100 * GiB,
     expire_at: iso(2 * DAY),
-    proxy_count: 1
+    proxy_count: 1,
+    deleted_at: ""
   }
 ];
 
@@ -235,6 +243,7 @@ const makeProxy = (over: Partial<AdminProxy> & Pick<AdminProxy, "id" | "node_nam
   route_rules_json: "[]",
   created_at: iso(30 * DAY),
   updated_at: iso(2 * DAY),
+  deleted_at: "",
   ...over
 });
 
@@ -263,7 +272,8 @@ const proxyAccessFor = (userName: string): AdminProxyAccess[] =>
       quota_bytes: (i + 1) * 50 * GiB,
       proxy_multiplier: p.traffic_multiplier,
       created_at: iso(20 * DAY),
-      updated_at: iso(DAY)
+      updated_at: iso(DAY),
+      deleted_at: ""
     }));
 
 // Mutable per-user access store, seeded lazily from proxyAccessFor so the
@@ -465,7 +475,9 @@ function nodesPage(query: URLSearchParams): AdminNodesResponse {
   const sort = query.get("sort") ?? "name";
   const direction = sortDirection(query);
   const { limit, offset } = pageParams(query);
+  const deleted = query.get("deleted") === "true";
   const filtered = nodes
+    .filter((node) => deleted ? Boolean(node.deleted_at) : !node.deleted_at)
     .filter((node) => !status || node.status === status)
     .filter((node) => {
       if (!search) return true;
@@ -496,7 +508,9 @@ function proxiesPage(query: URLSearchParams): AdminProxiesResponse {
   const sort = query.get("sort") ?? "node_name";
   const direction = sortDirection(query);
   const { limit, offset } = pageParams(query);
+  const deleted = query.get("deleted") === "true";
   const filtered = proxies
+    .filter((proxy) => deleted ? Boolean(proxy.deleted_at) : !proxy.deleted_at)
     .filter((proxy) => !nodeName || proxy.node_name === nodeName)
     .filter((proxy) => {
       if (enabled === "true") return proxy.enabled;
@@ -561,7 +575,7 @@ const routes: Route[] = [
       return { published };
     }
   },
-  { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies },
+  { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies.filter((proxy) => !proxy.deleted_at) },
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies$/,
@@ -629,14 +643,28 @@ const routes: Route[] = [
     handler: ({ match }) => {
       const node = decodeURIComponent(match?.[1] ?? "");
       const name = decodeURIComponent(match?.[2] ?? "");
-      const idx = proxies.findIndex((p) => p.node_name === node && p.name === name);
-      if (idx >= 0) proxies.splice(idx, 1);
+      const proxy = proxies.find((p) => p.node_name === node && p.name === name);
+      if (proxy) {
+        proxy.enabled = false;
+        proxy.deleted_at = new Date().toISOString();
+      }
       markNodeChanged(node);
-      return { ok: true };
+      return proxy ?? { ok: true };
     }
   },
-  { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes },
-  { method: "GET", pattern: /^\/api\/admin\/users$/, handler: () => users },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)\/restore$/,
+    handler: ({ match }) => {
+      const node = decodeURIComponent(match?.[1] ?? "");
+      const name = decodeURIComponent(match?.[2] ?? "");
+      const proxy = proxies.find((item) => item.node_name === node && item.name === name);
+      if (proxy) proxy.deleted_at = "";
+      return proxy ?? { ok: true };
+    }
+  },
+  { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes.filter((node) => !node.deleted_at) },
+  { method: "GET", pattern: /^\/api\/admin\/users$/, handler: ({ query }) => users.filter((user) => query.get("deleted") === "true" ? Boolean(user.deleted_at) : !user.deleted_at) },
   { method: "GET", pattern: /^\/api\/admin\/traffic\/users$/, handler: () => traffic },
   { method: "GET", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
   { method: "PUT", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
@@ -686,7 +714,8 @@ const routes: Route[] = [
         api_base_url: "",
         status: "pending",
         sing_box_version: "",
-        last_seen_at: ""
+        last_seen_at: "",
+        deleted_at: ""
       };
       nodes.push(node);
       return {
@@ -753,10 +782,23 @@ const routes: Route[] = [
     pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
     handler: ({ match }) => {
       const name = decodeURIComponent(match?.[1] ?? "");
-      const idx = nodes.findIndex((n) => n.name === name);
-      if (idx >= 0) nodes.splice(idx, 1);
+      const node = nodes.find((n) => n.name === name);
+      if (node) {
+        node.status = "disabled";
+        node.has_active_token = false;
+        node.deleted_at = new Date().toISOString();
+      }
       markNodeChanged(name);
-      return { ok: true };
+      return node ?? { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/restore$/,
+    handler: ({ match }) => {
+      const node = nodes.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      if (node) node.deleted_at = "";
+      return node ?? { ok: true };
     }
   },
   {
@@ -770,7 +812,8 @@ const routes: Route[] = [
         status: "active",
         global_quota_bytes: Number(body?.global_quota_bytes) || 0,
         expire_at: typeof body?.expire_at === "string" ? body.expire_at : "",
-        proxy_count: 0
+        proxy_count: 0,
+        deleted_at: ""
       };
       users.push(user);
       return user;
@@ -813,7 +856,8 @@ const routes: Route[] = [
           quota_bytes: 0,
           proxy_multiplier: proxy.traffic_multiplier,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          deleted_at: ""
         };
         list.push(access);
         const user = users.find((u) => u.name === name);
@@ -822,6 +866,27 @@ const routes: Route[] = [
         return access;
       }
       return { ok: true };
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/users\/([^/]+)$/,
+    handler: ({ match }) => {
+      const user = users.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      if (user) {
+        user.status = "disabled";
+        user.deleted_at = new Date().toISOString();
+      }
+      return user ?? { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/restore$/,
+    handler: ({ match }) => {
+      const user = users.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      if (user) user.deleted_at = "";
+      return user ?? { ok: true };
     }
   },
   {

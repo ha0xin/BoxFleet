@@ -107,7 +107,7 @@ func (q *Queries) DeleteProxyNameAlias(ctx context.Context, arg DeleteProxyNameA
 }
 
 const getProxyByNodeAndName = `-- name: GetProxyByNodeAndName :one
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE node_id = (
     SELECT n.id
@@ -119,6 +119,8 @@ WHERE node_id = (
          WHERE alias = ?1
        )
   )
+  AND deleted_at IS NULL
+  AND node_deleted_at IS NULL
   AND id = (
     SELECT p.id
     FROM proxies p
@@ -155,6 +157,65 @@ func (q *Queries) GetProxyByNodeAndName(ctx context.Context, arg GetProxyByNodeA
 		&i.InboundRulesJson,
 		&i.OutboundRulesJson,
 		&i.RouteRulesJson,
+		&i.DeletedAt,
+		&i.NodeDeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getProxyByNodeAndNameIncludingDeleted = `-- name: GetProxyByNodeAndNameIncludingDeleted :one
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+FROM proxy_details
+WHERE node_id = (
+    SELECT n.id
+    FROM nodes n
+    WHERE n.name = ?1
+       OR n.id = (
+         SELECT node_id
+         FROM node_name_aliases
+         WHERE alias = ?1
+       )
+  )
+  AND id = (
+    SELECT p.id
+    FROM proxies p
+    WHERE p.name = ?2
+       OR p.id = (
+         SELECT proxy_id
+         FROM proxy_name_aliases
+         WHERE alias = ?2
+       )
+  )
+`
+
+type GetProxyByNodeAndNameIncludingDeletedParams struct {
+	NodeName string `json:"node_name"`
+	Name     string `json:"name"`
+}
+
+func (q *Queries) GetProxyByNodeAndNameIncludingDeleted(ctx context.Context, arg GetProxyByNodeAndNameIncludingDeletedParams) (ProxyDetail, error) {
+	row := q.db.QueryRowContext(ctx, getProxyByNodeAndNameIncludingDeleted, arg.NodeName, arg.Name)
+	var i ProxyDetail
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.NodeName,
+		&i.NodePublicHost,
+		&i.Name,
+		&i.Protocol,
+		&i.Listen,
+		&i.ListenPort,
+		&i.Transport,
+		&i.Enabled,
+		&i.TrafficMultiplier,
+		&i.SettingsJson,
+		&i.InboundRulesJson,
+		&i.OutboundRulesJson,
+		&i.RouteRulesJson,
+		&i.DeletedAt,
+		&i.NodeDeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -180,8 +241,10 @@ func (q *Queries) GetProxyIDByNameOrAlias(ctx context.Context, name string) (str
 }
 
 const listProxies = `-- name: ListProxies :many
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
+WHERE deleted_at IS NULL
+  AND node_deleted_at IS NULL
 ORDER BY node_name, listen_port, name
 `
 
@@ -210,6 +273,8 @@ func (q *Queries) ListProxies(ctx context.Context) ([]ProxyDetail, error) {
 			&i.InboundRulesJson,
 			&i.OutboundRulesJson,
 			&i.RouteRulesJson,
+			&i.DeletedAt,
+			&i.NodeDeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -227,9 +292,11 @@ func (q *Queries) ListProxies(ctx context.Context) ([]ProxyDetail, error) {
 }
 
 const listProxiesByNodeName = `-- name: ListProxiesByNodeName :many
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE node_name = ?1
+  AND deleted_at IS NULL
+  AND node_deleted_at IS NULL
 ORDER BY node_name, listen_port, name
 `
 
@@ -258,6 +325,8 @@ func (q *Queries) ListProxiesByNodeName(ctx context.Context, nodeName string) ([
 			&i.InboundRulesJson,
 			&i.OutboundRulesJson,
 			&i.RouteRulesJson,
+			&i.DeletedAt,
+			&i.NodeDeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -295,12 +364,30 @@ func (q *Queries) RenameProxyByID(ctx context.Context, arg RenameProxyByIDParams
 	return result.RowsAffected()
 }
 
+const restoreProxy = `-- name: RestoreProxy :execrows
+UPDATE proxies
+SET
+  deleted_at = NULL,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) RestoreProxy(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, restoreProxy, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProxyEnabled = `-- name: SetProxyEnabled :execrows
 UPDATE proxies
 SET
   enabled = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE node_id = ?2 AND name = ?3
+  AND deleted_at IS NULL
 `
 
 type SetProxyEnabledParams struct {
@@ -311,6 +398,24 @@ type SetProxyEnabledParams struct {
 
 func (q *Queries) SetProxyEnabled(ctx context.Context, arg SetProxyEnabledParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProxyEnabled, arg.Enabled, arg.NodeID, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const softDeleteProxy = `-- name: SoftDeleteProxy :execrows
+UPDATE proxies
+SET
+  enabled = 0,
+  deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteProxy(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteProxy, id)
 	if err != nil {
 		return 0, err
 	}
@@ -331,6 +436,7 @@ SET
   route_rules_json = ?9,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE node_id = ?10 AND name = ?11
+  AND deleted_at IS NULL
 `
 
 type UpdateProxyParams struct {

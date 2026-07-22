@@ -10,7 +10,7 @@ import {
   PlusIcon,
   TrashIcon
 } from "@phosphor-icons/react";
-import { Banner, Button, Dialog, Input, Loader, Select } from "@cloudflare/kumo";
+import { Banner, Button, Checkbox, Dialog, Input, Loader, Select } from "@cloudflare/kumo";
 
 import type {
   AdminProxiesResponse,
@@ -22,7 +22,7 @@ import type {
 } from "../types";
 import type { AdminRequest } from "@/publish/publish-status";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export type UserDialogState =
   | { mode: "create" }
@@ -238,7 +238,7 @@ function AccessRow({
   );
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-kumo-line bg-kumo-canvas px-3 py-2">
+    <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-2 last:border-b-0">
       <div className="min-w-0">
         <div className="truncate text-sm font-medium text-kumo-default">
           {access.node_name} / {access.proxy_name}
@@ -270,7 +270,9 @@ export function ManageAccessDialog({
   user: AdminUser;
   onClose: () => void;
 }) {
-  const [selected, setSelected] = useState<string>("");
+  const [selectedIDs, setSelectedIDs] = useState<string[]>([]);
+  const [issueError, setIssueError] = useState("");
+  const queryClient = useQueryClient();
 
   const accessQuery = useQuery({
     queryKey: ["admin", "user-access", user.name],
@@ -293,18 +295,39 @@ export function ManageAccessDialog({
       ),
     [proxiesQuery.data, existing]
   );
-  const items = available.map((p) => ({ value: p.id, label: `${p.node_name} / ${p.name}` }));
-  const selectedProxy = available.find((p) => p.id === selected);
-
-  const issue = useAdminMutation<AdminProxy, unknown>(
-    request,
-    (req, proxy) =>
-      req(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`, {
-        method: "POST",
-        body: JSON.stringify({ node_name: proxy.node_name, proxy_name: proxy.name })
-      }),
-    { onSuccess: () => setSelected("") }
+  const selected = useMemo(
+    () => available.filter((proxy) => selectedIDs.includes(proxy.id)),
+    [available, selectedIDs]
   );
+  const issue = useMutation({
+    mutationFn: async (proxies: AdminProxy[]) => {
+      const results = await Promise.allSettled(
+        proxies.map((proxy) =>
+          request(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`, {
+            method: "POST",
+            body: JSON.stringify({ node_name: proxy.node_name, proxy_name: proxy.name })
+          })
+        )
+      );
+      const succeeded: AdminProxy[] = [];
+      const failed: AdminProxy[] = [];
+      results.forEach((result, index) => {
+        (result.status === "fulfilled" ? succeeded : failed).push(proxies[index]);
+      });
+      return { succeeded, failed };
+    },
+    onMutate: () => setIssueError(""),
+    onSuccess: ({ succeeded, failed }) => {
+      void queryClient.invalidateQueries({ queryKey: ["admin"] });
+      setSelectedIDs(failed.map((proxy) => proxy.id));
+      if (failed.length > 0) {
+        const labels = failed.map((proxy) => `${proxy.node_name} / ${proxy.name}`).join(", ");
+        setIssueError(
+          `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
+        );
+      }
+    }
+  });
 
   const loading = accessQuery.isLoading || proxiesQuery.isLoading;
 
@@ -317,43 +340,98 @@ export function ManageAccessDialog({
           Changes alter the rendered config on the next publish.
         </Dialog.Description>
 
-        {issue.isError ? <Banner variant="error" title={issue.error.message} className="mb-4" /> : null}
+        {issueError ? <Banner variant="error" title={issueError} className="mb-4" /> : null}
 
-        <div className="flex items-end gap-2">
-          <Select
-            label="Add proxy"
-            className="flex-1"
-            value={selected || null}
-            onValueChange={(value) => setSelected((value as string) ?? "")}
-            items={items}
-            placeholder={items.length > 0 ? "Select a proxy" : "No more proxies available"}
-            disabled={items.length === 0}
-          />
-          <Button
-            icon={PlusIcon}
-            loading={issue.isPending}
-            disabled={!selectedProxy}
-            onClick={() => selectedProxy && issue.mutate(selectedProxy)}
-          >
-            Issue
-          </Button>
-        </div>
+        <section>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-kumo-default">Grant proxies</h3>
+              <p className="text-sm text-kumo-subtle">Select one or more proxies to grant.</p>
+            </div>
+            {available.length > 0 ? (
+              <Checkbox
+                label="Select all"
+                checked={selectedIDs.length === available.length}
+                indeterminate={selectedIDs.length > 0 && selectedIDs.length < available.length}
+                disabled={issue.isPending}
+                onCheckedChange={(checked) =>
+                  setSelectedIDs(checked ? available.map((proxy) => proxy.id) : [])
+                }
+              />
+            ) : null}
+          </div>
 
-        <div className="mt-4 flex max-h-72 flex-col gap-2 overflow-y-auto">
           {loading ? (
             <div className="flex min-h-24 items-center justify-center">
               <Loader size={20} />
             </div>
-          ) : accesses.length > 0 ? (
-            accesses.map((access) => (
-              <AccessRow key={access.id} request={request} user={user} access={access} />
-            ))
+          ) : available.length > 0 ? (
+            <div className="max-h-56 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
+              {available.map((proxy) => (
+                <div
+                  key={proxy.id}
+                  className="border-b border-kumo-line px-3 py-2 last:border-b-0"
+                >
+                  <Checkbox
+                    checked={selectedIDs.includes(proxy.id)}
+                    disabled={issue.isPending}
+                    onCheckedChange={(checked) =>
+                      setSelectedIDs((current) =>
+                        checked
+                          ? [...current, proxy.id]
+                          : current.filter((id) => id !== proxy.id)
+                      )
+                    }
+                    label={
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-kumo-default">
+                          {proxy.node_name} / {proxy.name}
+                        </div>
+                        <div className="truncate text-xs text-kumo-subtle">
+                          {proxy.protocol} · {proxy.listen_port}
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">
-              No access issued yet.
+            <div className="flex min-h-20 items-center justify-center text-sm text-kumo-subtle">
+              All available proxies have already been granted.
             </div>
           )}
-        </div>
+
+          <div className="mt-3 flex justify-end">
+            <Button
+              icon={PlusIcon}
+              loading={issue.isPending}
+              disabled={selected.length === 0}
+              onClick={() => issue.mutate(selected)}
+            >
+              Grant access{selected.length > 0 ? ` (${selected.length})` : ""}
+            </Button>
+          </div>
+        </section>
+
+        <section className="mt-4">
+          <h3 className="mb-2 font-semibold text-kumo-default">Current access</h3>
+          <div className="max-h-72 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
+            {accessQuery.isLoading ? (
+              <div className="flex min-h-24 items-center justify-center">
+                <Loader size={20} />
+              </div>
+            ) : accesses.length > 0 ? (
+              accesses.map((access) => (
+                <AccessRow key={access.id} request={request} user={user} access={access} />
+              ))
+            ) : (
+              <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">
+                No access issued yet.
+              </div>
+            )}
+          </div>
+        </section>
 
         <div className="mt-4 flex justify-end">
           <Button variant="secondary" onClick={onClose}>

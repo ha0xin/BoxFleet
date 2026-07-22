@@ -78,6 +78,7 @@ SELECT
 FROM traffic_usage_deltas d
 JOIN proxy_users u ON u.id = d.proxy_user_id
 WHERE u.name = sqlc.arg(user_name)
+  AND u.deleted_at IS NULL
 GROUP BY u.name, d.direction
 ORDER BY d.direction;
 
@@ -89,5 +90,6 @@ SELECT
   CAST(COALESCE(SUM(d.billable_bytes_delta), 0) AS INTEGER) AS billable_bytes
 FROM traffic_usage_deltas d
 JOIN proxy_users u ON u.id = d.proxy_user_id
+WHERE u.deleted_at IS NULL
 GROUP BY u.name, d.direction
 ORDER BY u.name, d.direction;

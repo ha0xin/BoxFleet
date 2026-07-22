@@ -38,6 +38,7 @@ type Proxy struct {
 	InboundRulesJSON  string
 	OutboundRulesJSON string
 	RouteRulesJSON    string
+	DeletedAt         sql.NullString
 	CreatedAt         string
 	UpdatedAt         string
 }
@@ -75,6 +76,7 @@ type ProxyFilter struct {
 	Search    string
 	NodeName  string
 	Enabled   string
+	Deleted   string
 	Sort      string
 	Direction string
 	Limit     int64
@@ -434,6 +436,7 @@ SELECT
   p.inbound_rules_json,
   p.outbound_rules_json,
   p.route_rules_json,
+  p.deleted_at,
   p.created_at,
   p.updated_at
 FROM proxy_details p
@@ -466,6 +469,7 @@ OFFSET ?`
 			&proxy.InboundRulesJSON,
 			&proxy.OutboundRulesJSON,
 			&proxy.RouteRulesJSON,
+			&proxy.DeletedAt,
 			&proxy.CreatedAt,
 			&proxy.UpdatedAt,
 		); err != nil {
@@ -486,8 +490,11 @@ OFFSET ?`
 }
 
 func proxyPageWhere(filter ProxyFilter) ([]string, []any) {
-	where := []string{"1 = 1"}
+	where := []string{"p.deleted_at IS NULL", "p.node_deleted_at IS NULL"}
 	args := make([]any, 0, 3)
+	if strings.EqualFold(strings.TrimSpace(filter.Deleted), "only") {
+		where[0] = "p.deleted_at IS NOT NULL"
+	}
 	if nodeName := normalizeName(filter.NodeName); nodeName != "" {
 		where = append(where, "p.node_name = ?")
 		args = append(args, nodeName)
@@ -570,6 +577,50 @@ func (db *DB) DisableProxy(ctx context.Context, nodeName, name string) (Proxy, e
 		return Proxy{}, err
 	}
 	return db.GetProxy(ctx, nodeName, name)
+}
+
+func (db *DB) SoftDeleteProxy(ctx context.Context, nodeName, name string) (Proxy, error) {
+	proxy, err := db.GetProxy(ctx, nodeName, name)
+	if err != nil {
+		return Proxy{}, err
+	}
+	affected, err := db.q.SoftDeleteProxy(ctx, proxy.ID)
+	if err != nil {
+		return Proxy{}, err
+	}
+	if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
+		return Proxy{}, err
+	}
+	return db.getProxyIncludingDeleted(ctx, nodeName, proxy.Name)
+}
+
+func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, error) {
+	proxy, err := db.getProxyIncludingDeleted(ctx, nodeName, name)
+	if err != nil {
+		return Proxy{}, err
+	}
+	affected, err := db.q.RestoreProxy(ctx, proxy.ID)
+	if err != nil {
+		return Proxy{}, err
+	}
+	if err := requireAffected(affected, "deleted proxy", name+"@"+nodeName); err != nil {
+		return Proxy{}, err
+	}
+	return db.GetProxy(ctx, nodeName, proxy.Name)
+}
+
+func (db *DB) getProxyIncludingDeleted(ctx context.Context, nodeName, name string) (Proxy, error) {
+	row, err := db.q.GetProxyByNodeAndNameIncludingDeleted(ctx, store.GetProxyByNodeAndNameIncludingDeletedParams{
+		NodeName: normalizeName(nodeName),
+		Name:     normalizeName(name),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Proxy{}, fmt.Errorf("proxy %q on node %q not found", name, nodeName)
+		}
+		return Proxy{}, err
+	}
+	return proxyFromDetail(row), nil
 }
 
 func normalizeProxyParams(params CreateProxyParams) (Proxy, error) {
@@ -699,6 +750,7 @@ func proxyFromDetail(row store.ProxyDetail) Proxy {
 		InboundRulesJSON:  row.InboundRulesJson,
 		OutboundRulesJSON: row.OutboundRulesJson,
 		RouteRulesJSON:    row.RouteRulesJson,
+		DeletedAt:         row.DeletedAt,
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
 	}

@@ -56,7 +56,13 @@ func accessRevokeCommandWithName(name string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
-				access, err := store.RevokeProxyAccess(ctx, args[0], nodeName, proxyName)
+				var access db.ProxyAccess
+				var err error
+				if name == "delete" {
+					access, err = store.SoftDeleteProxyAccess(ctx, args[0], nodeName, proxyName)
+				} else {
+					access, err = store.RevokeProxyAccess(ctx, args[0], nodeName, proxyName)
+				}
 				if err != nil {
 					return err
 				}

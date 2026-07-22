@@ -641,12 +641,19 @@ func TestAdminNodeReenroll(t *testing.T) {
 		t.Fatal("active node's token should survive a rejected re-enroll")
 	}
 
-	// Decommission revokes the token; re-enroll restores the node to pending.
+	// Delete hides the node and revokes its token. Restore makes the disabled
+	// record visible again, then re-enroll returns it to pending.
 	delReq := adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/edge-r", nil)
 	delRec := httptest.NewRecorder()
 	router.ServeHTTP(delRec, delReq)
 	if delRec.Code != http.StatusOK {
 		t.Fatalf("decommission status = %d, body = %s", delRec.Code, delRec.Body.String())
+	}
+	restoreReq := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/edge-r/restore", nil)
+	restoreRec := httptest.NewRecorder()
+	router.ServeHTTP(restoreRec, restoreReq)
+	if restoreRec.Code != http.StatusOK {
+		t.Fatalf("restore status = %d, body = %s", restoreRec.Code, restoreRec.Body.String())
 	}
 	restored, thirdCfg := decodeBootstrap(t, reenroll())
 	if restored.Status != "pending" {
@@ -1235,7 +1242,7 @@ func TestAdminNodeAndProxyPagination(t *testing.T) {
 	}
 }
 
-func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
+func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
 	seedAPITestNode(t, ctx, store)
@@ -1251,12 +1258,8 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete access status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	access, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if access.Enabled {
-		t.Fatal("access was not disabled")
+	if _, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090"); err == nil {
+		t.Fatal("deleted access remained visible")
 	}
 
 	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/proxies", map[string]string{
@@ -1268,7 +1271,7 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reissue access status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	access, err = store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	access, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1282,12 +1285,24 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete proxy status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.GetProxy(ctx, "azus", "vless-39090"); err == nil {
+		t.Fatal("deleted proxy remained visible")
 	}
-	if proxy.Enabled {
-		t.Fatal("proxy was not disabled")
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/proxies?limit=10&deleted=true", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"vless-39090"`) {
+		t.Fatalf("deleted proxies response = %d %s", rec.Code, rec.Body.String())
+	}
+	req = adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/azus/proxies/vless-39090/restore", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore proxy status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
+	if err != nil || proxy.Enabled {
+		t.Fatalf("restored proxy = %#v, err = %v; want visible and disabled", proxy, err)
 	}
 
 	req = adminJSONRequest(t, http.MethodDelete, "/api/admin/users/alice", nil)
@@ -1296,12 +1311,24 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete user status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	user, err := store.GetProxyUser(ctx, "alice")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.GetProxyUser(ctx, "alice"); err == nil {
+		t.Fatal("deleted user remained visible")
 	}
-	if user.Status != "disabled" {
-		t.Fatalf("user status = %q", user.Status)
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/users?deleted=true", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"alice"`) {
+		t.Fatalf("deleted users response = %d %s", rec.Code, rec.Body.String())
+	}
+	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/restore", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore user status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	user, err := store.GetProxyUser(ctx, "alice")
+	if err != nil || user.Status != "disabled" {
+		t.Fatalf("restored user = %#v, err = %v; want visible and disabled", user, err)
 	}
 
 	req = adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/azus", nil)
@@ -1310,12 +1337,14 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete node status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	node, err := store.GetNode(ctx, "azus")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.GetNode(ctx, "azus"); err == nil {
+		t.Fatal("deleted node remained visible")
 	}
-	if node.Status != "disabled" {
-		t.Fatalf("node status = %q", node.Status)
+	req = adminJSONRequest(t, http.MethodGet, "/api/admin/nodes?limit=10&deleted=true", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"azus"`) {
+		t.Fatalf("deleted nodes response = %d %s", rec.Code, rec.Body.String())
 	}
 	ok, err := store.VerifyNodeToken(ctx, "azus", issued.Token)
 	if err != nil {
@@ -1323,6 +1352,16 @@ func TestAdminDeleteResourceEndpointsDisableResources(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("node token still verifies after node delete")
+	}
+	req = adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/azus/restore", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore node status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	node, err := store.GetNode(ctx, "azus")
+	if err != nil || node.Status != "disabled" {
+		t.Fatalf("restored node = %#v, err = %v; want visible and disabled", node, err)
 	}
 }
 

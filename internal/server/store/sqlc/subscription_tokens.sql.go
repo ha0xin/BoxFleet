@@ -45,6 +45,7 @@ SELECT
 FROM subscription_tokens t
 JOIN proxy_users u ON u.id = t.proxy_user_id
 WHERE u.name = ?1
+  AND u.deleted_at IS NULL
   AND t.revoked_at IS NULL
 `
 
@@ -85,6 +86,7 @@ SELECT
 FROM subscription_tokens t
 JOIN proxy_users u ON u.id = t.proxy_user_id
 WHERE t.token = ?1
+  AND u.deleted_at IS NULL
   AND t.revoked_at IS NULL
 `
 

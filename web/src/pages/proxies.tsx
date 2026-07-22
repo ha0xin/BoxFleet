@@ -10,6 +10,7 @@ import {
   ProhibitIcon,
   SortAscendingIcon,
   SortDescendingIcon,
+  TrashIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
 import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
@@ -19,9 +20,10 @@ import { adminPath, formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { ProxyFormDialog } from "./proxy-dialogs";
 import type { ProxyDialogState } from "./proxy-dialogs";
+import { SoftDeleteDialog } from "./soft-delete-dialog";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
-type ProxyFilter = "all" | "enabled" | "disabled";
+type ProxyFilter = "all" | "enabled" | "disabled" | "deleted";
 type ProxySort = "node_name" | "name" | "protocol" | "listen_port" | "enabled" | "traffic_multiplier" | "updated_at";
 type SortDirection = "asc" | "desc";
 
@@ -42,6 +44,9 @@ function proxyEnabledFilter(filter: ProxyFilter): string | undefined {
 }
 
 function proxyStatus(proxy: AdminProxy) {
+  if (proxy.deleted_at) {
+    return { label: "Deleted", icon: XCircleIcon, className: "text-kumo-subtle" };
+  }
   if (!proxy.enabled) {
     return { label: "Disabled", icon: XCircleIcon, className: "text-kumo-subtle" };
   }
@@ -107,12 +112,19 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
   const [sort, setSortValue] = useState<ProxySort>("node_name");
   const [direction, setDirection] = useState<SortDirection>("asc");
   const [dialog, setDialog] = useState<ProxyDialogState>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminProxy | null>(null);
 
   const toggleEnabled = useAdminMutation<AdminProxy>(request, (req, proxy) =>
     req(`/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}`, {
       method: "PATCH",
       body: JSON.stringify({ enabled: !proxy.enabled })
     })
+  );
+  const restore = useAdminMutation<AdminProxy>(request, (req, proxy) =>
+    req(
+      `/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}/restore`,
+      { method: "POST" }
+    )
   );
 
   function setSort(column: ProxySort) {
@@ -143,6 +155,7 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
       offset,
       search,
       enabled: proxyEnabledFilter(filter),
+      deleted: filter === "deleted" ? "true" : undefined,
       sort,
       direction
     });
@@ -229,6 +242,10 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
                       </DropdownMenu.RadioItem>
                       <DropdownMenu.RadioItem value="disabled">
                         Disabled
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
+                      <DropdownMenu.RadioItem value="deleted">
+                        Deleted
                         <DropdownMenu.RadioItemIndicator />
                       </DropdownMenu.RadioItem>
                     </DropdownMenu.RadioGroup>
@@ -318,15 +335,27 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
                                   }
                                 />
                                 <DropdownMenu.Content>
-                                  <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", proxy })}>
-                                    Edit
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item
-                                    icon={proxy.enabled ? ProhibitIcon : CheckCircleIcon}
-                                    onClick={() => toggleEnabled.mutate(proxy)}
-                                  >
-                                    {proxy.enabled ? "Disable" : "Enable"}
-                                  </DropdownMenu.Item>
+                                  {proxy.deleted_at ? (
+                                    <DropdownMenu.Item icon={CheckCircleIcon} onClick={() => restore.mutate(proxy)}>
+                                      Restore
+                                    </DropdownMenu.Item>
+                                  ) : (
+                                    <>
+                                      <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", proxy })}>
+                                        Edit
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Item
+                                        icon={proxy.enabled ? ProhibitIcon : CheckCircleIcon}
+                                        onClick={() => toggleEnabled.mutate(proxy)}
+                                      >
+                                        {proxy.enabled ? "Disable" : "Enable"}
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Separator />
+                                      <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(proxy)}>
+                                        Delete
+                                      </DropdownMenu.Item>
+                                    </>
+                                  )}
                                 </DropdownMenu.Content>
                               </DropdownMenu>
                             </Table.Cell>
@@ -359,6 +388,19 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
 
       {dialog?.mode === "create" || dialog?.mode === "edit" ? (
         <ProxyFormDialog request={request} state={dialog} onClose={() => setDialog(null)} />
+      ) : null}
+      {deleteTarget ? (
+        <SoftDeleteDialog
+          request={request}
+          title="Delete proxy"
+          description={
+            <>
+              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? It will disappear from the default inventory and can be restored from the Deleted filter.
+            </>
+          }
+          endpoint={`/api/admin/nodes/${encodeURIComponent(deleteTarget.node_name)}/proxies/${encodeURIComponent(deleteTarget.name)}`}
+          onClose={() => setDeleteTarget(null)}
+        />
       ) : null}
     </div>
   );

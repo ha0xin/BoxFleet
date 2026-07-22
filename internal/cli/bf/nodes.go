@@ -226,7 +226,7 @@ func nodeDeleteCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
-				node, err := store.DisableNode(ctx, args[0])
+				node, err := store.SoftDeleteNode(ctx, args[0])
 				if err != nil {
 					return err
 				}

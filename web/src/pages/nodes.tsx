@@ -8,11 +8,11 @@ import {
   FunnelIcon,
   HardDrivesIcon,
   PencilSimpleIcon,
-  PlugsIcon,
   PlusIcon,
   ProhibitIcon,
   SortAscendingIcon,
-  SortDescendingIcon
+  SortDescendingIcon,
+  TrashIcon
 } from "@phosphor-icons/react";
 import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
 
@@ -31,7 +31,7 @@ import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog 
 import type { NodeDialogState } from "./node-dialogs";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
-type NodeFilter = "all" | "active" | "disabled" | "degraded";
+type NodeFilter = "all" | "active" | "disabled" | "degraded" | "deleted";
 type NodeSort = "name" | "status" | "public_host" | "last_seen_at" | "sing_box_version";
 type SortDirection = "asc" | "desc";
 
@@ -46,7 +46,7 @@ function queryString(params: Record<string, string | number | undefined>) {
 }
 
 function nodeStatusFilter(filter: NodeFilter): string | undefined {
-  return filter === "all" ? undefined : filter;
+  return filter === "all" || filter === "deleted" ? undefined : filter;
 }
 
 function nodeTimestamp(node: AdminNode): string {
@@ -110,6 +110,9 @@ export function NodesPage({ request }: { request: AdminRequest }) {
       body: JSON.stringify({ status: node.status === "disabled" ? "active" : "disabled" })
     })
   );
+  const restore = useAdminMutation<AdminNode>(request, (req, node) =>
+    req(`/api/admin/nodes/${encodeURIComponent(node.name)}/restore`, { method: "POST" })
+  );
 
   function setSort(column: NodeSort) {
     setPage(1);
@@ -139,6 +142,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
       offset,
       search,
       status: nodeStatusFilter(filter),
+      deleted: filter === "deleted" ? "true" : undefined,
       sort,
       direction
     });
@@ -231,6 +235,10 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                         Degraded
                         <DropdownMenu.RadioItemIndicator />
                       </DropdownMenu.RadioItem>
+                      <DropdownMenu.RadioItem value="deleted">
+                        Deleted
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
                     </DropdownMenu.RadioGroup>
                   </DropdownMenu.Group>
                 </DropdownMenu.Content>
@@ -267,7 +275,9 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                       </Table.Row>
                     ) : nodes.length > 0 ? (
                       nodes.map((node) => {
-                        const health = nodeHealth(node);
+                        const health = node.deleted_at
+                          ? { label: "Deleted", icon: ProhibitIcon, className: "text-kumo-subtle" }
+                          : nodeHealth(node);
                         const StatusIcon = health.icon;
                         const statusClassName = health.label === "Disabled" ? "text-kumo-subtle" : health.className;
                         return (
@@ -316,6 +326,12 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                   }
                                 />
                                 <DropdownMenu.Content>
+                                  {node.deleted_at ? (
+                                    <DropdownMenu.Item icon={ArrowsClockwiseIcon} onClick={() => restore.mutate(node)}>
+                                      Restore
+                                    </DropdownMenu.Item>
+                                  ) : (
+                                    <>
                                   <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", node })}>
                                     Edit
                                   </DropdownMenu.Item>
@@ -342,9 +358,11 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                         {node.status === "disabled" ? "Enable" : "Disable"}
                                       </DropdownMenu.Item>
                                       <DropdownMenu.Separator />
-                                      <DropdownMenu.Item variant="danger" icon={PlugsIcon} onClick={() => setDialog({ mode: "delete", node })}>
-                                        Decommission
+                                      <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDialog({ mode: "delete", node })}>
+                                        Delete
                                       </DropdownMenu.Item>
+                                    </>
+                                  )}
                                     </>
                                   )}
                                 </DropdownMenu.Content>

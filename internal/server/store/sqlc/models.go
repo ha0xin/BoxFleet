@@ -56,6 +56,7 @@ type Node struct {
 	Status         string         `json:"status"`
 	SingBoxVersion string         `json:"sing_box_version"`
 	LastSeenAt     sql.NullString `json:"last_seen_at"`
+	DeletedAt      sql.NullString `json:"deleted_at"`
 	CreatedAt      string         `json:"created_at"`
 	UpdatedAt      string         `json:"updated_at"`
 }
@@ -110,21 +111,22 @@ type NodeToken struct {
 }
 
 type Proxy struct {
-	ID                string  `json:"id"`
-	NodeID            string  `json:"node_id"`
-	Name              string  `json:"name"`
-	Protocol          string  `json:"protocol"`
-	Listen            string  `json:"listen"`
-	ListenPort        int64   `json:"listen_port"`
-	Transport         string  `json:"transport"`
-	Enabled           int64   `json:"enabled"`
-	TrafficMultiplier float64 `json:"traffic_multiplier"`
-	SettingsJson      string  `json:"settings_json"`
-	InboundRulesJson  string  `json:"inbound_rules_json"`
-	OutboundRulesJson string  `json:"outbound_rules_json"`
-	RouteRulesJson    string  `json:"route_rules_json"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	ID                string         `json:"id"`
+	NodeID            string         `json:"node_id"`
+	Name              string         `json:"name"`
+	Protocol          string         `json:"protocol"`
+	Listen            string         `json:"listen"`
+	ListenPort        int64          `json:"listen_port"`
+	Transport         string         `json:"transport"`
+	Enabled           int64          `json:"enabled"`
+	TrafficMultiplier float64        `json:"traffic_multiplier"`
+	SettingsJson      string         `json:"settings_json"`
+	InboundRulesJson  string         `json:"inbound_rules_json"`
+	OutboundRulesJson string         `json:"outbound_rules_json"`
+	RouteRulesJson    string         `json:"route_rules_json"`
+	DeletedAt         sql.NullString `json:"deleted_at"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
 }
 
 type ProxyAccess struct {
@@ -136,6 +138,7 @@ type ProxyAccess struct {
 	QuotaBytes        int64           `json:"quota_bytes"`
 	TrafficMultiplier sql.NullFloat64 `json:"traffic_multiplier"`
 	CredentialJson    string          `json:"credential_json"`
+	DeletedAt         sql.NullString  `json:"deleted_at"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
 }
@@ -163,28 +166,34 @@ type ProxyAccessDetail struct {
 	CredentialJson         string          `json:"credential_json"`
 	ProxyUserStatus        string          `json:"proxy_user_status"`
 	NodeStatus             string          `json:"node_status"`
+	DeletedAt              sql.NullString  `json:"deleted_at"`
+	ProxyDeletedAt         sql.NullString  `json:"proxy_deleted_at"`
+	ProxyUserDeletedAt     sql.NullString  `json:"proxy_user_deleted_at"`
+	NodeDeletedAt          sql.NullString  `json:"node_deleted_at"`
 	CreatedAt              string          `json:"created_at"`
 	UpdatedAt              string          `json:"updated_at"`
 }
 
 type ProxyDetail struct {
-	ID                string  `json:"id"`
-	NodeID            string  `json:"node_id"`
-	NodeName          string  `json:"node_name"`
-	NodePublicHost    string  `json:"node_public_host"`
-	Name              string  `json:"name"`
-	Protocol          string  `json:"protocol"`
-	Listen            string  `json:"listen"`
-	ListenPort        int64   `json:"listen_port"`
-	Transport         string  `json:"transport"`
-	Enabled           int64   `json:"enabled"`
-	TrafficMultiplier float64 `json:"traffic_multiplier"`
-	SettingsJson      string  `json:"settings_json"`
-	InboundRulesJson  string  `json:"inbound_rules_json"`
-	OutboundRulesJson string  `json:"outbound_rules_json"`
-	RouteRulesJson    string  `json:"route_rules_json"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	ID                string         `json:"id"`
+	NodeID            string         `json:"node_id"`
+	NodeName          string         `json:"node_name"`
+	NodePublicHost    string         `json:"node_public_host"`
+	Name              string         `json:"name"`
+	Protocol          string         `json:"protocol"`
+	Listen            string         `json:"listen"`
+	ListenPort        int64          `json:"listen_port"`
+	Transport         string         `json:"transport"`
+	Enabled           int64          `json:"enabled"`
+	TrafficMultiplier float64        `json:"traffic_multiplier"`
+	SettingsJson      string         `json:"settings_json"`
+	InboundRulesJson  string         `json:"inbound_rules_json"`
+	OutboundRulesJson string         `json:"outbound_rules_json"`
+	RouteRulesJson    string         `json:"route_rules_json"`
+	DeletedAt         sql.NullString `json:"deleted_at"`
+	NodeDeletedAt     sql.NullString `json:"node_deleted_at"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
 }
 
 type ProxyNameAlias struct {
@@ -200,6 +209,7 @@ type ProxyUser struct {
 	Status           string         `json:"status"`
 	GlobalQuotaBytes int64          `json:"global_quota_bytes"`
 	ExpireAt         sql.NullString `json:"expire_at"`
+	DeletedAt        sql.NullString `json:"deleted_at"`
 	CreatedAt        string         `json:"created_at"`
 	UpdatedAt        string         `json:"updated_at"`
 }

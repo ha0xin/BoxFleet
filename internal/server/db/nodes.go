@@ -32,6 +32,7 @@ type Node struct {
 	Status         string
 	SingBoxVersion string
 	LastSeenAt     sql.NullString
+	DeletedAt      sql.NullString
 	CreatedAt      string
 	UpdatedAt      string
 }
@@ -135,6 +136,7 @@ func parseNodeHosts(raw, fallbackHost string) []NodeHost {
 type NodeFilter struct {
 	Search    string
 	Status    string
+	Deleted   string
 	Sort      string
 	Direction string
 	Limit     int64
@@ -382,6 +384,7 @@ SELECT
   n.status,
   n.sing_box_version,
   n.last_seen_at,
+  n.deleted_at,
   n.created_at,
   n.updated_at
 FROM nodes n
@@ -407,6 +410,7 @@ OFFSET ?`
 			&node.Status,
 			&node.SingBoxVersion,
 			&node.LastSeenAt,
+			&node.DeletedAt,
 			&node.CreatedAt,
 			&node.UpdatedAt,
 		); err != nil {
@@ -427,8 +431,11 @@ OFFSET ?`
 }
 
 func nodePageWhere(filter NodeFilter) ([]string, []any) {
-	where := []string{"1 = 1"}
+	where := []string{"n.deleted_at IS NULL"}
 	args := make([]any, 0, 2)
+	if strings.EqualFold(strings.TrimSpace(filter.Deleted), "only") {
+		where[0] = "n.deleted_at IS NOT NULL"
+	}
 	if status := strings.TrimSpace(filter.Status); status != "" {
 		where = append(where, "n.status = ?")
 		args = append(args, status)
@@ -503,6 +510,50 @@ func (db *DB) DisableNode(ctx context.Context, name string) (Node, error) {
 	return db.GetNode(ctx, name)
 }
 
+func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
+	node, err := db.GetNode(ctx, name)
+	if err != nil {
+		return Node{}, err
+	}
+	affected, err := db.q.SoftDeleteNode(ctx, node.Name)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := requireAffected(affected, "node", name); err != nil {
+		return Node{}, err
+	}
+	if err := db.q.RevokeNodeTokensByNodeID(ctx, node.ID); err != nil {
+		return Node{}, err
+	}
+	return db.getNodeIncludingDeleted(ctx, node.Name)
+}
+
+func (db *DB) RestoreNode(ctx context.Context, name string) (Node, error) {
+	node, err := db.getNodeIncludingDeleted(ctx, name)
+	if err != nil {
+		return Node{}, err
+	}
+	affected, err := db.q.RestoreNode(ctx, node.Name)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := requireAffected(affected, "deleted node", name); err != nil {
+		return Node{}, err
+	}
+	return db.GetNode(ctx, node.Name)
+}
+
+func (db *DB) getNodeIncludingDeleted(ctx context.Context, name string) (Node, error) {
+	node, err := db.q.GetNodeByNameIncludingDeleted(ctx, normalizeName(name))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Node{}, fmt.Errorf("node %q not found", name)
+		}
+		return Node{}, err
+	}
+	return mapNode(node), nil
+}
+
 func validNodeStatus(status string) bool {
 	switch status {
 	case "pending", "active", "disabled", "degraded":
@@ -522,6 +573,7 @@ func mapNode(row store.Node) Node {
 		Status:         row.Status,
 		SingBoxVersion: row.SingBoxVersion,
 		LastSeenAt:     row.LastSeenAt,
+		DeletedAt:      row.DeletedAt,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}

@@ -86,15 +86,17 @@ SELECT
   status,
   sing_box_version,
   last_seen_at,
+  deleted_at,
   created_at,
   updated_at
 FROM nodes
-WHERE name = ?1
+WHERE deleted_at IS NULL
+  AND (name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
      WHERE alias = ?1
-   )
+   ))
 `
 
 func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) {
@@ -109,6 +111,37 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 		&i.Status,
 		&i.SingBoxVersion,
 		&i.LastSeenAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNodeByNameIncludingDeleted = `-- name: GetNodeByNameIncludingDeleted :one
+SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at
+FROM nodes
+WHERE name = ?1
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = ?1
+   )
+`
+
+func (q *Queries) GetNodeByNameIncludingDeleted(ctx context.Context, name string) (Node, error) {
+	row := q.db.QueryRowContext(ctx, getNodeByNameIncludingDeleted, name)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.PublicHost,
+		&i.HostsJson,
+		&i.ApiBaseUrl,
+		&i.Status,
+		&i.SingBoxVersion,
+		&i.LastSeenAt,
+		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -143,9 +176,11 @@ SELECT
   status,
   sing_box_version,
   last_seen_at,
+  deleted_at,
   created_at,
   updated_at
 FROM nodes
+WHERE deleted_at IS NULL
 ORDER BY name
 `
 
@@ -167,6 +202,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.Status,
 			&i.SingBoxVersion,
 			&i.LastSeenAt,
+			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -189,6 +225,7 @@ SET
   status = 'active',
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?1
+  AND deleted_at IS NULL
   AND status = 'pending'
 `
 
@@ -221,12 +258,30 @@ func (q *Queries) RenameNodeByID(ctx context.Context, arg RenameNodeByIDParams) 
 	return result.RowsAffected()
 }
 
+const restoreNode = `-- name: RestoreNode :execrows
+UPDATE nodes
+SET
+  deleted_at = NULL,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?1
+  AND deleted_at IS NOT NULL
+`
+
+func (q *Queries) RestoreNode(ctx context.Context, name string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, restoreNode, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setNodeStatus = `-- name: SetNodeStatus :execrows
 UPDATE nodes
 SET
   status = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?2
+  AND deleted_at IS NULL
 `
 
 type SetNodeStatusParams struct {
@@ -242,6 +297,24 @@ func (q *Queries) SetNodeStatus(ctx context.Context, arg SetNodeStatusParams) (i
 	return result.RowsAffected()
 }
 
+const softDeleteNode = `-- name: SoftDeleteNode :execrows
+UPDATE nodes
+SET
+  status = 'disabled',
+  deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = ?1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteNode(ctx context.Context, name string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteNode, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateNode = `-- name: UpdateNode :execrows
 UPDATE nodes
 SET
@@ -251,6 +324,7 @@ SET
   status = ?4,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = ?5
+  AND deleted_at IS NULL
 `
 
 type UpdateNodeParams struct {

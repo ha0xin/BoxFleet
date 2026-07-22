@@ -13,6 +13,7 @@ import {
   ProhibitIcon,
   SortAscendingIcon,
   SortDescendingIcon,
+  TrashIcon,
   UserIcon,
   WarningCircleIcon,
   XCircleIcon
@@ -25,9 +26,10 @@ import { PageHeader, PageTopBar } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
+import { SoftDeleteDialog } from "./soft-delete-dialog";
 
 type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
-type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded";
+type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded" | "deleted";
 type UserSort = "name" | "status" | "traffic" | "quota" | "proxy_count" | "expire_at";
 type SortDirection = "asc" | "desc";
 
@@ -92,6 +94,9 @@ function userStatus(user: AdminUser, total: number): {
   icon: Icon;
   className: string;
 } {
+  if (user.deleted_at) {
+    return { key: "deleted", label: "Deleted", icon: XCircleIcon, className: "text-kumo-subtle" };
+  }
   if (user.status === "disabled") {
     return { key: "disabled", label: "Disabled", icon: XCircleIcon, className: "text-kumo-subtle" };
   }
@@ -225,6 +230,7 @@ export function UsersPage({ request }: { request: AdminRequest }) {
   const [sort, setSortValue] = useState<UserSort>("name");
   const [direction, setDirection] = useState<SortDirection>("asc");
   const [dialog, setDialog] = useState<UserDialogState>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
 
   const toggleStatus = useAdminMutation<AdminUser>(request, (req, user) =>
     req(`/api/admin/users/${encodeURIComponent(user.name)}`, {
@@ -232,10 +238,13 @@ export function UsersPage({ request }: { request: AdminRequest }) {
       body: JSON.stringify({ status: user.status === "disabled" ? "active" : "disabled" })
     })
   );
+  const restore = useAdminMutation<AdminUser>(request, (req, user) =>
+    req(`/api/admin/users/${encodeURIComponent(user.name)}/restore`, { method: "POST" })
+  );
 
   const usersQuery = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: () => request<AdminUser[]>("/api/admin/users")
+    queryKey: ["admin", "users", filter === "deleted"],
+    queryFn: () => request<AdminUser[]>(filter === "deleted" ? "/api/admin/users?deleted=true" : "/api/admin/users")
   });
   const trafficQuery = useQuery({
     queryKey: ["admin", "traffic-users"],
@@ -380,6 +389,10 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                         Over quota
                         <DropdownMenu.RadioItemIndicator />
                       </DropdownMenu.RadioItem>
+                      <DropdownMenu.RadioItem value="deleted">
+                        Deleted
+                        <DropdownMenu.RadioItemIndicator />
+                      </DropdownMenu.RadioItem>
                     </DropdownMenu.RadioGroup>
                   </DropdownMenu.Group>
                 </DropdownMenu.Content>
@@ -464,24 +477,36 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                                   }
                                 />
                                 <DropdownMenu.Content>
-                                  <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
-                                    Edit
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
-                                    Manage access
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item
-                                    icon={IdentificationCardIcon}
-                                    onClick={() => setDialog({ mode: "connection", user: row.user })}
-                                  >
-                                    Connection info
-                                  </DropdownMenu.Item>
-                                  <DropdownMenu.Item
-                                    icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
-                                    onClick={() => toggleStatus.mutate(row.user)}
-                                  >
-                                    {row.user.status === "disabled" ? "Enable" : "Disable"}
-                                  </DropdownMenu.Item>
+                                  {row.user.deleted_at ? (
+                                    <DropdownMenu.Item icon={CheckCircleIcon} onClick={() => restore.mutate(row.user)}>
+                                      Restore
+                                    </DropdownMenu.Item>
+                                  ) : (
+                                    <>
+                                      <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
+                                        Edit
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
+                                        Manage access
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Item
+                                        icon={IdentificationCardIcon}
+                                        onClick={() => setDialog({ mode: "connection", user: row.user })}
+                                      >
+                                        Connection info
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Item
+                                        icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                        onClick={() => toggleStatus.mutate(row.user)}
+                                      >
+                                        {row.user.status === "disabled" ? "Enable" : "Disable"}
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Separator />
+                                      <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row.user)}>
+                                        Delete
+                                      </DropdownMenu.Item>
+                                    </>
+                                  )}
                                 </DropdownMenu.Content>
                               </DropdownMenu>
                             </Table.Cell>
@@ -520,6 +545,19 @@ export function UsersPage({ request }: { request: AdminRequest }) {
       ) : null}
       {dialog?.mode === "connection" ? (
         <ConnectionInfoDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
+      ) : null}
+      {deleteTarget ? (
+        <SoftDeleteDialog
+          request={request}
+          title="Delete user"
+          description={
+            <>
+              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? The user and its credentials will disappear from the default inventory and can be restored from the Deleted filter.
+            </>
+          }
+          endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.name)}`}
+          onClose={() => setDeleteTarget(null)}
+        />
       ) : null}
     </div>
   );

@@ -25,9 +25,11 @@ SELECT
   status,
   sing_box_version,
   last_seen_at,
+  deleted_at,
   created_at,
   updated_at
 FROM nodes
+WHERE deleted_at IS NULL
 ORDER BY name;
 
 -- name: GetNodeByName :one
@@ -40,8 +42,20 @@ SELECT
   status,
   sing_box_version,
   last_seen_at,
+  deleted_at,
   created_at,
   updated_at
+FROM nodes
+WHERE deleted_at IS NULL
+  AND (name = sqlc.arg(name)
+   OR id = (
+     SELECT node_id
+     FROM node_name_aliases
+     WHERE alias = sqlc.arg(name)
+   ));
+
+-- name: GetNodeByNameIncludingDeleted :one
+SELECT *
 FROM nodes
 WHERE name = sqlc.arg(name)
    OR id = (
@@ -80,7 +94,8 @@ UPDATE nodes
 SET
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name);
+WHERE name = sqlc.arg(name)
+  AND deleted_at IS NULL;
 
 -- name: PromotePendingNodeToActive :execrows
 UPDATE nodes
@@ -88,6 +103,7 @@ SET
   status = 'active',
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = sqlc.arg(name)
+  AND deleted_at IS NULL
   AND status = 'pending';
 
 -- name: UpdateNode :execrows
@@ -98,4 +114,22 @@ SET
   api_base_url = sqlc.arg(api_base_url),
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name);
+WHERE name = sqlc.arg(name)
+  AND deleted_at IS NULL;
+
+-- name: SoftDeleteNode :execrows
+UPDATE nodes
+SET
+  status = 'disabled',
+  deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = sqlc.arg(name)
+  AND deleted_at IS NULL;
+
+-- name: RestoreNode :execrows
+UPDATE nodes
+SET
+  deleted_at = NULL,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE name = sqlc.arg(name)
+  AND deleted_at IS NOT NULL;

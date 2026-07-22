@@ -34,6 +34,7 @@ type ProxyAccess struct {
 	QuotaBytes             int64
 	TrafficMultiplier      sql.NullFloat64
 	CredentialJSON         string
+	DeletedAt              sql.NullString
 	CreatedAt              string
 	UpdatedAt              string
 }
@@ -70,10 +71,10 @@ func (db *DB) IssueVLESSRealityAccess(ctx context.Context, params IssueAccessPar
 	}
 	existing, err := db.getProxyAccessByIDs(ctx, user.ID, proxy.ID)
 	if err == nil {
-		if existing.Enabled {
+		if existing.Enabled && !existing.DeletedAt.Valid {
 			return existing, nil
 		}
-		if err := db.setProxyAccessEnabledByIDs(ctx, user.ID, proxy.ID, true); err != nil {
+		if _, err := db.q.RestoreProxyAccess(ctx, store.RestoreProxyAccessParams{ProxyUserID: user.ID, ProxyID: proxy.ID}); err != nil {
 			return ProxyAccess{}, err
 		}
 		return db.GetProxyAccess(ctx, user.Name, proxy.NodeName, proxy.Name)
@@ -105,6 +106,28 @@ func (db *DB) IssueVLESSRealityAccess(ctx context.Context, params IssueAccessPar
 		return ProxyAccess{}, err
 	}
 	return db.GetProxyAccess(ctx, user.Name, proxy.NodeName, proxy.Name)
+}
+
+func (db *DB) SoftDeleteProxyAccess(ctx context.Context, userName, nodeName, proxyName string) (ProxyAccess, error) {
+	user, err := db.GetProxyUser(ctx, userName)
+	if err != nil {
+		return ProxyAccess{}, err
+	}
+	proxy, err := db.GetProxy(ctx, nodeName, proxyName)
+	if err != nil {
+		return ProxyAccess{}, err
+	}
+	affected, err := db.q.SoftDeleteProxyAccess(ctx, store.SoftDeleteProxyAccessParams{
+		ProxyUserID: user.ID,
+		ProxyID:     proxy.ID,
+	})
+	if err != nil {
+		return ProxyAccess{}, err
+	}
+	if err := requireAffected(affected, "proxy access", userName+"@"+nodeName+"/"+proxyName); err != nil {
+		return ProxyAccess{}, err
+	}
+	return db.getProxyAccessByIDs(ctx, user.ID, proxy.ID)
 }
 
 func (db *DB) RevokeProxyAccess(ctx context.Context, userName, nodeName, proxyName string) (ProxyAccess, error) {
@@ -246,6 +269,7 @@ func proxyAccessFromDetail(row store.ProxyAccessDetail) ProxyAccess {
 		QuotaBytes:             row.QuotaBytes,
 		TrafficMultiplier:      row.TrafficMultiplier,
 		CredentialJSON:         row.CredentialJson,
+		DeletedAt:              row.DeletedAt,
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}

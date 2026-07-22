@@ -58,11 +58,15 @@ func (q *Queries) CreateProxyAccess(ctx context.Context, arg CreateProxyAccessPa
 }
 
 const getProxyAccess = `-- name: GetProxyAccess :one
-SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, created_at, updated_at
+SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, deleted_at, proxy_deleted_at, proxy_user_deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_access_details
 WHERE proxy_user_name = ?1
   AND node_name = ?2
   AND proxy_name = ?3
+  AND deleted_at IS NULL
+  AND proxy_deleted_at IS NULL
+  AND proxy_user_deleted_at IS NULL
+  AND node_deleted_at IS NULL
 `
 
 type GetProxyAccessParams struct {
@@ -97,6 +101,10 @@ func (q *Queries) GetProxyAccess(ctx context.Context, arg GetProxyAccessParams) 
 		&i.CredentialJson,
 		&i.ProxyUserStatus,
 		&i.NodeStatus,
+		&i.DeletedAt,
+		&i.ProxyDeletedAt,
+		&i.ProxyUserDeletedAt,
+		&i.NodeDeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -104,7 +112,7 @@ func (q *Queries) GetProxyAccess(ctx context.Context, arg GetProxyAccessParams) 
 }
 
 const getProxyAccessByIDs = `-- name: GetProxyAccessByIDs :one
-SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, created_at, updated_at
+SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, deleted_at, proxy_deleted_at, proxy_user_deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_access_details
 WHERE proxy_user_id = ?1
   AND proxy_id = ?2
@@ -141,6 +149,10 @@ func (q *Queries) GetProxyAccessByIDs(ctx context.Context, arg GetProxyAccessByI
 		&i.CredentialJson,
 		&i.ProxyUserStatus,
 		&i.NodeStatus,
+		&i.DeletedAt,
+		&i.ProxyDeletedAt,
+		&i.ProxyUserDeletedAt,
+		&i.NodeDeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -148,7 +160,7 @@ func (q *Queries) GetProxyAccessByIDs(ctx context.Context, arg GetProxyAccessByI
 }
 
 const listProxyAccessesByNodeName = `-- name: ListProxyAccessesByNodeName :many
-SELECT d.id, d.proxy_id, d.proxy_user_id, d.proxy_user_name, d.node_id, d.node_name, d.node_public_host, d.proxy_name, d.protocol, d.listen, d.listen_port, d.transport, d.proxy_traffic_multiplier, d.proxy_enabled, d.settings_json, d.auth_name, d.enabled, d.quota_bytes, d.traffic_multiplier, d.credential_json, d.proxy_user_status, d.node_status, d.created_at, d.updated_at
+SELECT d.id, d.proxy_id, d.proxy_user_id, d.proxy_user_name, d.node_id, d.node_name, d.node_public_host, d.proxy_name, d.protocol, d.listen, d.listen_port, d.transport, d.proxy_traffic_multiplier, d.proxy_enabled, d.settings_json, d.auth_name, d.enabled, d.quota_bytes, d.traffic_multiplier, d.credential_json, d.proxy_user_status, d.node_status, d.deleted_at, d.proxy_deleted_at, d.proxy_user_deleted_at, d.node_deleted_at, d.created_at, d.updated_at
 FROM proxy_access_details d
 JOIN user_node_bindings b ON b.proxy_user_id = d.proxy_user_id AND b.node_id = d.node_id
 WHERE d.node_name = ?1
@@ -157,6 +169,10 @@ WHERE d.node_name = ?1
   AND d.node_status = 'active'
   AND d.proxy_enabled = 1
   AND b.enabled = 1
+  AND d.deleted_at IS NULL
+  AND d.proxy_deleted_at IS NULL
+  AND d.proxy_user_deleted_at IS NULL
+  AND d.node_deleted_at IS NULL
 ORDER BY d.listen_port, d.proxy_name, d.proxy_user_name
 `
 
@@ -192,6 +208,10 @@ func (q *Queries) ListProxyAccessesByNodeName(ctx context.Context, nodeName stri
 			&i.CredentialJson,
 			&i.ProxyUserStatus,
 			&i.NodeStatus,
+			&i.DeletedAt,
+			&i.ProxyDeletedAt,
+			&i.ProxyUserDeletedAt,
+			&i.NodeDeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -209,9 +229,13 @@ func (q *Queries) ListProxyAccessesByNodeName(ctx context.Context, nodeName stri
 }
 
 const listProxyAccessesByUserName = `-- name: ListProxyAccessesByUserName :many
-SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, created_at, updated_at
+SELECT id, proxy_id, proxy_user_id, proxy_user_name, node_id, node_name, node_public_host, proxy_name, protocol, listen, listen_port, transport, proxy_traffic_multiplier, proxy_enabled, settings_json, auth_name, enabled, quota_bytes, traffic_multiplier, credential_json, proxy_user_status, node_status, deleted_at, proxy_deleted_at, proxy_user_deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_access_details
 WHERE proxy_user_name = ?1
+  AND deleted_at IS NULL
+  AND proxy_deleted_at IS NULL
+  AND proxy_user_deleted_at IS NULL
+  AND node_deleted_at IS NULL
 ORDER BY node_name, listen_port, proxy_name
 `
 
@@ -247,6 +271,10 @@ func (q *Queries) ListProxyAccessesByUserName(ctx context.Context, userName stri
 			&i.CredentialJson,
 			&i.ProxyUserStatus,
 			&i.NodeStatus,
+			&i.DeletedAt,
+			&i.ProxyDeletedAt,
+			&i.ProxyUserDeletedAt,
+			&i.NodeDeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -264,7 +292,7 @@ func (q *Queries) ListProxyAccessesByUserName(ctx context.Context, userName stri
 }
 
 const listProxyAccessesByUserNode = `-- name: ListProxyAccessesByUserNode :many
-SELECT d.id, d.proxy_id, d.proxy_user_id, d.proxy_user_name, d.node_id, d.node_name, d.node_public_host, d.proxy_name, d.protocol, d.listen, d.listen_port, d.transport, d.proxy_traffic_multiplier, d.proxy_enabled, d.settings_json, d.auth_name, d.enabled, d.quota_bytes, d.traffic_multiplier, d.credential_json, d.proxy_user_status, d.node_status, d.created_at, d.updated_at
+SELECT d.id, d.proxy_id, d.proxy_user_id, d.proxy_user_name, d.node_id, d.node_name, d.node_public_host, d.proxy_name, d.protocol, d.listen, d.listen_port, d.transport, d.proxy_traffic_multiplier, d.proxy_enabled, d.settings_json, d.auth_name, d.enabled, d.quota_bytes, d.traffic_multiplier, d.credential_json, d.proxy_user_status, d.node_status, d.deleted_at, d.proxy_deleted_at, d.proxy_user_deleted_at, d.node_deleted_at, d.created_at, d.updated_at
 FROM proxy_access_details d
 JOIN user_node_bindings b ON b.proxy_user_id = d.proxy_user_id AND b.node_id = d.node_id
 WHERE d.proxy_user_name = ?1
@@ -274,6 +302,10 @@ WHERE d.proxy_user_name = ?1
   AND d.node_status = 'active'
   AND d.proxy_enabled = 1
   AND b.enabled = 1
+  AND d.deleted_at IS NULL
+  AND d.proxy_deleted_at IS NULL
+  AND d.proxy_user_deleted_at IS NULL
+  AND d.node_deleted_at IS NULL
 ORDER BY d.listen_port, d.proxy_name
 `
 
@@ -314,6 +346,10 @@ func (q *Queries) ListProxyAccessesByUserNode(ctx context.Context, arg ListProxy
 			&i.CredentialJson,
 			&i.ProxyUserStatus,
 			&i.NodeStatus,
+			&i.DeletedAt,
+			&i.ProxyDeletedAt,
+			&i.ProxyUserDeletedAt,
+			&i.NodeDeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -330,6 +366,29 @@ func (q *Queries) ListProxyAccessesByUserNode(ctx context.Context, arg ListProxy
 	return items, nil
 }
 
+const restoreProxyAccess = `-- name: RestoreProxyAccess :execrows
+UPDATE proxy_accesses
+SET
+  enabled = 1,
+  deleted_at = NULL,
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE proxy_user_id = ?1
+  AND proxy_id = ?2
+`
+
+type RestoreProxyAccessParams struct {
+	ProxyUserID string `json:"proxy_user_id"`
+	ProxyID     string `json:"proxy_id"`
+}
+
+func (q *Queries) RestoreProxyAccess(ctx context.Context, arg RestoreProxyAccessParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, restoreProxyAccess, arg.ProxyUserID, arg.ProxyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProxyAccessEnabled = `-- name: SetProxyAccessEnabled :execrows
 UPDATE proxy_accesses
 SET
@@ -337,6 +396,7 @@ SET
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE proxy_user_id = ?2
   AND proxy_id = ?3
+  AND deleted_at IS NULL
 `
 
 type SetProxyAccessEnabledParams struct {
@@ -347,6 +407,30 @@ type SetProxyAccessEnabledParams struct {
 
 func (q *Queries) SetProxyAccessEnabled(ctx context.Context, arg SetProxyAccessEnabledParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setProxyAccessEnabled, arg.Enabled, arg.ProxyUserID, arg.ProxyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const softDeleteProxyAccess = `-- name: SoftDeleteProxyAccess :execrows
+UPDATE proxy_accesses
+SET
+  enabled = 0,
+  deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE proxy_user_id = ?1
+  AND proxy_id = ?2
+  AND deleted_at IS NULL
+`
+
+type SoftDeleteProxyAccessParams struct {
+	ProxyUserID string `json:"proxy_user_id"`
+	ProxyID     string `json:"proxy_id"`
+}
+
+func (q *Queries) SoftDeleteProxyAccess(ctx context.Context, arg SoftDeleteProxyAccessParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteProxyAccess, arg.ProxyUserID, arg.ProxyID)
 	if err != nil {
 		return 0, err
 	}

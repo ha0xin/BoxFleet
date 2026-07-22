@@ -24,7 +24,7 @@ func proxyCommand() *cobra.Command {
 	cmd.AddCommand(proxySetShortIDCommand())
 	cmd.AddCommand(proxyStatusCommand("enable", true))
 	cmd.AddCommand(proxyStatusCommand("disable", false))
-	cmd.AddCommand(proxyStatusCommand("delete", false))
+	cmd.AddCommand(proxyDeleteCommand())
 	return cmd
 }
 
@@ -349,6 +349,28 @@ func proxyStatusCommand(name string, enabled bool) *cobra.Command {
 					return err
 				}
 				okText.Fprintf(cmd.OutOrStdout(), "proxy %s@%s enabled: %t\n", args[0], nodeName, enabled)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&nodeName, "node", "", "node name")
+	_ = cmd.MarkFlagRequired("node")
+	return cmd
+}
+
+func proxyDeleteCommand() *cobra.Command {
+	var nodeName string
+	cmd := &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a proxy",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
+				proxy, err := store.SoftDeleteProxy(ctx, nodeName, args[0])
+				if err != nil {
+					return err
+				}
+				okText.Fprintf(cmd.OutOrStdout(), "proxy %s@%s deleted\n", proxy.Name, proxy.NodeName)
 				return nil
 			})
 		},

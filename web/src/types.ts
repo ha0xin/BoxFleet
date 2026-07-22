@@ -23,6 +23,7 @@ export type AdminNode = {
   latest_heartbeat?: string;
   agent_version?: string;
   has_active_token?: boolean;
+  deleted_at: string;
 };
 
 export type ConfigChange = {
@@ -76,6 +77,7 @@ export type AdminProxy = {
   route_rules_json: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string;
 };
 
 export type AdminProxiesResponse = {
@@ -93,6 +95,7 @@ export type AdminUser = {
   global_quota_bytes: number;
   expire_at: string;
   proxy_count: number;
+  deleted_at: string;
 };
 
 export type AdminProxyAccess = {
@@ -111,6 +114,7 @@ export type AdminProxyAccess = {
   proxy_multiplier: number;
   created_at: string;
   updated_at: string;
+  deleted_at: string;
 };
 
 export type UserConnectionInfo = {

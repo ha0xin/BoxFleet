@@ -409,11 +409,11 @@ export function DeleteNodeDialog({
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
       <Dialog size="sm" className="p-6">
-        <Dialog.Title className="text-xl font-semibold text-kumo-default">Decommission node</Dialog.Title>
+        <Dialog.Title className="text-xl font-semibold text-kumo-default">Delete node</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Decommission <span className="font-medium text-kumo-default">{node.name}</span>? This disables it
-          and revokes its agent token, cutting the daemon off entirely. The record is kept for history; use{" "}
-          <span className="font-medium text-kumo-default">Disable</span> instead to only pause serving.
+          Delete <span className="font-medium text-kumo-default">{node.name}</span>? This disables it,
+          revokes its agent token, and hides it from the default inventory. You can restore it from the Deleted
+          filter. Use <span className="font-medium text-kumo-default">Disable</span> instead to only pause serving.
         </Dialog.Description>
 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
@@ -423,7 +423,7 @@ export function DeleteNodeDialog({
             Cancel
           </Button>
           <Button variant="destructive" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-            Decommission
+            Delete
           </Button>
         </div>
       </Dialog>

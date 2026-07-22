@@ -68,6 +68,32 @@ func (db *DB) ListProxyUsersWithProxyCounts(ctx context.Context) ([]ProxyUserWit
 				Status:           row.Status,
 				GlobalQuotaBytes: row.GlobalQuotaBytes,
 				ExpireAt:         row.ExpireAt,
+				DeletedAt:        row.DeletedAt,
+				CreatedAt:        row.CreatedAt,
+				UpdatedAt:        row.UpdatedAt,
+			},
+			ProxyCount: row.ProxyCount,
+		})
+	}
+	return out, nil
+}
+
+func (db *DB) ListDeletedProxyUsersWithProxyCounts(ctx context.Context) ([]ProxyUserWithProxyCount, error) {
+	rows, err := db.q.ListDeletedProxyUsersWithProxyCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProxyUserWithProxyCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProxyUserWithProxyCount{
+			ProxyUser: ProxyUser{
+				ID:               row.ID,
+				Name:             row.Name,
+				DisplayName:      row.DisplayName,
+				Status:           row.Status,
+				GlobalQuotaBytes: row.GlobalQuotaBytes,
+				ExpireAt:         row.ExpireAt,
+				DeletedAt:        row.DeletedAt,
 				CreatedAt:        row.CreatedAt,
 				UpdatedAt:        row.UpdatedAt,
 			},
@@ -107,6 +133,39 @@ func (db *DB) DisableProxyUser(ctx context.Context, name string) (ProxyUser, err
 		return ProxyUser{}, err
 	}
 	return db.GetProxyUser(ctx, name)
+}
+
+func (db *DB) SoftDeleteProxyUser(ctx context.Context, name string) (ProxyUser, error) {
+	affected, err := db.q.SoftDeleteProxyUser(ctx, normalizeName(name))
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	if err := requireAffected(affected, "proxy user", name); err != nil {
+		return ProxyUser{}, err
+	}
+	return db.getProxyUserIncludingDeleted(ctx, name)
+}
+
+func (db *DB) RestoreProxyUser(ctx context.Context, name string) (ProxyUser, error) {
+	affected, err := db.q.RestoreProxyUser(ctx, normalizeName(name))
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	if err := requireAffected(affected, "deleted proxy user", name); err != nil {
+		return ProxyUser{}, err
+	}
+	return db.GetProxyUser(ctx, name)
+}
+
+func (db *DB) getProxyUserIncludingDeleted(ctx context.Context, name string) (ProxyUser, error) {
+	user, err := db.q.GetProxyUserByNameIncludingDeleted(ctx, normalizeName(name))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ProxyUser{}, fmt.Errorf("proxy user %q not found", name)
+		}
+		return ProxyUser{}, err
+	}
+	return user, nil
 }
 
 type UpdateProxyUserParams struct {

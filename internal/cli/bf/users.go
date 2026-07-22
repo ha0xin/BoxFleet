@@ -88,7 +88,7 @@ func userCommand() *cobra.Command {
 	})
 	cmd.AddCommand(userStatusCommand("enable", "active"))
 	cmd.AddCommand(userStatusCommand("disable", "disabled"))
-	cmd.AddCommand(userStatusCommand("delete", "disabled"))
+	cmd.AddCommand(userDeleteCommand())
 	cmd.AddCommand(userSetQuotaCommand())
 	cmd.AddCommand(userSetExpireCommand())
 	cmd.AddCommand(userNodeInfoCommand())
@@ -132,6 +132,24 @@ func userStatusCommand(name, status string) *cobra.Command {
 					return err
 				}
 				okText.Fprintf(cmd.OutOrStdout(), "user %s: %s\n", args[0], status)
+				return nil
+			})
+		},
+	}
+}
+
+func userDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a proxy user",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withMigratedStore(cmd.Context(), func(ctx context.Context, store *db.DB) error {
+				user, err := store.SoftDeleteProxyUser(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				okText.Fprintf(cmd.OutOrStdout(), "user %s deleted\n", user.Name)
 				return nil
 			})
 		},

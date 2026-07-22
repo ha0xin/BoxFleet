@@ -19,6 +19,10 @@ baseline; later migrations are append-only (e.g.
 `014_subscription_tokens.sql` adds revocable Mihomo proxy-provider links.
 Migration `015_names_and_aliases.sql` adds canonical rename aliases and makes
 proxy names globally unique.
+Migration `016_soft_delete.sql` adds reversible soft deletion for users, nodes,
+proxies, and proxy accesses. Default inventory and operational queries exclude
+rows whose `deleted_at` is set; admin `deleted=true` views expose them for
+restore.
 Regenerate sqlc after editing queries or the schema snapshot.
 
 ## Core Tables
@@ -34,6 +38,7 @@ display_name
 status                    active | disabled | expired | quota_exceeded
 global_quota_bytes        0 means unlimited
 expire_at                 nullable
+deleted_at                nullable; non-null hides the user by default
 created_at
 updated_at
 ```
@@ -64,6 +69,7 @@ api_base_url
 status                    pending | active | disabled | degraded
 sing_box_version
 last_seen_at
+deleted_at                nullable; delete also disables and revokes tokens
 created_at
 updated_at
 ```
@@ -129,6 +135,7 @@ settings_json             protocol/listener settings
 inbound_rules_json        proxy-specific inbound rules
 outbound_rules_json       proxy-specific outbound definitions
 route_rules_json          proxy-specific route rules
+deleted_at                nullable; delete also sets enabled=false
 created_at
 updated_at
 ```
@@ -189,6 +196,7 @@ enabled
 quota_bytes
 traffic_multiplier        optional override
 credential_json           profile-specific credential
+deleted_at                nullable; issuing the same access restores it
 created_at
 updated_at
 ```

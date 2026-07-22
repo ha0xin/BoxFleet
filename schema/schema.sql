@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS proxy_users (
   global_quota_bytes INTEGER NOT NULL DEFAULT 0
     CHECK (global_quota_bytes >= 0),
   expire_at TEXT,
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     CHECK (status IN ('pending', 'active', 'disabled', 'degraded')),
   sing_box_version TEXT NOT NULL DEFAULT '',
   last_seen_at TEXT,
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS proxies (
   inbound_rules_json TEXT NOT NULL DEFAULT '[]',
   outbound_rules_json TEXT NOT NULL DEFAULT '[]',
   route_rules_json TEXT NOT NULL DEFAULT '[]',
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE (node_id, name)
@@ -120,6 +123,8 @@ SELECT
   p.inbound_rules_json,
   p.outbound_rules_json,
   p.route_rules_json,
+  p.deleted_at,
+  n.deleted_at AS node_deleted_at,
   p.created_at,
   p.updated_at
 FROM proxies p
@@ -134,6 +139,7 @@ CREATE TABLE IF NOT EXISTS proxy_accesses (
   quota_bytes INTEGER NOT NULL DEFAULT 0 CHECK (quota_bytes >= 0),
   traffic_multiplier REAL CHECK (traffic_multiplier IS NULL OR traffic_multiplier >= 0),
   credential_json TEXT NOT NULL DEFAULT '{}',
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE (proxy_id, proxy_user_id),
@@ -167,6 +173,10 @@ SELECT
   a.credential_json,
   u.status AS proxy_user_status,
   n.status AS node_status,
+  a.deleted_at,
+  p.deleted_at AS proxy_deleted_at,
+  u.deleted_at AS proxy_user_deleted_at,
+  n.deleted_at AS node_deleted_at,
   a.created_at,
   a.updated_at
 FROM proxy_accesses a

@@ -59,6 +59,7 @@ type adminNode struct {
 	Status          string `json:"status"`
 	SingBoxVersion  string `json:"sing_box_version"`
 	LastSeenAt      string `json:"last_seen_at"`
+	DeletedAt       string `json:"deleted_at"`
 	TargetVersion   string `json:"target_version,omitempty"`
 	CurrentVersion  string `json:"current_version,omitempty"`
 	ApplyStatus     string `json:"apply_status,omitempty"`
@@ -95,6 +96,7 @@ type adminProxy struct {
 	InboundRulesJSON  string  `json:"inbound_rules_json"`
 	OutboundRulesJSON string  `json:"outbound_rules_json"`
 	RouteRulesJSON    string  `json:"route_rules_json"`
+	DeletedAt         string  `json:"deleted_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
 }
@@ -107,6 +109,7 @@ type adminUser struct {
 	GlobalQuotaBytes int64  `json:"global_quota_bytes"`
 	ExpireAt         string `json:"expire_at"`
 	ProxyCount       int    `json:"proxy_count"`
+	DeletedAt        string `json:"deleted_at"`
 }
 
 type adminProxyAccess struct {
@@ -125,6 +128,7 @@ type adminProxyAccess struct {
 	ProxyMultiplier   float64  `json:"proxy_multiplier"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
+	DeletedAt         string   `json:"deleted_at"`
 }
 
 type adminUserTraffic struct {
@@ -334,6 +338,7 @@ func adminNodesHandler(store *db.DB) http.HandlerFunc {
 			page, err := store.ListNodesPage(r.Context(), db.NodeFilter{
 				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
 				Status:    strings.TrimSpace(r.URL.Query().Get("status")),
+				Deleted:   deletedFilter(r),
 				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
 				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
 				Limit:     queryLimit(r, 50),
@@ -621,7 +626,23 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 
 func adminDeleteNodeHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		node, err := store.DisableNode(r.Context(), chi.URLParam(r, "node"))
+		node, err := store.SoftDeleteNode(r.Context(), chi.URLParam(r, "node"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, resp)
+	}
+}
+
+func adminRestoreNodeHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		node, err := store.RestoreNode(r.Context(), chi.URLParam(r, "node"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -653,6 +674,7 @@ func adminProxiesHandler(store *db.DB) http.HandlerFunc {
 				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
 				NodeName:  strings.TrimSpace(r.URL.Query().Get("node")),
 				Enabled:   strings.TrimSpace(r.URL.Query().Get("enabled")),
+				Deleted:   deletedFilter(r),
 				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
 				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
 				Limit:     queryLimit(r, 50),
@@ -686,6 +708,7 @@ func adminNodeProxiesHandler(store *db.DB) http.HandlerFunc {
 				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
 				NodeName:  chi.URLParam(r, "node"),
 				Enabled:   strings.TrimSpace(r.URL.Query().Get("enabled")),
+				Deleted:   deletedFilter(r),
 				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
 				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
 				Limit:     queryLimit(r, 50),
@@ -817,7 +840,18 @@ func adminUpdateProxyHandler(store *db.DB) http.HandlerFunc {
 
 func adminDeleteProxyHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		proxy, err := store.DisableProxy(r.Context(), chi.URLParam(r, "node"), chi.URLParam(r, "proxy"))
+		proxy, err := store.SoftDeleteProxy(r.Context(), chi.URLParam(r, "node"), chi.URLParam(r, "proxy"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminProxyFromDB(proxy))
+	}
+}
+
+func adminRestoreProxyHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		proxy, err := store.RestoreProxy(r.Context(), chi.URLParam(r, "node"), chi.URLParam(r, "proxy"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -920,7 +954,7 @@ func adminUpdateUserHandler(store *db.DB) http.HandlerFunc {
 
 func adminDeleteUserHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, err := store.DisableProxyUser(r.Context(), chi.URLParam(r, "user"))
+		user, err := store.SoftDeleteProxyUser(r.Context(), chi.URLParam(r, "user"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -932,6 +966,31 @@ func adminDeleteUserHandler(store *db.DB) http.HandlerFunc {
 			Status:           user.Status,
 			GlobalQuotaBytes: user.GlobalQuotaBytes,
 			ExpireAt:         nullString(user.ExpireAt),
+			DeletedAt:        nullString(user.DeletedAt),
+		})
+	}
+}
+
+func adminRestoreUserHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, err := store.RestoreProxyUser(r.Context(), chi.URLParam(r, "user"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		accesses, err := store.ListProxyAccessesByUser(r.Context(), user.Name)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminUser{
+			ID:               user.ID,
+			Name:             user.Name,
+			DisplayName:      user.DisplayName,
+			Status:           user.Status,
+			GlobalQuotaBytes: user.GlobalQuotaBytes,
+			ExpireAt:         nullString(user.ExpireAt),
+			ProxyCount:       len(accesses),
 		})
 	}
 }
@@ -974,7 +1033,7 @@ func adminIssueUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
 
 func adminDeleteUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		access, err := store.RevokeProxyAccess(
+		access, err := store.SoftDeleteProxyAccess(
 			r.Context(),
 			chi.URLParam(r, "user"),
 			chi.URLParam(r, "node"),
@@ -1336,6 +1395,7 @@ func adminNodeFromNode(node db.Node) adminNode {
 		Status:         node.Status,
 		SingBoxVersion: node.SingBoxVersion,
 		LastSeenAt:     nullString(node.LastSeenAt),
+		DeletedAt:      nullString(node.DeletedAt),
 		Hosts:          hosts,
 	}
 }
@@ -1345,6 +1405,9 @@ func adminNodeFromNode(node db.Node) adminNode {
 // the list endpoint does.
 func adminNodeResponse(ctx context.Context, store *db.DB, node db.Node) (adminNode, error) {
 	item := adminNodeFromNode(node)
+	if node.DeletedAt.Valid {
+		return item, nil
+	}
 	has, err := store.NodeHasActiveToken(ctx, node.Name)
 	if err != nil {
 		return adminNode{}, err
@@ -1354,7 +1417,13 @@ func adminNodeResponse(ctx context.Context, store *db.DB, node db.Node) (adminNo
 }
 
 func listAdminUsers(r *http.Request, store *db.DB) ([]adminUser, error) {
-	users, err := store.ListProxyUsersWithProxyCounts(r.Context())
+	var users []db.ProxyUserWithProxyCount
+	var err error
+	if deletedFilter(r) == "only" {
+		users, err = store.ListDeletedProxyUsersWithProxyCounts(r.Context())
+	} else {
+		users, err = store.ListProxyUsersWithProxyCounts(r.Context())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1368,6 +1437,7 @@ func listAdminUsers(r *http.Request, store *db.DB) ([]adminUser, error) {
 			GlobalQuotaBytes: user.GlobalQuotaBytes,
 			ExpireAt:         nullString(user.ExpireAt),
 			ProxyCount:       int(user.ProxyCount),
+			DeletedAt:        nullString(user.DeletedAt),
 		})
 	}
 	return out, nil
@@ -1472,6 +1542,7 @@ func adminProxyAccesses(accesses []db.ProxyAccess) []adminProxyAccess {
 			ProxyMultiplier:   access.ProxyTrafficMultiplier,
 			CreatedAt:         access.CreatedAt,
 			UpdatedAt:         access.UpdatedAt,
+			DeletedAt:         nullString(access.DeletedAt),
 		})
 	}
 	return out
@@ -1493,6 +1564,7 @@ func adminProxyFromDB(proxy db.Proxy) adminProxy {
 		InboundRulesJSON:  proxy.InboundRulesJSON,
 		OutboundRulesJSON: proxy.OutboundRulesJSON,
 		RouteRulesJSON:    proxy.RouteRulesJSON,
+		DeletedAt:         nullString(proxy.DeletedAt),
 		CreatedAt:         proxy.CreatedAt,
 		UpdatedAt:         proxy.UpdatedAt,
 	}
@@ -1638,12 +1710,21 @@ func queryLimit(r *http.Request, fallback int64) int64 {
 
 func adminPageRequested(r *http.Request) bool {
 	query := r.URL.Query()
-	for _, key := range []string{"limit", "offset", "search", "status", "enabled", "node", "sort", "direction"} {
+	for _, key := range []string{"limit", "offset", "search", "status", "enabled", "deleted", "node", "sort", "direction"} {
 		if strings.TrimSpace(query.Get(key)) != "" {
 			return true
 		}
 	}
 	return false
+}
+
+func deletedFilter(r *http.Request) string {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("deleted"))) {
+	case "1", "true", "only":
+		return "only"
+	default:
+		return ""
+	}
 }
 
 func queryOffset(r *http.Request) int64 {
