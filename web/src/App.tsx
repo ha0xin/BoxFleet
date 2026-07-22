@@ -12,17 +12,35 @@ import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
 import type { Overview } from "./types";
 
+const loadNetworkEventsPage = () => import("./pages/network-events");
+const loadNodesPage = () => import("./pages/nodes");
+const loadOverviewPage = () => import("./pages/overview");
+const loadProxiesPage = () => import("./pages/proxies");
+const loadSettingsPage = () => import("./pages/settings");
+const loadSystemLogsPage = () => import("./pages/system-logs");
+const loadUsersPage = () => import("./pages/users");
+
+const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
+  "/": loadOverviewPage,
+  "/nodes": loadNodesPage,
+  "/proxies": loadProxiesPage,
+  "/users": loadUsersPage,
+  "/network-events": loadNetworkEventsPage,
+  "/system-logs": loadSystemLogsPage,
+  "/settings": loadSettingsPage
+};
+
 const NetworkEventsPage = lazy(() =>
-  import("./pages/network-events").then((module) => ({ default: module.NetworkEventsPage }))
+  loadNetworkEventsPage().then((module) => ({ default: module.NetworkEventsPage }))
 );
-const NodesPage = lazy(() => import("./pages/nodes").then((module) => ({ default: module.NodesPage })));
-const OverviewPage = lazy(() => import("./pages/overview").then((module) => ({ default: module.OverviewPage })));
-const ProxiesPage = lazy(() => import("./pages/proxies").then((module) => ({ default: module.ProxiesPage })));
-const SettingsPage = lazy(() => import("./pages/settings").then((module) => ({ default: module.SettingsPage })));
+const NodesPage = lazy(() => loadNodesPage().then((module) => ({ default: module.NodesPage })));
+const OverviewPage = lazy(() => loadOverviewPage().then((module) => ({ default: module.OverviewPage })));
+const ProxiesPage = lazy(() => loadProxiesPage().then((module) => ({ default: module.ProxiesPage })));
+const SettingsPage = lazy(() => loadSettingsPage().then((module) => ({ default: module.SettingsPage })));
 const SystemLogsPage = lazy(() =>
-  import("./pages/system-logs").then((module) => ({ default: module.SystemLogsPage }))
+  loadSystemLogsPage().then((module) => ({ default: module.SystemLogsPage }))
 );
-const UsersPage = lazy(() => import("./pages/users").then((module) => ({ default: module.UsersPage })));
+const UsersPage = lazy(() => loadUsersPage().then((module) => ({ default: module.UsersPage })));
 
 function adminRequestPath(path: string): string {
   if (!path.startsWith("/api/admin")) {
@@ -166,17 +184,25 @@ function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const renderItem = (item: NavItem) => (
-    <Sidebar.MenuButton
-      key={item.id}
-      icon={item.icon}
-      tooltip={item.label}
-      active={item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)}
-      onClick={() => navigate(item.path)}
-    >
-      {item.label}
-    </Sidebar.MenuButton>
-  );
+  const renderItem = (item: NavItem) => {
+    const preload = () => {
+      void routePreloaders[item.path]?.();
+    };
+    return (
+      <Sidebar.MenuButton
+        key={item.id}
+        icon={item.icon}
+        tooltip={item.label}
+        active={item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)}
+        onPointerEnter={preload}
+        onPointerDown={preload}
+        onFocus={preload}
+        onClick={() => navigate(item.path)}
+      >
+        {item.label}
+      </Sidebar.MenuButton>
+    );
+  };
 
   return (
     <Sidebar>

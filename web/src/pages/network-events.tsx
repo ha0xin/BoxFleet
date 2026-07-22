@@ -250,6 +250,7 @@ function EventActivity({ events }: { events: NetworkEvent[] }) {
 export function NetworkEventsPage({ request }: { request: AdminRequest }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [nowAnchor, setNowAnchor] = useState(() => new Date());
+  const [refreshGeneration, setRefreshGeneration] = useState(0);
   const [filterOpen, setFilterOpen] = useState(false);
   const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams]);
   const startParam = searchParams.get("start");
@@ -327,17 +328,32 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
     offset
   });
   const eventsQuery = useQuery({
-    queryKey: ["admin", "network-events", path],
-    queryFn: () => request<NetworkEventsResponse>(path),
+    // Preset ranges deliberately key on the preset instead of their exact
+    // millisecond timestamps. This lets a quick route revisit use TanStack's
+    // short-lived cache; once stale, the current queryFn still fetches a fresh
+    // time window. Custom ranges retain their exact boundaries in the key.
+    queryKey: ["admin", "network-events", {
+      search: filters.search.trim(),
+      action: filters.action,
+      node: filters.node,
+      user: filters.user,
+      range: filters.range,
+      start: filters.range === "custom" ? timeRange.start : undefined,
+      end: filters.range === "custom" ? timeRange.end : undefined,
+      limit: perPage,
+      offset,
+      refreshGeneration
+    }],
+    queryFn: ({ signal }) => request<NetworkEventsResponse>(path, { signal }),
     placeholderData: (previous) => previous
   });
   const nodesQuery = useQuery({
     queryKey: ["admin", "network-events-options", "nodes"],
-    queryFn: () => request<AdminNode[]>("/api/admin/nodes")
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
   const usersQuery = useQuery({
-    queryKey: ["admin", "network-events-options", "users"],
-    queryFn: () => request<AdminUser[]>("/api/admin/users")
+    queryKey: ["admin", "users", false],
+    queryFn: ({ signal }) => request<AdminUser[]>("/api/admin/users", { signal })
   });
 
   const events = eventsQuery.data?.events ?? [];
@@ -468,7 +484,10 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
               variant="secondary"
               icon={ArrowClockwiseIcon}
               disabled={eventsQuery.isFetching}
-              onClick={() => setNowAnchor(new Date())}
+              onClick={() => {
+                setNowAnchor(new Date());
+                setRefreshGeneration((value) => value + 1);
+              }}
             >
               Refresh
             </Button>

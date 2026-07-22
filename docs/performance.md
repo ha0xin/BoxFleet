@@ -61,6 +61,27 @@ requested time window, rather than total telemetry history:
 Absolute latency still has to be measured on the release host because CPU,
 storage, database size, and network conditions materially affect it.
 
+## Deferred bottleneck: Network Events prefix search
+
+The production FTS3 index removes the former full-table `LIKE` scan, but prefix
+queries are not yet within the heavy-read SLO on the current two-core host. A
+2026-07-22 diagnostic run against roughly 881 thousand visible events measured
+the following for a real destination search:
+
+- last 24 hours: P50 519 ms, P95 1.90 s, maximum 3.02 s (30 requests)
+- all history: P50 518 ms, P95 2.21 s, maximum 2.53 s (20 requests)
+
+Query decomposition showed that FTS3 `MATCH` itself took about 1.5 seconds even
+when only seven rows matched. The cause is that every search token is currently
+compiled as a prefix token and the virtual table has no dedicated prefix index;
+the normal time-window and ordering indexes are not the limiting path.
+
+Further index expansion is intentionally deferred. The proposed follow-up is an
+FTS4 prefix index (a three-character prefix index is the first candidate), plus
+a minimum useful prefix length for one- and two-character searches. Treat the
+free-text Search field as a known exception to the 500 ms heavy-read target
+until that work is approved and measured with the full 100-request protocol.
+
 ## Baseline that triggered this target
 
 Before the bounded read paths were introduced, the 2026-07-22 production
