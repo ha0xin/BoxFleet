@@ -405,6 +405,22 @@ CREATE INDEX IF NOT EXISTS idx_log_events_visible_window
   ON log_events(window_end, window_start)
   WHERE proxy_user_id IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_action_window
+  ON log_events(action COLLATE NOCASE, window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_node_window
+  ON log_events(node_id, window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_user_window
+  ON log_events(proxy_user_id, window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_node_user_window
+  ON log_events(node_id, proxy_user_id, window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_log_events_created_window
   ON log_events(created_at DESC, window_end DESC, id DESC);
 

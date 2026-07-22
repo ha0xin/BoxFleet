@@ -108,6 +108,55 @@ WHERE e.proxy_user_id IS NOT NULL
 			args: []any{"2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
 			want: "idx_log_events_visible_window",
 		},
+		{
+			name: "network event action filter bounds the time window",
+			query: `
+SELECT COUNT(*)
+FROM log_events e
+WHERE e.proxy_user_id IS NOT NULL
+  AND e.action = ? COLLATE NOCASE
+  AND e.window_end >= ?
+  AND e.window_start <= ?`,
+			args: []any{"connect", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
+			want: "idx_log_events_visible_action_window",
+		},
+		{
+			name: "network event node filter bounds the time window",
+			query: `
+SELECT COUNT(*)
+FROM log_events e
+WHERE e.proxy_user_id IS NOT NULL
+  AND e.node_id = ?
+  AND e.window_end >= ?
+  AND e.window_start <= ?`,
+			args: []any{"node-1", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
+			want: "idx_log_events_visible_node_window",
+		},
+		{
+			name: "network event user filter bounds the time window",
+			query: `
+SELECT COUNT(*)
+FROM log_events e
+WHERE e.proxy_user_id IS NOT NULL
+  AND e.proxy_user_id = ?
+  AND e.window_end >= ?
+  AND e.window_start <= ?`,
+			args: []any{"user-1", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
+			want: "idx_log_events_visible_user_window",
+		},
+		{
+			name: "network event node and user filter bounds the time window",
+			query: `
+SELECT COUNT(*)
+FROM log_events e
+WHERE e.proxy_user_id IS NOT NULL
+  AND e.node_id = ?
+  AND e.proxy_user_id = ?
+  AND e.window_end >= ?
+  AND e.window_start <= ?`,
+			args: []any{"node-1", "user-1", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
+			want: "idx_log_events_visible_node_user_window",
+		},
 	}
 
 	for _, tt := range tests {

@@ -47,6 +47,8 @@ requested time window, rather than total telemetry history:
   the per-node pointer transactionally.
 - The first Network Events page filters by its visible time window and uses the
   partial visible-event index.
+- Network Events action, node, user, and combined node/user filters use partial
+  composite indexes whose time-window columns follow the selected dimension.
 - SQLite uses WAL and a small connection pool so one report or slow read does
   not serialize unrelated reads.
 - The application shell does not wait for Overview data, route pages are split

@@ -310,7 +310,7 @@ func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams
 		args = append(args, params.UserID)
 	}
 	if params.Action != "" {
-		where = append(where, "LOWER(e.action) = LOWER(?)")
+		where = append(where, "e.action = ? COLLATE NOCASE")
 		args = append(args, params.Action)
 	}
 	if params.Search != "" {
