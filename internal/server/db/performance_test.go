@@ -38,6 +38,7 @@ func TestTelemetryRollupMigrationBackfillsExistingHistory(t *testing.T) {
 		`INSERT INTO traffic_usage_deltas (id, report_id, node_id, proxy_user_id, auth_name, direction, raw_bytes_delta, effective_multiplier, billable_bytes_delta, counter_value, observed_at) VALUES ('delta-2', 'report-1', 'node-1', 'user-1', 'alice', 'uplink', 15, 1.2, 18, 25, '2026-07-22T00:01:00Z')`,
 		`INSERT INTO node_heartbeats (id, node_id, reported_at, created_at) VALUES ('heartbeat-old', 'node-1', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z')`,
 		`INSERT INTO node_heartbeats (id, node_id, reported_at, created_at) VALUES ('heartbeat-new', 'node-1', '2026-07-22T00:01:00Z', '2026-07-22T00:01:00Z')`,
+		`INSERT INTO log_events (id, node_id, proxy_user_id, target_host, target_port, aggregate_key, window_start, window_end) VALUES ('legacy-event', 'node-1', 'user-1', 'legacy.example.com', 443, 'legacy-search-key', '2026-07-22T00:00:00Z', '2026-07-22T00:01:00Z')`,
 	}
 	for _, statement := range statements {
 		if _, err := db.sql.ExecContext(ctx, statement); err != nil {
@@ -61,6 +62,13 @@ func TestTelemetryRollupMigrationBackfillsExistingHistory(t *testing.T) {
 	}
 	if heartbeatID != "heartbeat-new" {
 		t.Fatalf("latest heartbeat = %q, want heartbeat-new", heartbeatID)
+	}
+	page, err := db.ListLogEventsPage(ctx, LogEventFilter{Search: "legacy.example.com", Limit: 25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 {
+		t.Fatalf("backfilled search total = %d, want 1", page.Total)
 	}
 }
 
@@ -156,6 +164,21 @@ WHERE e.proxy_user_id IS NOT NULL
   AND e.window_start <= ?`,
 			args: []any{"node-1", "user-1", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
 			want: "idx_log_events_visible_node_user_window",
+		},
+		{
+			name: "network event text search uses the full-text index",
+			query: `
+SELECT COUNT(*)
+FROM log_events e
+JOIN log_event_search_documents search_document ON search_document.event_id = e.id
+JOIN log_events_search ON log_events_search.docid = search_document.id
+WHERE e.proxy_user_id IS NOT NULL
+  AND log_events_search MATCH ?
+  AND e.window_end >= ?
+  AND e.window_start <= ?`,
+			args:      []any{`example* com*`, "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"},
+			want:      "virtual table index",
+			forbidden: "scan e",
 		},
 	}
 

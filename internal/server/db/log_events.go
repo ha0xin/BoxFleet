@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/haoxin/boxfleet/internal/id"
 	"github.com/haoxin/boxfleet/internal/model"
@@ -314,9 +315,8 @@ func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams
 		args = append(args, params.Action)
 	}
 	if params.Search != "" {
-		where = append(where, `(LOWER(n.name) LIKE ? OR LOWER(u.name) LIKE ? OR LOWER(e.auth_name) LIKE ? OR LOWER(e.source_ip) LIKE ? OR LOWER(e.target_host) LIKE ? OR CAST(e.target_port AS TEXT) LIKE ? OR LOWER(e.action) LIKE ? OR LOWER(e.raw_message) LIKE ?)`)
-		pattern := "%" + strings.ToLower(params.Search) + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		where = append(where, "log_events_search MATCH ?")
+		args = append(args, networkEventSearchQuery(params.Search))
 	}
 	if params.StartTime != "" {
 		where = append(where, "e.window_end >= ?")
@@ -327,15 +327,15 @@ func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams
 		args = append(args, params.EndTime)
 	}
 	whereSQL := strings.Join(where, " AND ")
-	countJoins := ""
+	searchJoin := ""
 	if params.Search != "" {
-		countJoins = `
-JOIN nodes n ON n.id = e.node_id
-JOIN proxy_users u ON u.id = e.proxy_user_id`
+		searchJoin = `
+JOIN log_event_search_documents search_document ON search_document.event_id = e.id
+JOIN log_events_search ON log_events_search.docid = search_document.id`
 	}
 	countQuery := `
 SELECT COUNT(*)
-FROM log_events e` + countJoins + `
+FROM log_events e` + searchJoin + `
 WHERE ` + whereSQL
 	var total int64
 	if err := db.sql.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
@@ -362,6 +362,7 @@ SELECT
   n.name AS node_name,
   u.name AS user_name
 FROM log_events e
+` + searchJoin + `
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE ` + whereSQL + `
@@ -405,6 +406,19 @@ OFFSET ?`
 		return 0, nil, err
 	}
 	return total, rows, nil
+}
+
+func networkEventSearchQuery(value string) string {
+	tokens := strings.FieldsFunc(strings.TrimSpace(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if len(tokens) == 0 {
+		return `"__boxfleet_no_search_tokens__"`
+	}
+	for i := range tokens {
+		tokens[i] += "*"
+	}
+	return strings.Join(tokens, " ")
 }
 
 var (

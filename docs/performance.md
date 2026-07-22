@@ -49,6 +49,9 @@ requested time window, rather than total telemetry history:
   partial visible-event index.
 - Network Events action, node, user, and combined node/user filters use partial
   composite indexes whose time-window columns follow the selected dimension.
+- Network Events free-text search uses an FTS3 document index maintained by
+  database triggers; it never evaluates `LOWER(...) LIKE '%term%'` across the
+  full event table.
 - SQLite uses WAL and a small connection pool so one report or slow read does
   not serialize unrelated reads.
 - The application shell does not wait for Overview data, route pages are split

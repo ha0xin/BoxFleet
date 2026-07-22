@@ -225,10 +225,13 @@ stack:
 - date range selection uses react-day-picker inside a Kumo Popover
 - time formatting and duration math use date-fns
 
-Filtering is server-side. The admin API accepts `limit`, `offset`, `node`,
-`user`, `start`, and `end` query parameters at `/api/admin/network-events`.
-Date range and time inputs are interpreted in the browser's local timezone and
-sent to the server as RFC3339 UTC timestamps.
+Filtering is server-side. The admin API accepts `limit`, `offset`, `search`,
+`action`, `node`, `user`, `start`, and `end` query parameters at
+`/api/admin/network-events`. Free-text search is case-insensitive and matches
+whole words or word prefixes across node/user names, authentication names,
+addresses, ports, actions, and compact message samples. Date range and time
+inputs are interpreted in the browser's local timezone and sent to the server
+as RFC3339 UTC timestamps.
 
 The page mirrors filters and pagination into the browser URL so a refresh or
 shared link preserves the selected time range, user, node, page size, and page.

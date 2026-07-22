@@ -425,9 +425,14 @@ expanding `window_start`/`window_end`.
 
 `bf logs user` queries events that were mapped to a known proxy user through
 `auth_name`. The admin Network Events API supports server-side `limit`,
-`offset`, `node`, `user`, `start`, and `end` filtering. Structured events are
-retained for the configured `network_event_retention_days` setting, defaulting
-to 90 days, and cleanup compares the event `window_end` against that horizon.
+`offset`, `search`, `action`, `node`, `user`, `start`, and `end` filtering.
+`log_event_search_documents` gives each event a stable integer search document
+ID, while the FTS3 `log_events_search` table indexes operator-visible names,
+addresses, actions, and compact raw-message samples. Database triggers keep the
+search index synchronized across event ingestion, aggregation, retention
+cleanup, and node/user renames. Structured events are retained for the
+configured `network_event_retention_days` setting, defaulting to 90 days, and
+cleanup compares the event `window_end` against that horizon.
 
 ### audit_events
 

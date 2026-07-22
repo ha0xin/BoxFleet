@@ -494,7 +494,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
                   onSubmit={form.handleSubmit(applyFilters)}
                 >
                   <Input
-                    placeholder="Search user, node, IP, destination, action, or message"
+                    placeholder="Search words or prefixes across user, node, IP, destination, action, or message"
                     aria-label="Search network events"
                     className="min-w-0 flex-1"
                     {...form.register("search")}
