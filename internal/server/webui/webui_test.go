@@ -1,9 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -25,6 +28,9 @@ func TestHashedAssetsAreCompressedAndCached(t *testing.T) {
 		t.Fatal("script src is not terminated")
 	}
 	scriptPath := index.Body.String()[start : start+end]
+	if strings.HasPrefix(scriptPath, "./") {
+		scriptPath = "/admin/" + strings.TrimPrefix(scriptPath, "./")
+	}
 
 	req := httptest.NewRequest(http.MethodGet, scriptPath, nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -55,5 +61,62 @@ func TestIndexIsNotStoredAsImmutable(t *testing.T) {
 	Handler("/admin").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/nodes", nil))
 	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
 		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestNestedRouteLoadsInitialAssetFromHiddenMount(t *testing.T) {
+	handler := Handler("/secret/admin")
+	index := httptest.NewRecorder()
+	handler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/secret/admin/mihomo-profiles", nil))
+	if index.Code != http.StatusOK {
+		t.Fatalf("index status = %d", index.Code)
+	}
+	start := strings.Index(index.Body.String(), `src="`)
+	if start < 0 {
+		t.Fatal("index has no script")
+	}
+	start += len(`src="`)
+	end := strings.Index(index.Body.String()[start:], `"`)
+	if end < 0 {
+		t.Fatal("script src is not terminated")
+	}
+	scriptPath := index.Body.String()[start : start+end]
+	if !strings.HasPrefix(scriptPath, "./assets/") {
+		t.Fatalf("script src = %q, want mount-relative asset", scriptPath)
+	}
+
+	asset := httptest.NewRecorder()
+	handler.ServeHTTP(asset, httptest.NewRequest(
+		http.MethodGet,
+		"/secret/admin/"+strings.TrimPrefix(scriptPath, "./"),
+		nil,
+	))
+	if asset.Code != http.StatusOK {
+		t.Fatalf("asset status = %d", asset.Code)
+	}
+	if got := asset.Header().Get("Content-Type"); !strings.Contains(got, "javascript") {
+		t.Fatalf("Content-Type = %q", got)
+	}
+}
+
+func TestBuiltJavaScriptUsesMountRelativeAssets(t *testing.T) {
+	err := fs.WalkDir(assets, "assets/generated/assets", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".js" {
+			return nil
+		}
+		body, err := fs.ReadFile(assets, path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(body, []byte(`"/admin/`)) {
+			t.Errorf("%s contains an absolute /admin asset URL", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

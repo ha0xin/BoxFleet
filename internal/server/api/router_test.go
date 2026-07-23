@@ -539,8 +539,8 @@ func TestAdminPathTokenMovesAdminRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("prefixed admin UI status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "/panel-secret/admin/assets/") {
-		t.Fatalf("admin asset paths were not rewritten: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `src="./assets/`) {
+		t.Fatalf("admin asset paths were not mount-relative: %s", rec.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/panel-secret/admin/network-events", nil)
@@ -549,8 +549,8 @@ func TestAdminPathTokenMovesAdminRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("prefixed admin deep link status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "/panel-secret/admin/assets/") {
-		t.Fatalf("admin deep link asset paths were not rewritten: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `src="./assets/`) {
+		t.Fatalf("admin deep link asset paths were not mount-relative: %s", rec.Body.String())
 	}
 }
 

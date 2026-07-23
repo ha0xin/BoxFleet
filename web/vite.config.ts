@@ -11,7 +11,10 @@ import { adminMockPlugin } from "./mocks/admin";
 const useRealApi = process.env.BOXFLEET_DEV_API === "1";
 
 export default defineConfig({
-  base: "/admin/",
+  // The server may mount the admin UI behind a secret path prefix. Relative
+  // production asset URLs keep lazy CSS chunks and Monaco workers under that
+  // runtime mount instead of leaking back to the public /admin path.
+  base: "./",
   plugins: [tailwindcss(), react(), ...(useRealApi ? [] : [adminMockPlugin()])],
   resolve: {
     alias: [
