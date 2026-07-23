@@ -17,6 +17,11 @@ The executable draft lives in `migrations/`. `010_init.sql` is the public
 baseline; later migrations are append-only (e.g.
 `012_remove_proxy_user_traffic_multiplier.sql`). Migration
 `014_subscription_tokens.sql` adds revocable Mihomo proxy-provider links.
+`021_mihomo_profiles.sql` adds draft/published Mihomo profile revisions and
+per-user profile bindings.
+`022_mihomo_configurations.sql` binds configurations directly to their proxy
+source user, adds reusable rewrite templates, and adds configuration-scoped
+subscription tokens.
 Migration `015_names_and_aliases.sql` adds canonical rename aliases and makes
 proxy names globally unique.
 Migration `016_soft_delete.sql` adds reversible soft deletion for users, nodes,
@@ -47,9 +52,9 @@ updated_at
 
 ### subscription_tokens
 
-One active Mihomo proxy-provider link per proxy user. Revoked rows are retained
-for lifecycle history; proxy changes update the dynamically rendered response
-without rotating the token.
+One active Mihomo subscription bearer per proxy user. Revoked rows are retained
+for lifecycle history; proxy changes update both the complete profile and legacy
+provider response without rotating the token.
 
 ```text
 id
@@ -59,6 +64,32 @@ created_at
 last_used_at
 revoked_at
 ```
+
+### mihomo_profiles, mihomo_profile_revisions, and mihomo_profile_publications
+
+`mihomo_profiles` owns the mutable administrator draft and references the proxy
+user whose inline `proxies` form the base document. A user may own multiple
+profiles. Its JSON document is an ordered list of enabled/disabled Clash Party
+YAML or JavaScript processors. Template-derived processors retain an optional
+`template_id` provenance field and a content snapshot.
+
+Publishing inserts an immutable, monotonically numbered row in
+`mihomo_profile_revisions`, then atomically moves the one-row
+`mihomo_profile_publications` pointer. Subscription rendering reads only that
+pointer, so editing or previewing a draft cannot change a live subscription.
+Rollback moves the pointer to an existing revision without deleting history.
+
+`proxy_user_mihomo_profiles` assigns one published profile to a proxy user.
+Users without a row resolve to the seeded `mhp_default` profile.
+This table is retained for legacy per-user subscription compatibility; new
+complete configurations use `mihomo_profiles.proxy_user_id` and their own token.
+
+`mihomo_rewrite_templates` is the global template library. The seeded
+`mhrt_basic` row is immutable through the admin facade. Custom templates may be
+edited, but changes do not propagate to configuration snapshots.
+
+`mihomo_profile_subscription_tokens` stores one active revocable bearer per
+configuration. Revoked rows remain available for audit history.
 
 ### nodes
 

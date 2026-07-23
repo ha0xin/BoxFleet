@@ -182,13 +182,16 @@ The eventual production log path should:
 ## User Node Information
 
 `bf` generates connection information for each proxy user and node. The admin
-Web UI also exposes that information and can issue one revocable Mihomo
-`proxy-provider` URL per user. The provider response contains only a top-level
-`proxies:` list; it is not a complete Clash profile with groups or rules.
+Web UI also exposes that information and can issue one revocable subscription
+token per user. The primary `/sub/{token}/mihomo.yaml` URL is a complete Mihomo
+profile with inline `proxies`, BoxFleet Basic defaults, and the user's published
+ordered rewrites. The legacy `/sub/{token}` response remains a top-level
+`proxies:` provider document for compatibility.
 
-Provider content is rendered from the current active accesses on every request,
-so adding, removing, or editing a proxy changes the content without changing
-the URL. Rotating or revoking the subscription token invalidates the URL.
+Proxy content is rendered from current active accesses, while rules and client
+settings come only from an immutable published profile revision. Proxy changes
+alter the output without changing the URL; editing a draft does not. Rotating
+or revoking the subscription token invalidates both URLs.
 
 Recommended command shape:
 

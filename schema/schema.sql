@@ -30,6 +30,70 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_tokens_active_user
   ON subscription_tokens(proxy_user_id)
   WHERE revoked_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS mihomo_profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  draft_document_json TEXT NOT NULL DEFAULT '{"rewrites":[]}',
+  proxy_user_id TEXT REFERENCES proxy_users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mihomo_profiles_proxy_user
+  ON mihomo_profiles(proxy_user_id);
+
+CREATE TABLE IF NOT EXISTS mihomo_profile_revisions (
+  id TEXT PRIMARY KEY,
+  profile_id TEXT NOT NULL REFERENCES mihomo_profiles(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL CHECK (version > 0),
+  document_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (profile_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mihomo_profile_revisions_profile_version
+  ON mihomo_profile_revisions(profile_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS mihomo_profile_publications (
+  profile_id TEXT PRIMARY KEY REFERENCES mihomo_profiles(id) ON DELETE CASCADE,
+  revision_id TEXT NOT NULL REFERENCES mihomo_profile_revisions(id) ON DELETE RESTRICT,
+  published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS proxy_user_mihomo_profiles (
+  proxy_user_id TEXT PRIMARY KEY REFERENCES proxy_users(id) ON DELETE CASCADE,
+  profile_id TEXT NOT NULL REFERENCES mihomo_profiles(id) ON DELETE RESTRICT,
+  assigned_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_user_mihomo_profiles_profile
+  ON proxy_user_mihomo_profiles(profile_id);
+
+CREATE TABLE IF NOT EXISTS mihomo_rewrite_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK (kind IN ('yaml', 'javascript')),
+  content TEXT NOT NULL,
+  built_in INTEGER NOT NULL DEFAULT 0 CHECK (built_in IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS mihomo_profile_subscription_tokens (
+  id TEXT PRIMARY KEY,
+  profile_id TEXT NOT NULL REFERENCES mihomo_profiles(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mihomo_profile_subscription_tokens_active
+  ON mihomo_profile_subscription_tokens(profile_id)
+  WHERE revoked_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS nodes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,

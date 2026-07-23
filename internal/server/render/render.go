@@ -7,10 +7,13 @@ import (
 	"fmt"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"github.com/haoxin/boxfleet/internal/server/mihomo"
 	"go.yaml.in/yaml/v3"
 )
 
 const DefaultMixedListenPort = 2080
+
+var mihomoProfileCompileCache = mihomo.NewCompileCache(128)
 
 type ClientConfigParams struct {
 	UserName        string
@@ -578,6 +581,83 @@ func RenderMihomoProxyProvider(ctx context.Context, store *db.DB, userName strin
 	}
 
 	return yaml.Marshal(provider)
+}
+
+// RenderMihomoProfile renders a complete Mihomo profile. BoxFleet owns the
+// inline proxies base; the built-in basic rewrite makes that base immediately
+// usable, and administrator rewrites run after it in their declared order.
+func RenderMihomoProfile(
+	ctx context.Context,
+	store *db.DB,
+	userName string,
+	rewrites []mihomo.Rewrite,
+) (mihomo.CompileResult, error) {
+	base, err := RenderMihomoProxyProvider(ctx, store, userName)
+	if err != nil {
+		return mihomo.CompileResult{}, err
+	}
+	if rewrites == nil {
+		published, err := store.GetPublishedMihomoProfileForUser(ctx, userName)
+		if err != nil {
+			return mihomo.CompileResult{}, err
+		}
+		rewrites = make([]mihomo.Rewrite, 0, len(published.Document.Rewrites))
+		for _, rewrite := range published.Document.Rewrites {
+			if !rewrite.Enabled {
+				continue
+			}
+			rewrites = append(rewrites, mihomo.Rewrite{
+				Name:    rewrite.Name,
+				Kind:    mihomo.RewriteKind(rewrite.Kind),
+				Content: rewrite.Content,
+			})
+		}
+	}
+	ordered := make([]mihomo.Rewrite, 0, len(rewrites)+1)
+	ordered = append(ordered, mihomo.BuiltInBasicRewrite())
+	ordered = append(ordered, rewrites...)
+	result, err := mihomoProfileCompileCache.Compile(
+		ctx,
+		mihomo.NewCompiler(mihomo.DefaultLimits()),
+		base,
+		ordered,
+	)
+	if err != nil {
+		return mihomo.CompileResult{}, err
+	}
+	result.Diagnostics = mihomo.Validate(result.YAML)
+	return result, nil
+}
+
+// RenderMihomoConfiguration renders a configuration whose base is exactly the
+// bound user's inline proxies. Unlike the legacy profile path, it does not
+// inject an implicit rewrite: every YAML or JavaScript processor is visible,
+// ordered, versioned, and switchable in the configuration document.
+func RenderMihomoConfiguration(
+	ctx context.Context,
+	store *db.DB,
+	userName string,
+	document db.MihomoProfileDocument,
+) (mihomo.CompileResult, error) {
+	base, err := RenderMihomoProxyProvider(ctx, store, userName)
+	if err != nil {
+		return mihomo.CompileResult{}, err
+	}
+	rewrites := make([]mihomo.Rewrite, 0, len(document.Rewrites))
+	for _, rewrite := range document.Rewrites {
+		if !rewrite.Enabled {
+			continue
+		}
+		rewrites = append(rewrites, mihomo.Rewrite{
+			Name: rewrite.Name, Kind: mihomo.RewriteKind(rewrite.Kind), Content: rewrite.Content,
+		})
+	}
+	result, err := mihomoProfileCompileCache.Compile(ctx, mihomo.NewCompiler(mihomo.DefaultLimits()), base, rewrites)
+	if err != nil {
+		return mihomo.CompileResult{}, err
+	}
+	result.Diagnostics = mihomo.Validate(result.YAML)
+	return result, nil
 }
 
 func parseVLESSReality(access db.ProxyAccess) (vlessRealitySettings, db.VLESSRealityCredential, error) {

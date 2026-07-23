@@ -285,13 +285,13 @@ export function ManageAccessDialog({
 
   const accesses = accessQuery.data ?? [];
   const existing = useMemo(
-    () => new Set(accesses.map((a) => `${a.node_name} ${a.proxy_name}`)),
+    () => new Set(accesses.map((a) => `${a.node_name}\u0000${a.proxy_name}`)),
     [accesses]
   );
   const available = useMemo<AdminProxy[]>(
     () =>
       (proxiesQuery.data?.proxies ?? []).filter(
-        (p) => p.enabled && !existing.has(`${p.node_name} ${p.name}`)
+        (p) => p.enabled && !existing.has(`${p.node_name}\u0000${p.name}`)
       ),
     [proxiesQuery.data, existing]
   );
@@ -555,7 +555,7 @@ export function ConnectionInfoDialog({
             Connection info
           </Dialog.Title>
           <Dialog.Description className="mb-4 text-kumo-subtle">
-            Connection profiles and Mihomo proxy-provider link for{" "}
+            Connection profiles and complete Mihomo subscription for{" "}
             <span className="font-medium text-kumo-default">{user.name}</span>.
           </Dialog.Description>
 
@@ -571,9 +571,9 @@ export function ConnectionInfoDialog({
           <section className="rounded-lg border border-kumo-line bg-kumo-base p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h3 className="font-semibold text-kumo-default">Proxy provider</h3>
+                <h3 className="font-semibold text-kumo-default">Mihomo subscription</h3>
                 <p className="text-sm text-kumo-subtle">
-                  The URL stays stable while its <code>proxies:</code> content follows current access.
+                  The primary URL contains inline <code>proxies:</code>, groups, DNS and published rules.
                 </p>
               </div>
               <Button
@@ -595,17 +595,36 @@ export function ConnectionInfoDialog({
               <div className="mt-4 flex flex-col gap-3">
                 <div className="flex items-end gap-2">
                   <Input
-                    label="Provider URL"
+                    label="Mihomo Profile URL"
                     readOnly
-                    value={subscription.url}
+                    value={subscription.mihomo_url || subscription.url}
                     className="min-w-0 flex-1"
                   />
                   <Button
                     variant="secondary"
                     icon={CopyIcon}
-                    onClick={() => void copyText(subscription.url, "url")}
+                    onClick={() =>
+                      void copyText(subscription.mihomo_url || subscription.url, "mihomo-url")
+                    }
                   >
-                    {copied === "url" ? "Copied" : "Copy"}
+                    {copied === "mihomo-url" ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <div className="flex items-end gap-2">
+                  <Input
+                    label="Legacy provider URL"
+                    readOnly
+                    value={subscription.provider_url || subscription.url}
+                    className="min-w-0 flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    icon={CopyIcon}
+                    onClick={() =>
+                      void copyText(subscription.provider_url || subscription.url, "provider-url")
+                    }
+                  >
+                    {copied === "provider-url" ? "Copied" : "Copy"}
                   </Button>
                 </div>
                 <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
@@ -639,7 +658,7 @@ export function ConnectionInfoDialog({
               </div>
             ) : (
               <div className="mt-4 flex items-center justify-between gap-3 rounded-md bg-kumo-canvas p-3">
-                <p className="text-sm text-kumo-subtle">No provider link has been generated.</p>
+                <p className="text-sm text-kumo-subtle">No subscription link has been generated.</p>
                 <Button
                   size="sm"
                   icon={LinkSimpleIcon}
@@ -720,7 +739,7 @@ export function ConnectionInfoDialog({
           <Banner
             variant="secondary"
             title="Changes and publishing"
-            description="Provider content updates from current access immediately. Publish configuration changes before new or changed credentials can connect to a node."
+            description="Inline proxies follow current access immediately; YAML and JavaScript changes affect clients only after the Mihomo profile is published. Publish node configuration changes before new credentials can connect."
             className="mt-4"
           />
 
@@ -739,7 +758,7 @@ export function ConnectionInfoDialog({
       >
         <Dialog size="sm" className="p-6">
           <Dialog.Title className="text-xl font-semibold text-kumo-default">
-            {confirmation === "rotate" ? "Rotate provider link?" : "Revoke provider link?"}
+            {confirmation === "rotate" ? "Rotate subscription link?" : "Revoke subscription link?"}
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-kumo-subtle">
             {confirmation === "rotate"

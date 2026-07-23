@@ -229,8 +229,77 @@ export type UserConnectionInfo = {
 export type AdminSubscription = {
   active: boolean;
   url: string;
+  mihomo_url?: string;
+  provider_url?: string;
   created_at: string;
   last_used_at: string;
+};
+
+export type MihomoRewrite = {
+  id: string;
+  template_id?: string;
+  name: string;
+  kind: "yaml" | "javascript";
+  content: string;
+  enabled: boolean;
+};
+
+export type MihomoProfileDocument = { rewrites: MihomoRewrite[] };
+
+export type MihomoProfile = {
+  id: string;
+  name: string;
+  description: string;
+  proxy_user_id: string;
+  proxy_user_name: string;
+  draft: MihomoProfileDocument;
+  published_revision_id: string;
+  published_version: number;
+  published: MihomoProfileDocument;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MihomoRewriteTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  kind: "yaml" | "javascript";
+  content: string;
+  built_in: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MihomoProfileSubscription = {
+  active: boolean;
+  url: string;
+  created_at: string;
+  last_used_at: string;
+};
+
+export type MihomoProfileRevision = {
+  id: string;
+  profile_id: string;
+  version: number;
+  document: MihomoProfileDocument;
+  created_at: string;
+};
+
+export type MihomoDiagnostic = {
+  severity: "error" | "warning";
+  code: string;
+  path?: string;
+  message: string;
+};
+
+export type MihomoLogEntry = { level: string; message: string };
+
+export type MihomoPreview = {
+  yaml: string;
+  published_yaml: string;
+  logs: MihomoLogEntry[];
+  diagnostics: MihomoDiagnostic[];
 };
 
 export type TrafficRow = {
@@ -295,4 +364,13 @@ export type SystemLogsResponse = {
   note: string;
 };
 
-export type Page = "overview" | "nodes" | "proxies" | "users" | "traffic" | "network-events" | "system-logs" | "settings";
+export type Page =
+  | "overview"
+  | "nodes"
+  | "proxies"
+  | "users"
+  | "mihomo-profiles"
+  | "traffic"
+  | "network-events"
+  | "system-logs"
+  | "settings";

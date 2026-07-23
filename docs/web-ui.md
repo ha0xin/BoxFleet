@@ -41,6 +41,17 @@ Current established libraries:
 - date-fns and react-day-picker for date/time formatting and date/range
   picking.
 - `@phosphor-icons/react` for app icons, matching Kumo's own internals.
+- Monaco Editor plus `monaco-yaml` for the lazy-loaded Mihomo profile
+  workbench. Workers, Mihomo JSON Schema, and JavaScript declarations are
+  bundled locally; the editor does not fetch schemas or code from a CDN.
+
+The Mihomo route follows the inventory-page pattern: horizontal underline tabs
+switch between the default configuration table and the global rewrite-template
+table. Creating a configuration is a two-step flow (proxy source user, then
+initial pipeline). Editing uses a two-column workbench with the ordered,
+switchable pipeline on the left and Monaco on the right. Template snapshots are
+read-only there; configuration-scoped custom processors remain editable. The
+Preview config action renders the complete unsaved pipeline output.
 
 Do not reintroduce native `<select>` elements for normal app dropdowns. Use the
 native Kumo `Select` (with `Select.Option` children) from `@cloudflare/kumo`.

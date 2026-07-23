@@ -65,6 +65,45 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "edge-ui");
 });
 
+test("Mihomo configurations use tables, templates, and a two-column processor pipeline", async ({ page }) => {
+  await page.goto(".");
+  await page.getByRole("button", { name: "Users", exact: true }).click();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("mihomo-ui");
+  await page.getByRole("button", { name: "Create user" }).click();
+  await page.getByRole("button", { name: "Mihomo Profiles", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Mihomo Profiles", exact: true })).toBeVisible();
+  await expect(page.locator("header").getByRole("button", { name: "New configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Configuration inventory" })).toBeVisible();
+  await expect(page.getByLabel("Search Mihomo configurations")).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Processors" })).toBeVisible();
+  await expect(page.getByText("No configurations match this filter.", { exact: true })).toBeVisible();
+  await page.getByText("Rewrite templates", { exact: true }).click();
+  await expect(page.locator("header").getByRole("button", { name: "New rewrite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rewrite inventory" })).toBeVisible();
+  await expect(page.getByText("Built in · read only", { exact: true })).toBeVisible();
+  await page.getByText("Mihomo configurations", { exact: true }).click();
+  await page.getByRole("button", { name: "New configuration" }).click();
+  await page.getByLabel("Configuration name").fill("mihomo-ui");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("Processor pipeline", { exact: true })).toBeVisible();
+  await expect(page.getByText("Template snapshot · read-only in this configuration", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Create configuration" }).click();
+  await expect(page.getByRole("heading", { name: "mihomo-ui" })).toBeVisible();
+  await page.getByRole("button", { name: "Custom YAML" }).click();
+  await page.getByLabel("Processor name").fill("Custom routes");
+  await page.getByRole("button", { name: "Preview config" }).click();
+  await expect(page.getByText("mixed-port", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("Final YAML after all enabled processors run in order.")).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await openRowActions(page, "mihomo-ui");
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Subscription link" }).click();
+  await expect(page.getByRole("heading", { name: "Subscription link" })).toBeVisible();
+  await expect(page.getByText("Publish this configuration before generating its link.")).toBeVisible();
+});
+
 async function selectDeletedFilter(page: Page) {
   await page.getByRole("button", { name: "Filter", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "Deleted", exact: true }).click();

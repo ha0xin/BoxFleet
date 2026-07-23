@@ -52,6 +52,50 @@ type LogEventSearchDocument struct {
 	EventID string `json:"event_id"`
 }
 
+type MihomoProfile struct {
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description"`
+	DraftDocumentJson string         `json:"draft_document_json"`
+	ProxyUserID       sql.NullString `json:"proxy_user_id"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
+}
+
+type MihomoProfilePublication struct {
+	ProfileID   string `json:"profile_id"`
+	RevisionID  string `json:"revision_id"`
+	PublishedAt string `json:"published_at"`
+}
+
+type MihomoProfileRevision struct {
+	ID           string `json:"id"`
+	ProfileID    string `json:"profile_id"`
+	Version      int64  `json:"version"`
+	DocumentJson string `json:"document_json"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type MihomoProfileSubscriptionToken struct {
+	ID         string         `json:"id"`
+	ProfileID  string         `json:"profile_id"`
+	Token      string         `json:"token"`
+	CreatedAt  string         `json:"created_at"`
+	LastUsedAt sql.NullString `json:"last_used_at"`
+	RevokedAt  sql.NullString `json:"revoked_at"`
+}
+
+type MihomoRewriteTemplate struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	Content     string `json:"content"`
+	BuiltIn     int64  `json:"built_in"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type Node struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`
@@ -296,6 +340,12 @@ type ProxyUser struct {
 	DeletedAt        sql.NullString `json:"deleted_at"`
 	CreatedAt        string         `json:"created_at"`
 	UpdatedAt        string         `json:"updated_at"`
+}
+
+type ProxyUserMihomoProfile struct {
+	ProxyUserID string `json:"proxy_user_id"`
+	ProfileID   string `json:"profile_id"`
+	AssignedAt  string `json:"assigned_at"`
 }
 
 type RawLogEntry struct {

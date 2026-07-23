@@ -224,7 +224,27 @@ func TestAdminSubscriptionLifecycleAndDynamicProvider(t *testing.T) {
 	if !subscription.Active || !strings.HasPrefix(subscription.URL, "http://example.com/sub/bfsub_") {
 		t.Fatalf("issued subscription = %#v", subscription)
 	}
+	if subscription.ProviderURL != subscription.URL ||
+		!strings.HasPrefix(subscription.MihomoURL, subscription.URL) ||
+		!strings.HasSuffix(subscription.MihomoURL, "/mihomo.yaml") {
+		t.Fatalf("issued subscription formats = %#v", subscription)
+	}
 	oldPath := strings.TrimPrefix(subscription.URL, "http://example.com")
+	oldMihomoPath := strings.TrimPrefix(subscription.MihomoURL, "http://example.com")
+
+	req = httptest.NewRequest(http.MethodGet, oldMihomoPath, nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Mihomo profile status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "proxies:") ||
+		!strings.Contains(body, "proxy-groups:") ||
+		!strings.Contains(body, "include-all-proxies: true") ||
+		!strings.Contains(body, "MATCH,PROXY") ||
+		strings.Contains(body, "proxy-providers:") {
+		t.Fatalf("Mihomo profile body = %s", body)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
 	rec = httptest.NewRecorder()

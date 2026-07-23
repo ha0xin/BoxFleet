@@ -10,6 +10,12 @@ import type {
   AdminSettings,
   AdminSubscription,
   AdminUser,
+  MihomoPreview,
+  MihomoProfile,
+  MihomoProfileDocument,
+  MihomoProfileRevision,
+  MihomoProfileSubscription,
+  MihomoRewriteTemplate,
   NetworkEvent,
   NetworkEventsResponse,
   Overview,
@@ -332,6 +338,8 @@ const subscriptions = new Map<string, AdminSubscription>([
     {
       active: true,
       url: "http://127.0.0.1:5173/sub/bfsub_mock_alice",
+      provider_url: "http://127.0.0.1:5173/sub/bfsub_mock_alice",
+      mihomo_url: "http://127.0.0.1:5173/sub/bfsub_mock_alice/mihomo.yaml",
       created_at: iso(14 * DAY),
       last_used_at: iso(10 * MIN)
     }
@@ -348,9 +356,12 @@ function subscriptionFor(userName: string): AdminSubscription {
 }
 
 function issueSubscription(userName: string): AdminSubscription {
-  const subscription = {
+  const providerURL = `http://127.0.0.1:5173/sub/bfsub_mock_${userName}_${Date.now()}`;
+  const subscription: AdminSubscription = {
     active: true,
-    url: `http://127.0.0.1:5173/sub/bfsub_mock_${userName}_${Date.now()}`,
+    url: providerURL,
+    provider_url: providerURL,
+    mihomo_url: `${providerURL}/mihomo.yaml`,
     created_at: new Date().toISOString(),
     last_used_at: ""
   };
@@ -420,6 +431,65 @@ const networkEvents: NetworkEvent[] = Array.from({ length: 96 }, (_, i) => {
 });
 
 const settings: AdminSettings = { network_event_retention_days: 90 };
+
+const basicMihomoYAML = `mixed-port: 7890
+mode: rule
+dns:
+  enable: true
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [DIRECT]
+rules:
+  - MATCH,PROXY
+`;
+const mihomoTemplates: MihomoRewriteTemplate[] = [
+  {
+    id: "mhrt_basic",
+    name: "BoxFleet Basic",
+    description: "A ready-to-use Mihomo baseline with DNS, groups, and rules.",
+    kind: "yaml",
+    content: basicMihomoYAML,
+    built_in: true,
+    created_at: iso(30 * DAY),
+    updated_at: iso(30 * DAY)
+  }
+];
+const basicMihomoDocument: MihomoProfileDocument = { rewrites: [{
+  id: "rw_basic",
+  template_id: "mhrt_basic",
+  name: "BoxFleet Basic",
+  kind: "yaml",
+  content: basicMihomoYAML,
+  enabled: true
+}] };
+const mihomoProfiles: MihomoProfile[] = [
+  {
+    id: "mhp_alice_desktop",
+    name: "Alice desktop",
+    description: "Default desktop subscription.",
+    proxy_user_id: "user_alice",
+    proxy_user_name: "alice",
+    draft: basicMihomoDocument,
+    published_revision_id: "mhpr_alice_1",
+    published_version: 1,
+    published: basicMihomoDocument,
+    created_at: iso(30 * DAY),
+    updated_at: iso(DAY)
+  }
+];
+const mihomoRevisions = new Map<string, MihomoProfileRevision[]>([
+  [
+    "mhp_alice_desktop",
+    [{ id: "mhpr_alice_1", profile_id: "mhp_alice_desktop", version: 1, document: basicMihomoDocument, created_at: iso(30 * DAY) }]
+  ]
+]);
+const mihomoSubscriptions = new Map<string, MihomoProfileSubscription>();
+
+function mihomoPreview(): MihomoPreview {
+  const yaml = `mixed-port: 7890\nmode: rule\ndns:\n  enable: true\nproxies:\n  - name: tokyo-reality\n    type: vless\nproxy-groups:\n  - name: PROXY\n    type: select\n    include-all-proxies: true\nrules:\n  - GEOIP,CN,DIRECT\n  - MATCH,PROXY\n`;
+  return { yaml, published_yaml: yaml, logs: [], diagnostics: [] };
+}
 
 const configChanges = {
   changed: [
@@ -576,6 +646,121 @@ const routes: Route[] = [
     }
   },
   { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies.filter((proxy) => !proxy.deleted_at) },
+  { method: "GET", pattern: /^\/api\/admin\/mihomo\/profiles$/, handler: () => mihomoProfiles },
+  { method: "GET", pattern: /^\/api\/admin\/mihomo\/rewrite-templates$/, handler: () => mihomoTemplates },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/mihomo\/rewrite-templates$/,
+    handler: ({ body }): MihomoRewriteTemplate => {
+      const template: MihomoRewriteTemplate = {
+        id: `mhrt_${Date.now()}`, name: body?.name ?? "Rewrite", description: body?.description ?? "",
+        kind: body?.kind ?? "yaml", content: body?.content ?? "", built_in: false,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      };
+      mihomoTemplates.push(template);
+      return template;
+    }
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/mihomo\/rewrite-templates\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const template = mihomoTemplates.find((item) => item.id === match?.[1]);
+      if (template && !template.built_in) Object.assign(template, body, { updated_at: new Date().toISOString() });
+      return template ?? { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/mihomo\/profiles$/,
+    handler: ({ body }): MihomoProfile => {
+      const profile: MihomoProfile = {
+        id: `mhp_${Date.now()}`,
+        name: body?.name ?? "New profile",
+        description: body?.description ?? "",
+        proxy_user_id: users.find((user) => user.name === body?.user)?.id ?? "",
+        proxy_user_name: body?.user ?? "",
+        draft: body?.draft ?? { rewrites: [] },
+        published_revision_id: "",
+        published_version: 0,
+        published: { rewrites: [] },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      mihomoProfiles.push(profile);
+      mihomoRevisions.set(profile.id, []);
+      return profile;
+    }
+  },
+  { method: "GET", pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/revisions$/, handler: ({ match }) => mihomoRevisions.get(match?.[1] ?? "") ?? [] },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/subscription$/,
+    handler: ({ match }) => mihomoSubscriptions.get(match?.[1] ?? "") ?? { active: false, url: "", created_at: "", last_used_at: "" }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/subscription(?:\/rotate)?$/,
+    handler: ({ match }): MihomoProfileSubscription => {
+      const subscription = {
+        active: true,
+        url: `http://127.0.0.1:5173/sub/bfsub_${Date.now()}/mihomo.yaml`,
+        created_at: new Date().toISOString(),
+        last_used_at: ""
+      };
+      mihomoSubscriptions.set(match?.[1] ?? "", subscription);
+      return subscription;
+    }
+  },
+  { method: "POST", pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/preview$/, handler: () => mihomoPreview() },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const profile = mihomoProfiles.find((item) => item.id === match?.[1]);
+      if (profile && body?.draft) {
+        profile.draft = body.draft;
+        profile.updated_at = new Date().toISOString();
+      }
+      return profile ?? { ok: true };
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/publish$/,
+    handler: ({ match }): MihomoProfileRevision => {
+      const profile = mihomoProfiles.find((item) => item.id === match?.[1])!;
+      const revisions = mihomoRevisions.get(profile.id) ?? [];
+      const revision: MihomoProfileRevision = {
+        id: `mhpr_${Date.now()}`,
+        profile_id: profile.id,
+        version: revisions.length + 1,
+        document: profile.draft,
+        created_at: new Date().toISOString()
+      };
+      revisions.unshift(revision);
+      mihomoRevisions.set(profile.id, revisions);
+      profile.published = profile.draft;
+      profile.published_revision_id = revision.id;
+      profile.published_version = revision.version;
+      return revision;
+    }
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/rollback$/,
+    handler: ({ match, body }) => {
+      const profile = mihomoProfiles.find((item) => item.id === match?.[1])!;
+      const revision = (mihomoRevisions.get(profile.id) ?? []).find((item) => item.id === body?.revision_id);
+      if (revision) {
+        profile.published = revision.document;
+        profile.published_revision_id = revision.id;
+        profile.published_version = revision.version;
+      }
+      return profile;
+    }
+  },
+  { method: "PUT", pattern: /^\/api\/admin\/users\/([^/]+)\/mihomo-profile$/, handler: () => mihomoProfiles[0] },
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies$/,

@@ -14,9 +14,15 @@ export default defineConfig({
   base: "/admin/",
   plugins: [tailwindcss(), react(), ...(useRealApi ? [] : [adminMockPlugin()])],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src")
-    }
+    alias: [
+      // monaco-yaml's worker manager still imports Monaco's documented ESM path;
+      // Monaco 0.56's export map no longer exposes that spelling to Vite.
+      {
+        find: /^monaco-editor\/esm\/vs\/(.*)$/,
+        replacement: path.resolve(__dirname, "node_modules/monaco-editor/esm/vs/$1")
+      },
+      { find: "@", replacement: path.resolve(__dirname, "./src") }
+    ]
   },
   build: {
     outDir: "../internal/server/webui/assets/generated",

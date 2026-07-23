@@ -13,6 +13,7 @@ import type { NavItem } from "./navigation";
 import type { Overview } from "./types";
 
 const loadNetworkEventsPage = () => import("./pages/network-events");
+const loadMihomoProfilesPage = () => import("./pages/mihomo-profiles");
 const loadNodesPage = () => import("./pages/nodes");
 const loadOverviewPage = () => import("./pages/overview");
 const loadProxiesPage = () => import("./pages/proxies");
@@ -25,6 +26,7 @@ const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
   "/nodes": loadNodesPage,
   "/proxies": loadProxiesPage,
   "/users": loadUsersPage,
+  "/mihomo-profiles": loadMihomoProfilesPage,
   "/network-events": loadNetworkEventsPage,
   "/system-logs": loadSystemLogsPage,
   "/settings": loadSettingsPage
@@ -32,6 +34,9 @@ const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
 
 const NetworkEventsPage = lazy(() =>
   loadNetworkEventsPage().then((module) => ({ default: module.NetworkEventsPage }))
+);
+const MihomoProfilesPage = lazy(() =>
+  loadMihomoProfilesPage().then((module) => ({ default: module.MihomoProfilesPage }))
 );
 const NodesPage = lazy(() => loadNodesPage().then((module) => ({ default: module.NodesPage })));
 const OverviewPage = lazy(() => loadOverviewPage().then((module) => ({ default: module.OverviewPage })));
@@ -122,6 +127,7 @@ function App() {
               <Route path="/nodes" element={<NodesPage request={request} />} />
               <Route path="/proxies" element={<ProxiesPage request={request} />} />
               <Route path="/users" element={<UsersPage request={request} />} />
+              <Route path="/mihomo-profiles" element={<MihomoProfilesPage request={request} />} />
               <Route path="/traffic" element={<ComingSoon />} />
               <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
               <Route path="/system-logs" element={<SystemLogsPage request={request} />} />

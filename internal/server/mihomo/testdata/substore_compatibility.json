@@ -1,0 +1,89 @@
+{
+  "substore_commit": "7db77f5cbd60d40d56bbf95c74eb958f9b70cd39",
+  "cases": [
+    {
+      "id": "yaml_recursive_replace",
+      "classification": "compatible",
+      "base": "mixed-port: 7890\ndns:\n  enable: true\n  ipv6: true\n  nameserver: [1.1.1.1]\nrules: [MATCH,PROXY]\n",
+      "rewrites": [
+        {
+          "name": "yaml",
+          "kind": "yaml",
+          "content": "mixed-port: 7891\ndns:\n  ipv6: false\n  nameserver: [8.8.8.8]\n"
+        }
+      ],
+      "substore": {
+        "ok": true,
+        "yaml": "mixed-port: 7891\ndns:\n  enable: true\n  ipv6: false\n  nameserver:\n    - 8.8.8.8\nrules:\n  - MATCH\n  - PROXY\n"
+      }
+    },
+    {
+      "id": "yaml_array_modifiers_and_force_replace",
+      "classification": "compatible",
+      "base": "dns:\n  enable: true\n  ipv6: true\nrules:\n  - GEOIP,CN,DIRECT\n  - MATCH,PROXY\n",
+      "rewrites": [
+        {
+          "name": "yaml",
+          "kind": "yaml",
+          "content": "+rules:\n  - DOMAIN-SUFFIX,example.com,DIRECT\nrules+:\n  - PROCESS-NAME,curl,DIRECT\ndns!:\n  enable: false\n"
+        }
+      ],
+      "substore": {
+        "ok": true,
+        "yaml": "dns:\n  enable: false\nrules:\n  - DOMAIN-SUFFIX,example.com,DIRECT\n  - GEOIP,CN,DIRECT\n  - MATCH,PROXY\n  - PROCESS-NAME,curl,DIRECT\n"
+      }
+    },
+    {
+      "id": "javascript_sync_main",
+      "classification": "compatible",
+      "base": "proxies:\n  - {name: HK-01, type: vless}\n",
+      "rewrites": [
+        {
+          "name": "javascript",
+          "kind": "javascript",
+          "content": "function main(config) { config.proxies[0].name = 'Hong Kong'; config.mode = 'rule'; return config }"
+        }
+      ],
+      "substore": {
+        "ok": true,
+        "yaml": "proxies:\n  - name: Hong Kong\n    type: vless\nmode: rule\n"
+      }
+    },
+    {
+      "id": "javascript_async_main",
+      "classification": "intentional_difference",
+      "difference": "BoxFleet rejects Promise results so subscription compilation stays synchronous and bounded; Sub-Store awaits async main(config).",
+      "base": "proxies: []\n",
+      "rewrites": [
+        {
+          "name": "javascript",
+          "kind": "javascript",
+          "content": "async function main(config) { config.mode = 'rule'; return config }"
+        }
+      ],
+      "boxfleet_error": "async_unsupported",
+      "substore": {
+        "ok": true,
+        "yaml": "proxies: []\nmode: rule\n"
+      }
+    },
+    {
+      "id": "javascript_missing_main",
+      "classification": "intentional_difference",
+      "difference": "BoxFleet rejects a JavaScript rewrite without main(config); Sub-Store leaves the profile unchanged.",
+      "base": "proxies: []\n",
+      "rewrites": [
+        {
+          "name": "javascript",
+          "kind": "javascript",
+          "content": "const value = 1"
+        }
+      ],
+      "boxfleet_error": "invalid_script",
+      "substore": {
+        "ok": true,
+        "yaml": "proxies: []\n"
+      }
+    }
+  ]
+}

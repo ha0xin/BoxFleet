@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/haoxin/boxfleet/internal/server/db"
+	"github.com/haoxin/boxfleet/internal/server/mihomo"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -180,6 +181,111 @@ func TestRenderMihomoProxyProvider(t *testing.T) {
 	reality, ok := proxy["reality-opts"].(map[string]any)
 	if !ok || reality["public-key"] != "public-key" || reality["short-id"] != "01234567" {
 		t.Fatalf("unexpected reality options: %#v", proxy["reality-opts"])
+	}
+}
+
+func TestRenderMihomoProfileUsesInlineProxies(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	result, err := RenderMihomoProfile(ctx, store, "alice", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(result.YAML), "proxy-providers:") {
+		t.Fatalf("full profile unexpectedly uses proxy-providers:\n%s", result.YAML)
+	}
+
+	var profile map[string]any
+	if err := yaml.Unmarshal(result.YAML, &profile); err != nil {
+		t.Fatal(err)
+	}
+	proxies, ok := profile["proxies"].([]any)
+	if !ok || len(proxies) != 1 {
+		t.Fatalf("inline proxies = %#v, want one", profile["proxies"])
+	}
+	if profile["mode"] != "rule" || profile["mixed-port"] != 7890 {
+		t.Fatalf("missing basic settings: %#v", profile)
+	}
+	groups, ok := profile["proxy-groups"].([]any)
+	if !ok || len(groups) != 2 {
+		t.Fatalf("proxy-groups = %#v, want PROXY and AUTO", profile["proxy-groups"])
+	}
+	proxyGroup := groups[0].(map[string]any)
+	if proxyGroup["name"] != "PROXY" || proxyGroup["include-all-proxies"] != true {
+		t.Fatalf("unexpected primary group: %#v", proxyGroup)
+	}
+	rules, ok := profile["rules"].([]any)
+	if !ok || len(rules) == 0 || rules[len(rules)-1] != "MATCH,PROXY" {
+		t.Fatalf("unexpected rules: %#v", profile["rules"])
+	}
+}
+
+func TestRenderMihomoProfileAppliesCustomRewritesAfterBasic(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	result, err := RenderMihomoProfile(ctx, store, "alice", []mihomo.Rewrite{
+		{
+			Name: "custom-mode",
+			Kind: mihomo.RewriteJavaScript,
+			Content: `function main(config) {
+				config.mode = "global"
+				config["proxy-groups"][0].name = "CUSTOM"
+				return config
+			}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]any
+	if err := yaml.Unmarshal(result.YAML, &profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile["mode"] != "global" {
+		t.Fatalf("mode = %#v, want global", profile["mode"])
+	}
+	groups := profile["proxy-groups"].([]any)
+	if groups[0].(map[string]any)["name"] != "CUSTOM" {
+		t.Fatalf("custom rewrite did not run after basic: %#v", groups)
+	}
+}
+
+func TestRenderMihomoProfileUsesPublishedUserProfile(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	profile, err := store.CreateMihomoProfile(ctx, db.CreateMihomoProfileParams{
+		Name: "Published", UserName: "alice",
+		Draft: db.MihomoProfileDocument{Rewrites: []db.MihomoRewrite{
+			{ID: "disabled", Name: "Disabled", Kind: "yaml", Content: "mode: direct\n", Enabled: false},
+			{ID: "enabled", Name: "Enabled", Kind: "yaml", Content: "mode: global\n", Enabled: true},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PublishMihomoProfile(ctx, profile.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AssignMihomoProfileToUser(ctx, "alice", profile.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RenderMihomoProfile(ctx, store, "alice", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered map[string]any
+	if err := yaml.Unmarshal(result.YAML, &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if rendered["mode"] != "global" {
+		t.Fatalf("published enabled rewrite was not applied: %#v", rendered)
 	}
 }
 

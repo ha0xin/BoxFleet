@@ -1,5 +1,6 @@
 import {
   BroadcastIcon,
+  BracketsCurlyIcon,
   FileTextIcon,
   GaugeIcon,
   GearSixIcon,
@@ -19,6 +20,7 @@ export const pages: NavItem[] = [
   { id: "nodes", label: "Nodes", icon: HardDrivesIcon, path: "/nodes" },
   { id: "proxies", label: "Proxies", icon: PathIcon, path: "/proxies" },
   { id: "users", label: "Users", icon: UsersIcon, path: "/users" },
+  { id: "mihomo-profiles", label: "Mihomo Profiles", icon: BracketsCurlyIcon, path: "/mihomo-profiles" },
   { id: "traffic", label: "Traffic", icon: GaugeIcon, path: "/traffic" },
   { id: "network-events", label: "Network Events", icon: BroadcastIcon, path: "/network-events" },
   { id: "system-logs", label: "System Logs", icon: FileTextIcon, path: "/system-logs" },
@@ -32,7 +34,7 @@ const byId = (id: Page): NavItem => pages.find((page) => page.id === id)!;
 export const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   { items: [byId("overview")] },
   { label: "Operate", items: [byId("nodes"), byId("proxies")] },
-  { label: "Manage", items: [byId("users"), byId("traffic")] },
+  { label: "Manage", items: [byId("users"), byId("mihomo-profiles"), byId("traffic")] },
   { label: "Observe", items: [byId("network-events"), byId("system-logs")] }
 ];
 

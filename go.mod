@@ -4,11 +4,13 @@ go 1.26.3
 
 require (
 	github.com/cavaliergopher/grab/v3 v3.0.1
+	github.com/dop251/goja v0.0.0-20260722130236-0768e0998ac0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.19.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jedib0t/go-pretty/v6 v6.7.10
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/pressly/goose/v3 v3.27.1
@@ -24,8 +26,11 @@ require (
 )
 
 require (
+	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/google/pprof v0.0.0-20240227163752-401108e1b7e7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect

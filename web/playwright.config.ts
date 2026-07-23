@@ -5,7 +5,10 @@ import path from "node:path";
 const serverPort = Number(process.env.BOXFLEET_E2E_SERVER_PORT ?? "18081");
 const webPort = Number(process.env.BOXFLEET_E2E_WEB_PORT ?? "4173");
 const dbPath = process.env.BOXFLEET_E2E_DB ?? path.join(os.tmpdir(), `boxfleet-web-e2e-${process.pid}.db`);
-const chromePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? "/usr/bin/google-chrome-stable";
+const defaultChromePath = process.platform === "darwin"
+  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  : "/usr/bin/google-chrome-stable";
+const chromePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ?? defaultChromePath;
 
 export default defineConfig({
   testDir: "./e2e",

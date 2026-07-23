@@ -23,6 +23,9 @@
     "date-fns": "^4.4.0",
     "diff": "^9.0.0",
     "lucide-react": "^0.511.0",
+    "meta-json-schema": "^1.19.28",
+    "monaco-editor": "^0.56.0",
+    "monaco-yaml": "^5.5.1",
     "react": "^19.1.0",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.1.0",
@@ -43,6 +46,9 @@
     "postcss": "^8.5.14",
     "tailwindcss": "^4.1.17",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.4.3"
+  },
+  "overrides": {
+    "dompurify": "3.4.12"
   }
 }
