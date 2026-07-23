@@ -30,9 +30,6 @@ func (db *DB) IssueMihomoProfileSubscriptionToken(ctx context.Context, profileID
 	if profile.ProxyUserID == "" {
 		return MihomoProfileSubscriptionToken{}, fmt.Errorf("Mihomo profile %q has no proxy user", profile.Name)
 	}
-	if profile.PublishedRevisionID == "" {
-		return MihomoProfileSubscriptionToken{}, fmt.Errorf("Mihomo profile %q has not been published", profile.Name)
-	}
 	tokenID, rawToken, err := newSubscriptionToken()
 	if err != nil {
 		return MihomoProfileSubscriptionToken{}, err

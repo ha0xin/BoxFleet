@@ -85,23 +85,29 @@ test("Mihomo configurations use tables, templates, and a two-column processor pi
   await expect(page.getByText("Built in · read only", { exact: true })).toBeVisible();
   await page.getByText("Mihomo configurations", { exact: true }).click();
   await page.getByRole("button", { name: "New configuration" }).click();
+  await expect(page).toHaveURL(/\/admin\/mihomo-profiles\/new$/);
+  await expect(page.getByRole("dialog", { name: "New Mihomo configuration" })).toHaveCount(0);
   await page.getByLabel("Configuration name").fill("mihomo-ui");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText("Processor pipeline", { exact: true })).toBeVisible();
-  await expect(page.getByText("Template snapshot · read-only in this configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText("Linked template · always uses the latest saved version", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create configuration" }).click();
+  await expect(page).toHaveURL(/\/admin\/mihomo-profiles\/[^/]+\/edit$/);
   await expect(page.getByRole("heading", { name: "mihomo-ui" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save draft", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Custom YAML" }).click();
   await page.getByLabel("Processor name").fill("Custom routes");
   await page.getByRole("button", { name: "Preview config" }).click();
   await expect(page.getByText("mixed-port", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("Final YAML after all enabled processors run in order.")).toBeVisible();
-  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await openRowActions(page, "mihomo-ui");
   await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Subscription link" }).click();
   await expect(page.getByRole("heading", { name: "Subscription link" })).toBeVisible();
-  await expect(page.getByText("Publish this configuration before generating its link.")).toBeVisible();
+  await expect(page.getByText("No subscription link has been generated.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate link" })).toBeEnabled();
 });
 
 async function selectDeletedFilter(page: Page) {

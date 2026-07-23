@@ -254,22 +254,19 @@ func TestRenderMihomoProfileAppliesCustomRewritesAfterBasic(t *testing.T) {
 	}
 }
 
-func TestRenderMihomoProfileUsesPublishedUserProfile(t *testing.T) {
+func TestRenderMihomoProfileUsesSavedUserProfile(t *testing.T) {
 	ctx := context.Background()
 	store := openRenderTestDB(t)
 	seedVLESSRealityFixture(t, ctx, store)
 
 	profile, err := store.CreateMihomoProfile(ctx, db.CreateMihomoProfileParams{
-		Name: "Published", UserName: "alice",
-		Draft: db.MihomoProfileDocument{Rewrites: []db.MihomoRewrite{
+		Name: "Saved", UserName: "alice",
+		Document: db.MihomoProfileDocument{Rewrites: []db.MihomoRewrite{
 			{ID: "disabled", Name: "Disabled", Kind: "yaml", Content: "mode: direct\n", Enabled: false},
 			{ID: "enabled", Name: "Enabled", Kind: "yaml", Content: "mode: global\n", Enabled: true},
 		}},
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.PublishMihomoProfile(ctx, profile.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.AssignMihomoProfileToUser(ctx, "alice", profile.ID); err != nil {
@@ -285,7 +282,7 @@ func TestRenderMihomoProfileUsesPublishedUserProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rendered["mode"] != "global" {
-		t.Fatalf("published enabled rewrite was not applied: %#v", rendered)
+		t.Fatalf("saved enabled rewrite was not applied: %#v", rendered)
 	}
 }
 

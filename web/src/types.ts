@@ -252,10 +252,7 @@ export type MihomoProfile = {
   description: string;
   proxy_user_id: string;
   proxy_user_name: string;
-  draft: MihomoProfileDocument;
-  published_revision_id: string;
-  published_version: number;
-  published: MihomoProfileDocument;
+  document: MihomoProfileDocument;
   created_at: string;
   updated_at: string;
 };
@@ -278,14 +275,6 @@ export type MihomoProfileSubscription = {
   last_used_at: string;
 };
 
-export type MihomoProfileRevision = {
-  id: string;
-  profile_id: string;
-  version: number;
-  document: MihomoProfileDocument;
-  created_at: string;
-};
-
 export type MihomoDiagnostic = {
   severity: "error" | "warning";
   code: string;
@@ -297,7 +286,6 @@ export type MihomoLogEntry = { level: string; message: string };
 
 export type MihomoPreview = {
   yaml: string;
-  published_yaml: string;
   logs: MihomoLogEntry[];
   diagnostics: MihomoDiagnostic[];
 };

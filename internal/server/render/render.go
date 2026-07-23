@@ -597,12 +597,12 @@ func RenderMihomoProfile(
 		return mihomo.CompileResult{}, err
 	}
 	if rewrites == nil {
-		published, err := store.GetPublishedMihomoProfileForUser(ctx, userName)
+		document, err := store.GetMihomoProfileDocumentForUser(ctx, userName)
 		if err != nil {
 			return mihomo.CompileResult{}, err
 		}
-		rewrites = make([]mihomo.Rewrite, 0, len(published.Document.Rewrites))
-		for _, rewrite := range published.Document.Rewrites {
+		rewrites = make([]mihomo.Rewrite, 0, len(document.Rewrites))
+		for _, rewrite := range document.Rewrites {
 			if !rewrite.Enabled {
 				continue
 			}
@@ -640,6 +640,10 @@ func RenderMihomoConfiguration(
 	document db.MihomoProfileDocument,
 ) (mihomo.CompileResult, error) {
 	base, err := RenderMihomoProxyProvider(ctx, store, userName)
+	if err != nil {
+		return mihomo.CompileResult{}, err
+	}
+	document, err = store.ResolveMihomoProfileDocument(ctx, document)
 	if err != nil {
 		return mihomo.CompileResult{}, err
 	}

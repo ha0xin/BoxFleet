@@ -31,32 +31,21 @@ type MihomoProfileDocument struct {
 }
 
 type MihomoProfile struct {
-	ID                  string                `json:"id"`
-	Name                string                `json:"name"`
-	Description         string                `json:"description"`
-	ProxyUserID         string                `json:"proxy_user_id"`
-	ProxyUserName       string                `json:"proxy_user_name"`
-	Draft               MihomoProfileDocument `json:"draft"`
-	PublishedRevisionID string                `json:"published_revision_id"`
-	PublishedVersion    int64                 `json:"published_version"`
-	Published           MihomoProfileDocument `json:"published"`
-	CreatedAt           string                `json:"created_at"`
-	UpdatedAt           string                `json:"updated_at"`
-}
-
-type MihomoProfileRevision struct {
-	ID        string                `json:"id"`
-	ProfileID string                `json:"profile_id"`
-	Version   int64                 `json:"version"`
-	Document  MihomoProfileDocument `json:"document"`
-	CreatedAt string                `json:"created_at"`
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	Description   string                `json:"description"`
+	ProxyUserID   string                `json:"proxy_user_id"`
+	ProxyUserName string                `json:"proxy_user_name"`
+	Document      MihomoProfileDocument `json:"document"`
+	CreatedAt     string                `json:"created_at"`
+	UpdatedAt     string                `json:"updated_at"`
 }
 
 type CreateMihomoProfileParams struct {
 	Name        string
 	Description string
 	UserName    string
-	Draft       MihomoProfileDocument
+	Document    MihomoProfileDocument
 }
 
 func (db *DB) CreateMihomoProfile(ctx context.Context, params CreateMihomoProfileParams) (MihomoProfile, error) {
@@ -68,7 +57,11 @@ func (db *DB) CreateMihomoProfile(ctx context.Context, params CreateMihomoProfil
 	if err != nil {
 		return MihomoProfile{}, err
 	}
-	documentJSON, err := marshalMihomoProfileDocument(params.Draft)
+	document, err := db.ResolveMihomoProfileDocument(ctx, params.Document)
+	if err != nil {
+		return MihomoProfile{}, err
+	}
+	documentJSON, err := marshalMihomoProfileDocument(document)
 	if err != nil {
 		return MihomoProfile{}, err
 	}
@@ -96,19 +89,24 @@ func (db *DB) GetMihomoProfile(ctx context.Context, profileID string) (MihomoPro
 		}
 		return MihomoProfile{}, err
 	}
-	return mihomoProfileFromRow(
+	profile, err := mihomoProfileFromRow(
 		row.ID,
 		row.Name,
 		row.Description,
 		row.ProxyUserID,
 		row.ProxyUserName,
-		row.DraftDocumentJson,
-		row.PublishedRevisionID,
-		row.PublishedVersion,
-		row.PublishedDocumentJson,
+		row.DocumentJson,
 		row.CreatedAt,
 		row.UpdatedAt,
 	)
+	if err != nil {
+		return MihomoProfile{}, err
+	}
+	profile.Document, err = db.ResolveMihomoProfileDocument(ctx, profile.Document)
+	if err != nil {
+		return MihomoProfile{}, fmt.Errorf("resolve Mihomo profile %q templates: %w", profile.Name, err)
+	}
+	return profile, nil
 }
 
 func (db *DB) ListMihomoProfiles(ctx context.Context) ([]MihomoProfile, error) {
@@ -124,124 +122,43 @@ func (db *DB) ListMihomoProfiles(ctx context.Context) ([]MihomoProfile, error) {
 			row.Description,
 			row.ProxyUserID,
 			row.ProxyUserName,
-			row.DraftDocumentJson,
-			row.PublishedRevisionID,
-			row.PublishedVersion,
-			row.PublishedDocumentJson,
+			row.DocumentJson,
 			row.CreatedAt,
 			row.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
+		profile.Document, err = db.ResolveMihomoProfileDocument(ctx, profile.Document)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Mihomo profile %q templates: %w", profile.Name, err)
+		}
 		profiles = append(profiles, profile)
 	}
 	return profiles, nil
 }
 
-func (db *DB) UpdateMihomoProfileDraft(
+func (db *DB) UpdateMihomoProfileDocument(
 	ctx context.Context,
 	profileID string,
 	document MihomoProfileDocument,
 ) (MihomoProfile, error) {
-	documentJSON, err := marshalMihomoProfileDocument(document)
+	resolved, err := db.ResolveMihomoProfileDocument(ctx, document)
 	if err != nil {
 		return MihomoProfile{}, err
 	}
-	affected, err := db.q.UpdateMihomoProfileDraft(ctx, store.UpdateMihomoProfileDraftParams{
-		DraftDocumentJson: documentJSON,
-		ID:                strings.TrimSpace(profileID),
+	documentJSON, err := marshalMihomoProfileDocument(resolved)
+	if err != nil {
+		return MihomoProfile{}, err
+	}
+	affected, err := db.q.UpdateMihomoProfileDocument(ctx, store.UpdateMihomoProfileDocumentParams{
+		DocumentJson: documentJSON,
+		ID:           strings.TrimSpace(profileID),
 	})
 	if err != nil {
 		return MihomoProfile{}, err
 	}
 	if err := requireAffected(affected, "Mihomo profile", profileID); err != nil {
-		return MihomoProfile{}, err
-	}
-	return db.GetMihomoProfile(ctx, profileID)
-}
-
-func (db *DB) PublishMihomoProfile(ctx context.Context, profileID string) (MihomoProfileRevision, error) {
-	profileID = strings.TrimSpace(profileID)
-	var published MihomoProfileRevision
-	err := db.withTx(ctx, func(q *store.Queries) error {
-		profile, err := q.GetMihomoProfile(ctx, profileID)
-		if err != nil {
-			return err
-		}
-		document, err := unmarshalMihomoProfileDocument(profile.DraftDocumentJson)
-		if err != nil {
-			return err
-		}
-		if _, err := marshalMihomoProfileDocument(document); err != nil {
-			return err
-		}
-		version, err := q.NextMihomoProfileVersion(ctx, profileID)
-		if err != nil {
-			return err
-		}
-		revisionID, err := id.New("mhpr")
-		if err != nil {
-			return err
-		}
-		if err := q.CreateMihomoProfileRevision(ctx, store.CreateMihomoProfileRevisionParams{
-			ID: revisionID, ProfileID: profileID, Version: version, DocumentJson: profile.DraftDocumentJson,
-		}); err != nil {
-			return err
-		}
-		if err := q.PublishMihomoProfileRevision(ctx, store.PublishMihomoProfileRevisionParams{
-			ProfileID: profileID, RevisionID: revisionID,
-		}); err != nil {
-			return err
-		}
-		row, err := q.GetMihomoProfileRevision(ctx, store.GetMihomoProfileRevisionParams{
-			ID: revisionID, ProfileID: profileID,
-		})
-		if err != nil {
-			return err
-		}
-		published, err = mihomoRevisionFromRow(row)
-		return err
-	})
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return MihomoProfileRevision{}, fmt.Errorf("Mihomo profile %q not found", profileID)
-		}
-		return MihomoProfileRevision{}, err
-	}
-	return published, nil
-}
-
-func (db *DB) ListMihomoProfileRevisions(ctx context.Context, profileID string) ([]MihomoProfileRevision, error) {
-	rows, err := db.q.ListMihomoProfileRevisions(ctx, strings.TrimSpace(profileID))
-	if err != nil {
-		return nil, err
-	}
-	revisions := make([]MihomoProfileRevision, 0, len(rows))
-	for _, row := range rows {
-		revision, err := mihomoRevisionFromRow(row)
-		if err != nil {
-			return nil, err
-		}
-		revisions = append(revisions, revision)
-	}
-	return revisions, nil
-}
-
-func (db *DB) RollbackMihomoProfile(ctx context.Context, profileID, revisionID string) (MihomoProfile, error) {
-	profileID = strings.TrimSpace(profileID)
-	revisionID = strings.TrimSpace(revisionID)
-	if _, err := db.q.GetMihomoProfileRevision(ctx, store.GetMihomoProfileRevisionParams{
-		ID: revisionID, ProfileID: profileID,
-	}); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return MihomoProfile{}, fmt.Errorf("revision %q does not belong to Mihomo profile %q", revisionID, profileID)
-		}
-		return MihomoProfile{}, err
-	}
-	if err := db.q.PublishMihomoProfileRevision(ctx, store.PublishMihomoProfileRevisionParams{
-		ProfileID: profileID, RevisionID: revisionID,
-	}); err != nil {
 		return MihomoProfile{}, err
 	}
 	return db.GetMihomoProfile(ctx, profileID)
@@ -256,85 +173,38 @@ func (db *DB) AssignMihomoProfileToUser(ctx context.Context, userName, profileID
 	if err != nil {
 		return err
 	}
-	if profile.PublishedRevisionID == "" {
-		return fmt.Errorf("Mihomo profile %q has not been published", profile.Name)
-	}
 	return db.q.AssignMihomoProfileToUser(ctx, store.AssignMihomoProfileToUserParams{
 		ProxyUserID: user.ID,
 		ProfileID:   profile.ID,
 	})
 }
 
-func (db *DB) GetPublishedMihomoProfileForUser(ctx context.Context, userName string) (MihomoProfileRevision, error) {
+func (db *DB) GetMihomoProfileDocumentForUser(ctx context.Context, userName string) (MihomoProfileDocument, error) {
 	profileID, err := db.q.GetMihomoProfileIDForUser(ctx, normalizeName(userName))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return MihomoProfileRevision{}, fmt.Errorf("proxy user %q not found", userName)
+			return MihomoProfileDocument{}, fmt.Errorf("proxy user %q not found", userName)
 		}
-		return MihomoProfileRevision{}, err
+		return MihomoProfileDocument{}, err
 	}
 	profile, err := db.GetMihomoProfile(ctx, profileID)
 	if err != nil {
-		return MihomoProfileRevision{}, err
+		return MihomoProfileDocument{}, err
 	}
-	if profile.PublishedRevisionID == "" {
-		return MihomoProfileRevision{}, fmt.Errorf("Mihomo profile %q has not been published", profile.Name)
-	}
-	row, err := db.q.GetMihomoProfileRevision(ctx, store.GetMihomoProfileRevisionParams{
-		ID: profile.PublishedRevisionID, ProfileID: profile.ID,
-	})
-	if err != nil {
-		return MihomoProfileRevision{}, err
-	}
-	return mihomoRevisionFromRow(row)
-}
-
-func (db *DB) GetPublishedMihomoProfile(ctx context.Context, profileID string) (MihomoProfileRevision, error) {
-	profile, err := db.GetMihomoProfile(ctx, profileID)
-	if err != nil {
-		return MihomoProfileRevision{}, err
-	}
-	if profile.PublishedRevisionID == "" {
-		return MihomoProfileRevision{}, fmt.Errorf("Mihomo profile %q has not been published", profile.Name)
-	}
-	row, err := db.q.GetMihomoProfileRevision(ctx, store.GetMihomoProfileRevisionParams{
-		ID: profile.PublishedRevisionID, ProfileID: profile.ID,
-	})
-	if err != nil {
-		return MihomoProfileRevision{}, err
-	}
-	return mihomoRevisionFromRow(row)
+	return profile.Document, nil
 }
 
 func mihomoProfileFromRow(
-	id, name, description, proxyUserID, proxyUserName, draftJSON, publishedRevisionID string,
-	publishedVersion int64,
-	publishedJSON, createdAt, updatedAt string,
+	id, name, description, proxyUserID, proxyUserName, documentJSON, createdAt, updatedAt string,
 ) (MihomoProfile, error) {
-	draft, err := unmarshalMihomoProfileDocument(draftJSON)
+	document, err := unmarshalMihomoProfileDocument(documentJSON)
 	if err != nil {
-		return MihomoProfile{}, fmt.Errorf("decode Mihomo profile %q draft: %w", name, err)
-	}
-	published, err := unmarshalMihomoProfileDocument(publishedJSON)
-	if err != nil {
-		return MihomoProfile{}, fmt.Errorf("decode Mihomo profile %q publication: %w", name, err)
+		return MihomoProfile{}, fmt.Errorf("decode Mihomo profile %q document: %w", name, err)
 	}
 	return MihomoProfile{
 		ID: id, Name: name, Description: description,
-		ProxyUserID: proxyUserID, ProxyUserName: proxyUserName, Draft: draft,
-		PublishedRevisionID: publishedRevisionID, PublishedVersion: publishedVersion,
-		Published: published, CreatedAt: createdAt, UpdatedAt: updatedAt,
-	}, nil
-}
-
-func mihomoRevisionFromRow(row store.MihomoProfileRevision) (MihomoProfileRevision, error) {
-	document, err := unmarshalMihomoProfileDocument(row.DocumentJson)
-	if err != nil {
-		return MihomoProfileRevision{}, fmt.Errorf("decode Mihomo profile revision %q: %w", row.ID, err)
-	}
-	return MihomoProfileRevision{
-		ID: row.ID, ProfileID: row.ProfileID, Version: row.Version,
-		Document: document, CreatedAt: row.CreatedAt,
+		ProxyUserID: proxyUserID, ProxyUserName: proxyUserName, Document: document,
+		CreatedAt: createdAt, UpdatedAt: updatedAt,
 	}, nil
 }
 

@@ -45,13 +45,16 @@ Current established libraries:
   workbench. Workers, Mihomo JSON Schema, and JavaScript declarations are
   bundled locally; the editor does not fetch schemas or code from a CDN.
 
-The Mihomo route follows the inventory-page pattern: horizontal underline tabs
-switch between the default configuration table and the global rewrite-template
-table. Creating a configuration is a two-step flow (proxy source user, then
-initial pipeline). Editing uses a two-column workbench with the ordered,
-switchable pipeline on the left and Monaco on the right. Template snapshots are
-read-only there; configuration-scoped custom processors remain editable. The
-Preview config action renders the complete unsaved pipeline output.
+The Mihomo inventory follows the standard page pattern: horizontal underline
+tabs switch between the configuration table and the global rewrite-template
+table. Creating and editing use refresh-safe nested routes instead of dialogs:
+`/mihomo-profiles/new` and `/mihomo-profiles/:profile/edit`. The workbench keeps
+the ordered, switchable pipeline on the left and Monaco on the right. Linked
+templates are read-only in a configuration and resolve their latest saved
+content on every preview or subscription request; configuration-scoped custom
+processors remain editable. Saving validates the complete output and makes the
+configuration immediately eligible for a subscription link—there is no Mihomo
+draft/publish lifecycle.
 
 Do not reintroduce native `<select>` elements for normal app dropdowns. Use the
 native Kumo `Select` (with `Select.Option` children) from `@cloudflare/kumo`.

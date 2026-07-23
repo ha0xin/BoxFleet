@@ -71,6 +71,32 @@ func (db *DB) ListMihomoRewriteTemplates(ctx context.Context) ([]MihomoRewriteTe
 	return result, nil
 }
 
+// ResolveMihomoProfileDocument replaces every template-backed processor's
+// display metadata and source with the template's current values. The profile
+// retains only ordering, enabled state, and the template reference as its own
+// configuration; template edits therefore affect the next preview or request.
+func (db *DB) ResolveMihomoProfileDocument(
+	ctx context.Context,
+	document MihomoProfileDocument,
+) (MihomoProfileDocument, error) {
+	resolved := MihomoProfileDocument{Rewrites: make([]MihomoRewrite, len(document.Rewrites))}
+	copy(resolved.Rewrites, document.Rewrites)
+	for index := range resolved.Rewrites {
+		rewrite := &resolved.Rewrites[index]
+		if strings.TrimSpace(rewrite.TemplateID) == "" {
+			continue
+		}
+		template, err := db.GetMihomoRewriteTemplate(ctx, rewrite.TemplateID)
+		if err != nil {
+			return MihomoProfileDocument{}, err
+		}
+		rewrite.Name = template.Name
+		rewrite.Kind = template.Kind
+		rewrite.Content = template.Content
+	}
+	return resolved, nil
+}
+
 func (db *DB) UpdateMihomoRewriteTemplate(ctx context.Context, templateID string, params UpdateMihomoRewriteTemplateParams) (MihomoRewriteTemplate, error) {
 	if err := validateMihomoRewriteTemplate(params.Name, params.Kind, params.Content); err != nil {
 		return MihomoRewriteTemplate{}, err

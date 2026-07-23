@@ -63,37 +63,6 @@ func (q *Queries) CreateMihomoProfile(ctx context.Context, arg CreateMihomoProfi
 	return err
 }
 
-const createMihomoProfileRevision = `-- name: CreateMihomoProfileRevision :exec
-INSERT INTO mihomo_profile_revisions (
-  id,
-  profile_id,
-  version,
-  document_json
-) VALUES (
-  ?1,
-  ?2,
-  ?3,
-  ?4
-)
-`
-
-type CreateMihomoProfileRevisionParams struct {
-	ID           string `json:"id"`
-	ProfileID    string `json:"profile_id"`
-	Version      int64  `json:"version"`
-	DocumentJson string `json:"document_json"`
-}
-
-func (q *Queries) CreateMihomoProfileRevision(ctx context.Context, arg CreateMihomoProfileRevisionParams) error {
-	_, err := q.db.ExecContext(ctx, createMihomoProfileRevision,
-		arg.ID,
-		arg.ProfileID,
-		arg.Version,
-		arg.DocumentJson,
-	)
-	return err
-}
-
 const createMihomoRewriteTemplate = `-- name: CreateMihomoRewriteTemplate :exec
 INSERT INTO mihomo_rewrite_templates (
   id, name, description, kind, content, built_in
@@ -129,31 +98,23 @@ SELECT
   p.description,
   COALESCE(p.proxy_user_id, '') AS proxy_user_id,
   COALESCE(u.name, '') AS proxy_user_name,
-  p.draft_document_json,
-  COALESCE(pub.revision_id, '') AS published_revision_id,
-  COALESCE(r.version, 0) AS published_version,
-  COALESCE(r.document_json, '{"rewrites":[]}') AS published_document_json,
+  p.draft_document_json AS document_json,
   p.created_at,
   p.updated_at
 FROM mihomo_profiles p
 LEFT JOIN proxy_users u ON u.id = p.proxy_user_id
-LEFT JOIN mihomo_profile_publications pub ON pub.profile_id = p.id
-LEFT JOIN mihomo_profile_revisions r ON r.id = pub.revision_id
 WHERE p.id = ?1
 `
 
 type GetMihomoProfileRow struct {
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	Description           string `json:"description"`
-	ProxyUserID           string `json:"proxy_user_id"`
-	ProxyUserName         string `json:"proxy_user_name"`
-	DraftDocumentJson     string `json:"draft_document_json"`
-	PublishedRevisionID   string `json:"published_revision_id"`
-	PublishedVersion      int64  `json:"published_version"`
-	PublishedDocumentJson string `json:"published_document_json"`
-	CreatedAt             string `json:"created_at"`
-	UpdatedAt             string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ProxyUserID   string `json:"proxy_user_id"`
+	ProxyUserName string `json:"proxy_user_name"`
+	DocumentJson  string `json:"document_json"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 func (q *Queries) GetMihomoProfile(ctx context.Context, id string) (GetMihomoProfileRow, error) {
@@ -165,10 +126,7 @@ func (q *Queries) GetMihomoProfile(ctx context.Context, id string) (GetMihomoPro
 		&i.Description,
 		&i.ProxyUserID,
 		&i.ProxyUserName,
-		&i.DraftDocumentJson,
-		&i.PublishedRevisionID,
-		&i.PublishedVersion,
-		&i.PublishedDocumentJson,
+		&i.DocumentJson,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -188,31 +146,6 @@ func (q *Queries) GetMihomoProfileIDForUser(ctx context.Context, proxyUserName s
 	var profile_id string
 	err := row.Scan(&profile_id)
 	return profile_id, err
-}
-
-const getMihomoProfileRevision = `-- name: GetMihomoProfileRevision :one
-SELECT id, profile_id, version, document_json, created_at
-FROM mihomo_profile_revisions
-WHERE id = ?1
-  AND profile_id = ?2
-`
-
-type GetMihomoProfileRevisionParams struct {
-	ID        string `json:"id"`
-	ProfileID string `json:"profile_id"`
-}
-
-func (q *Queries) GetMihomoProfileRevision(ctx context.Context, arg GetMihomoProfileRevisionParams) (MihomoProfileRevision, error) {
-	row := q.db.QueryRowContext(ctx, getMihomoProfileRevision, arg.ID, arg.ProfileID)
-	var i MihomoProfileRevision
-	err := row.Scan(
-		&i.ID,
-		&i.ProfileID,
-		&i.Version,
-		&i.DocumentJson,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const getMihomoRewriteTemplate = `-- name: GetMihomoRewriteTemplate :one
@@ -237,42 +170,6 @@ func (q *Queries) GetMihomoRewriteTemplate(ctx context.Context, id string) (Miho
 	return i, err
 }
 
-const listMihomoProfileRevisions = `-- name: ListMihomoProfileRevisions :many
-SELECT id, profile_id, version, document_json, created_at
-FROM mihomo_profile_revisions
-WHERE profile_id = ?1
-ORDER BY version DESC
-`
-
-func (q *Queries) ListMihomoProfileRevisions(ctx context.Context, profileID string) ([]MihomoProfileRevision, error) {
-	rows, err := q.db.QueryContext(ctx, listMihomoProfileRevisions, profileID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []MihomoProfileRevision
-	for rows.Next() {
-		var i MihomoProfileRevision
-		if err := rows.Scan(
-			&i.ID,
-			&i.ProfileID,
-			&i.Version,
-			&i.DocumentJson,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMihomoProfiles = `-- name: ListMihomoProfiles :many
 SELECT
   p.id,
@@ -280,32 +177,24 @@ SELECT
   p.description,
   COALESCE(p.proxy_user_id, '') AS proxy_user_id,
   COALESCE(u.name, '') AS proxy_user_name,
-  p.draft_document_json,
-  COALESCE(pub.revision_id, '') AS published_revision_id,
-  COALESCE(r.version, 0) AS published_version,
-  COALESCE(r.document_json, '{"rewrites":[]}') AS published_document_json,
+  p.draft_document_json AS document_json,
   p.created_at,
   p.updated_at
 FROM mihomo_profiles p
 LEFT JOIN proxy_users u ON u.id = p.proxy_user_id
-LEFT JOIN mihomo_profile_publications pub ON pub.profile_id = p.id
-LEFT JOIN mihomo_profile_revisions r ON r.id = pub.revision_id
 WHERE p.proxy_user_id IS NOT NULL
 ORDER BY p.updated_at DESC, p.name, p.id
 `
 
 type ListMihomoProfilesRow struct {
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	Description           string `json:"description"`
-	ProxyUserID           string `json:"proxy_user_id"`
-	ProxyUserName         string `json:"proxy_user_name"`
-	DraftDocumentJson     string `json:"draft_document_json"`
-	PublishedRevisionID   string `json:"published_revision_id"`
-	PublishedVersion      int64  `json:"published_version"`
-	PublishedDocumentJson string `json:"published_document_json"`
-	CreatedAt             string `json:"created_at"`
-	UpdatedAt             string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ProxyUserID   string `json:"proxy_user_id"`
+	ProxyUserName string `json:"proxy_user_name"`
+	DocumentJson  string `json:"document_json"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 func (q *Queries) ListMihomoProfiles(ctx context.Context) ([]ListMihomoProfilesRow, error) {
@@ -323,10 +212,7 @@ func (q *Queries) ListMihomoProfiles(ctx context.Context) ([]ListMihomoProfilesR
 			&i.Description,
 			&i.ProxyUserID,
 			&i.ProxyUserName,
-			&i.DraftDocumentJson,
-			&i.PublishedRevisionID,
-			&i.PublishedVersion,
-			&i.PublishedDocumentJson,
+			&i.DocumentJson,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -381,38 +267,7 @@ func (q *Queries) ListMihomoRewriteTemplates(ctx context.Context) ([]MihomoRewri
 	return items, nil
 }
 
-const nextMihomoProfileVersion = `-- name: NextMihomoProfileVersion :one
-SELECT COALESCE(MAX(version), 0) + 1
-FROM mihomo_profile_revisions
-WHERE profile_id = ?1
-`
-
-func (q *Queries) NextMihomoProfileVersion(ctx context.Context, profileID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, nextMihomoProfileVersion, profileID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const publishMihomoProfileRevision = `-- name: PublishMihomoProfileRevision :exec
-INSERT INTO mihomo_profile_publications (profile_id, revision_id)
-VALUES (?1, ?2)
-ON CONFLICT(profile_id) DO UPDATE SET
-  revision_id = excluded.revision_id,
-  published_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-`
-
-type PublishMihomoProfileRevisionParams struct {
-	ProfileID  string `json:"profile_id"`
-	RevisionID string `json:"revision_id"`
-}
-
-func (q *Queries) PublishMihomoProfileRevision(ctx context.Context, arg PublishMihomoProfileRevisionParams) error {
-	_, err := q.db.ExecContext(ctx, publishMihomoProfileRevision, arg.ProfileID, arg.RevisionID)
-	return err
-}
-
-const updateMihomoProfileDraft = `-- name: UpdateMihomoProfileDraft :execrows
+const updateMihomoProfileDocument = `-- name: UpdateMihomoProfileDocument :execrows
 UPDATE mihomo_profiles
 SET
   draft_document_json = ?1,
@@ -420,13 +275,13 @@ SET
 WHERE id = ?2
 `
 
-type UpdateMihomoProfileDraftParams struct {
-	DraftDocumentJson string `json:"draft_document_json"`
-	ID                string `json:"id"`
+type UpdateMihomoProfileDocumentParams struct {
+	DocumentJson string `json:"document_json"`
+	ID           string `json:"id"`
 }
 
-func (q *Queries) UpdateMihomoProfileDraft(ctx context.Context, arg UpdateMihomoProfileDraftParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updateMihomoProfileDraft, arg.DraftDocumentJson, arg.ID)
+func (q *Queries) UpdateMihomoProfileDocument(ctx context.Context, arg UpdateMihomoProfileDocumentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateMihomoProfileDocument, arg.DocumentJson, arg.ID)
 	if err != nil {
 		return 0, err
 	}

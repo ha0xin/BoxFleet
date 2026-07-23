@@ -19,12 +19,6 @@ func TestMihomoProfileSubscriptionTokensAreIndependentPerConfiguration(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PublishMihomoProfile(ctx, first.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.PublishMihomoProfile(ctx, second.ID); err != nil {
-		t.Fatal(err)
-	}
 	firstToken, err := store.IssueMihomoProfileSubscriptionToken(ctx, first.ID)
 	if err != nil {
 		t.Fatal(err)

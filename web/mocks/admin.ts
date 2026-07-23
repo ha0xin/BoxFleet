@@ -13,7 +13,6 @@ import type {
   MihomoPreview,
   MihomoProfile,
   MihomoProfileDocument,
-  MihomoProfileRevision,
   MihomoProfileSubscription,
   MihomoRewriteTemplate,
   NetworkEvent,
@@ -470,25 +469,16 @@ const mihomoProfiles: MihomoProfile[] = [
     description: "Default desktop subscription.",
     proxy_user_id: "user_alice",
     proxy_user_name: "alice",
-    draft: basicMihomoDocument,
-    published_revision_id: "mhpr_alice_1",
-    published_version: 1,
-    published: basicMihomoDocument,
+    document: basicMihomoDocument,
     created_at: iso(30 * DAY),
     updated_at: iso(DAY)
   }
 ];
-const mihomoRevisions = new Map<string, MihomoProfileRevision[]>([
-  [
-    "mhp_alice_desktop",
-    [{ id: "mhpr_alice_1", profile_id: "mhp_alice_desktop", version: 1, document: basicMihomoDocument, created_at: iso(30 * DAY) }]
-  ]
-]);
 const mihomoSubscriptions = new Map<string, MihomoProfileSubscription>();
 
 function mihomoPreview(): MihomoPreview {
   const yaml = `mixed-port: 7890\nmode: rule\ndns:\n  enable: true\nproxies:\n  - name: tokyo-reality\n    type: vless\nproxy-groups:\n  - name: PROXY\n    type: select\n    include-all-proxies: true\nrules:\n  - GEOIP,CN,DIRECT\n  - MATCH,PROXY\n`;
-  return { yaml, published_yaml: yaml, logs: [], diagnostics: [] };
+  return { yaml, logs: [], diagnostics: [] };
 }
 
 const configChanges = {
@@ -647,6 +637,7 @@ const routes: Route[] = [
   },
   { method: "GET", pattern: /^\/api\/admin\/proxies$/, handler: ({ query }) => query.has("limit") ? proxiesPage(query) : proxies.filter((proxy) => !proxy.deleted_at) },
   { method: "GET", pattern: /^\/api\/admin\/mihomo\/profiles$/, handler: () => mihomoProfiles },
+  { method: "GET", pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)$/, handler: ({ match }) => mihomoProfiles.find((item) => item.id === match?.[1]) ?? { ok: false } },
   { method: "GET", pattern: /^\/api\/admin\/mihomo\/rewrite-templates$/, handler: () => mihomoTemplates },
   {
     method: "POST",
@@ -666,7 +657,14 @@ const routes: Route[] = [
     pattern: /^\/api\/admin\/mihomo\/rewrite-templates\/([^/]+)$/,
     handler: ({ match, body }) => {
       const template = mihomoTemplates.find((item) => item.id === match?.[1]);
-      if (template && !template.built_in) Object.assign(template, body, { updated_at: new Date().toISOString() });
+      if (template && !template.built_in) {
+        Object.assign(template, body, { updated_at: new Date().toISOString() });
+        for (const profile of mihomoProfiles) {
+          for (const rewrite of profile.document.rewrites) {
+            if (rewrite.template_id === template.id) Object.assign(rewrite, { name: template.name, kind: template.kind, content: template.content });
+          }
+        }
+      }
       return template ?? { ok: true };
     }
   },
@@ -680,19 +678,14 @@ const routes: Route[] = [
         description: body?.description ?? "",
         proxy_user_id: users.find((user) => user.name === body?.user)?.id ?? "",
         proxy_user_name: body?.user ?? "",
-        draft: body?.draft ?? { rewrites: [] },
-        published_revision_id: "",
-        published_version: 0,
-        published: { rewrites: [] },
+        document: body?.document ?? { rewrites: [] },
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
       mihomoProfiles.push(profile);
-      mihomoRevisions.set(profile.id, []);
       return profile;
     }
   },
-  { method: "GET", pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/revisions$/, handler: ({ match }) => mihomoRevisions.get(match?.[1] ?? "") ?? [] },
   {
     method: "GET",
     pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/subscription$/,
@@ -718,46 +711,11 @@ const routes: Route[] = [
     pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)$/,
     handler: ({ match, body }) => {
       const profile = mihomoProfiles.find((item) => item.id === match?.[1]);
-      if (profile && body?.draft) {
-        profile.draft = body.draft;
+      if (profile && body?.document) {
+        profile.document = body.document;
         profile.updated_at = new Date().toISOString();
       }
       return profile ?? { ok: true };
-    }
-  },
-  {
-    method: "POST",
-    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/publish$/,
-    handler: ({ match }): MihomoProfileRevision => {
-      const profile = mihomoProfiles.find((item) => item.id === match?.[1])!;
-      const revisions = mihomoRevisions.get(profile.id) ?? [];
-      const revision: MihomoProfileRevision = {
-        id: `mhpr_${Date.now()}`,
-        profile_id: profile.id,
-        version: revisions.length + 1,
-        document: profile.draft,
-        created_at: new Date().toISOString()
-      };
-      revisions.unshift(revision);
-      mihomoRevisions.set(profile.id, revisions);
-      profile.published = profile.draft;
-      profile.published_revision_id = revision.id;
-      profile.published_version = revision.version;
-      return revision;
-    }
-  },
-  {
-    method: "POST",
-    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/rollback$/,
-    handler: ({ match, body }) => {
-      const profile = mihomoProfiles.find((item) => item.id === match?.[1])!;
-      const revision = (mihomoRevisions.get(profile.id) ?? []).find((item) => item.id === body?.revision_id);
-      if (revision) {
-        profile.published = revision.document;
-        profile.published_revision_id = revision.id;
-        profile.published_version = revision.version;
-      }
-      return profile;
     }
   },
   { method: "PUT", pattern: /^\/api\/admin\/users\/([^/]+)\/mihomo-profile$/, handler: () => mihomoProfiles[0] },

@@ -573,7 +573,7 @@ export function ConnectionInfoDialog({
               <div>
                 <h3 className="font-semibold text-kumo-default">Mihomo subscription</h3>
                 <p className="text-sm text-kumo-subtle">
-                  The primary URL contains inline <code>proxies:</code>, groups, DNS and published rules.
+                  The primary URL contains inline <code>proxies:</code>, groups, DNS and the latest saved rules.
                 </p>
               </div>
               <Button
@@ -738,8 +738,8 @@ export function ConnectionInfoDialog({
 
           <Banner
             variant="secondary"
-            title="Changes and publishing"
-            description="Inline proxies follow current access immediately; YAML and JavaScript changes affect clients only after the Mihomo profile is published. Publish node configuration changes before new credentials can connect."
+            title="Configuration behavior"
+            description="Inline proxies and saved YAML or JavaScript processors are rendered on every request. Publish node configuration changes before new credentials can connect."
             className="mt-4"
           />
 

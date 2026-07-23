@@ -1,20 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   ArrowsClockwiseIcon,
   BracketsCurlyIcon,
-  CheckCircleIcon,
   CodeIcon,
   CopyIcon,
   DotsThreeIcon,
-  FloppyDiskIcon,
   FunnelIcon,
   LinkSimpleIcon,
   PencilSimpleIcon,
   PlusIcon,
-  RocketLaunchIcon,
   SortAscendingIcon,
   SortDescendingIcon,
   TrashIcon
@@ -30,7 +28,6 @@ import type {
   MihomoPreview,
   MihomoProfile,
   MihomoProfileDocument,
-  MihomoProfileRevision,
   MihomoProfileSubscription,
   MihomoRewrite,
   MihomoRewriteTemplate
@@ -38,8 +35,8 @@ import type {
 
 type PageTab = "configurations" | "rewrites";
 type SortDirection = "asc" | "desc";
-type ConfigurationFilter = "all" | "published" | "unpublished";
-type ConfigurationSort = "name" | "user" | "processors" | "published" | "updated";
+type ConfigurationFilter = "all" | "yaml" | "javascript";
+type ConfigurationSort = "name" | "user" | "processors" | "updated";
 type TemplateFilter = "all" | "yaml" | "javascript";
 type TemplateSort = "name" | "type" | "availability" | "updated";
 
@@ -77,19 +74,14 @@ function customRewrite(kind: MihomoRewrite["kind"]): MihomoRewrite {
 }
 
 export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<PageTab>("configurations");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editorProfile, setEditorProfile] = useState<MihomoProfile | null>(null);
   const [subscriptionProfile, setSubscriptionProfile] = useState<MihomoProfile | null>(null);
   const [templateDialog, setTemplateDialog] = useState<MihomoRewriteTemplate | "new" | null>(null);
 
   const profilesQuery = useQuery({
     queryKey: ["admin", "mihomo-profiles"],
     queryFn: () => request<MihomoProfile[]>("/api/admin/mihomo/profiles")
-  });
-  const usersQuery = useQuery({
-    queryKey: ["admin", "users", "mihomo-configurations"],
-    queryFn: () => request<AdminUser[]>("/api/admin/users")
   });
   const templatesQuery = useQuery({
     queryKey: ["admin", "mihomo-rewrite-templates"],
@@ -98,14 +90,6 @@ export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
 
   const profiles = profilesQuery.data ?? [];
   const templates = templatesQuery.data ?? [];
-  const users = (usersQuery.data ?? []).filter((user) => !user.deleted_at);
-
-  useEffect(() => {
-    if (!editorProfile) return;
-    const current = profiles.find((profile) => profile.id === editorProfile.id);
-    if (current && current.updated_at !== editorProfile.updated_at) setEditorProfile(current);
-  }, [profiles, editorProfile]);
-
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Mihomo Profiles" />
@@ -117,7 +101,7 @@ export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
           title="Mihomo Profiles"
           description="Build complete Mihomo subscriptions from inline proxies and ordered rewrite pipelines."
           actions={
-            <Button variant="primary" icon={PlusIcon} onClick={() => tab === "configurations" ? setCreateOpen(true) : setTemplateDialog("new")}>
+            <Button variant="primary" icon={PlusIcon} onClick={() => tab === "configurations" ? navigate("/mihomo-profiles/new") : setTemplateDialog("new")}>
               {tab === "configurations" ? "New configuration" : "New rewrite"}
             </Button>
           }
@@ -135,30 +119,13 @@ export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
             />
           </div>
           {tab === "configurations" ? (
-            <ConfigurationInventory profiles={profiles} loading={profilesQuery.isLoading} error={profilesQuery.error} onEdit={setEditorProfile} onSubscription={setSubscriptionProfile} />
+            <ConfigurationInventory profiles={profiles} loading={profilesQuery.isLoading} error={profilesQuery.error} onEdit={(profile) => navigate(`/mihomo-profiles/${profile.id}/edit`)} onSubscription={setSubscriptionProfile} />
           ) : (
             <TemplateInventory templates={templates} loading={templatesQuery.isLoading} error={templatesQuery.error} onOpen={setTemplateDialog} />
           )}
         </div>
       </main>
 
-      {createOpen ? (
-        <CreateConfigurationDialog
-          request={request}
-          users={users}
-          templates={templates}
-          onClose={() => setCreateOpen(false)}
-          onCreated={(profile) => { setCreateOpen(false); setEditorProfile(profile); }}
-        />
-      ) : null}
-      {editorProfile ? (
-        <ConfigurationEditorDialog
-          request={request}
-          profile={editorProfile}
-          templates={templates}
-          onClose={() => setEditorProfile(null)}
-        />
-      ) : null}
       {subscriptionProfile ? (
         <SubscriptionLinkDialog request={request} profile={subscriptionProfile} onClose={() => setSubscriptionProfile(null)} />
       ) : null}
@@ -209,13 +176,12 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
   const rows = useMemo(() => profiles.filter((profile) => {
     const query = search.toLocaleLowerCase();
     const matchesSearch = !query || `${profile.name} ${profile.proxy_user_name}`.toLocaleLowerCase().includes(query);
-    const matchesFilter = filter === "all" || (filter === "published" ? profile.published_version > 0 : profile.published_version === 0);
+    const matchesFilter = filter === "all" || profile.document.rewrites.some((rewrite) => rewrite.kind === filter);
     return matchesSearch && matchesFilter;
   }).sort((left, right) => {
     const values: Record<ConfigurationSort, [string | number, string | number]> = {
       name: [left.name, right.name], user: [left.proxy_user_name, right.proxy_user_name],
-      processors: [left.draft.rewrites.length, right.draft.rewrites.length],
-      published: [left.published_version, right.published_version], updated: [left.updated_at, right.updated_at]
+      processors: [left.document.rewrites.length, right.document.rewrites.length], updated: [left.updated_at, right.updated_at]
     };
     return compareValue(values[sort][0], values[sort][1], direction);
   }), [profiles, search, filter, sort, direction]);
@@ -239,7 +205,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
         submit={() => { setSearch(searchInput.trim()); setPage(1); }}
         filter={filter}
         setFilter={(value) => { setFilter(value as ConfigurationFilter); setPage(1); }}
-        options={[{ value: "all", label: "All" }, { value: "published", label: "Published" }, { value: "unpublished", label: "Unpublished" }]}
+        options={[{ value: "all", label: "All" }, { value: "yaml", label: "YAML" }, { value: "javascript", label: "JavaScript" }]}
       />
       <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
         <div className="overflow-x-auto">
@@ -248,23 +214,20 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
               <SortHead label="Configuration" column="name" sort={sort} direction={direction} setSort={setSort} />
               <SortHead label="User" column="user" sort={sort} direction={direction} setSort={setSort} />
               <SortHead label="Processors" column="processors" sort={sort} direction={direction} setSort={setSort} />
-              <SortHead label="Status" column="published" sort={sort} direction={direction} setSort={setSort} />
               <SortHead label="Updated" column="updated" sort={sort} direction={direction} setSort={setSort} />
               <Table.Head className="text-right"><span className="sr-only">Actions</span></Table.Head>
             </Table.Row></Table.Header>
             <Table.Body>
-              {error ? <TableEmpty colSpan={6}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty> : loading ? <TableLoading colSpan={6} /> : visible.length ? visible.map((profile) => {
-                const enabled = profile.draft.rewrites.filter((rewrite) => rewrite.enabled).length;
-                const published = profile.published_version > 0;
+              {error ? <TableEmpty colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((profile) => {
+                const enabled = profile.document.rewrites.filter((rewrite) => rewrite.enabled).length;
                 return <Table.Row key={profile.id}>
                   <Table.Cell><div className="flex min-w-52 items-center gap-2"><BracketsCurlyIcon className="size-4 shrink-0 text-kumo-subtle" /><button type="button" className={rowLinkClassName} onClick={() => onEdit(profile)}>{profile.name}</button></div></Table.Cell>
                   <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{profile.proxy_user_name}</span></Table.Cell>
-                  <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.draft.rewrites.length} enabled</span></Table.Cell>
-                  <Table.Cell><span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${published ? "text-kumo-success" : "text-kumo-subtle"}`}>{published ? <CheckCircleIcon className="size-4" /> : <CodeIcon className="size-4" />}{published ? `Published · v${profile.published_version}` : "Unpublished"}</span></Table.Cell>
+                  <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.document.rewrites.length} enabled</span></Table.Cell>
                   <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(profile.updated_at)}</span></Table.Cell>
                   <Table.Cell className="text-right"><ConfigurationRowMenu profile={profile} onEdit={() => onEdit(profile)} onSubscription={() => onSubscription(profile)} /></Table.Cell>
                 </Table.Row>;
-              }) : <TableEmpty colSpan={6}>No configurations match this filter.</TableEmpty>}
+              }) : <TableEmpty colSpan={5}>No configurations match this filter.</TableEmpty>}
             </Table.Body>
           </Table>
         </div>
@@ -388,15 +351,77 @@ function InventoryPagination({ page, setPage, perPage, setPerPage, total }: { pa
   return <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1"><Pagination.Info>{({ pageShowingRange, totalCount }) => <span><strong>{pageShowingRange}</strong> of {totalCount} items</span>}</Pagination.Info><Pagination.Separator /><Pagination.PageSize value={perPage} onChange={(value) => { setPerPage(value); setPage(1); }} options={[10, 25, 50, 100]} label="Items per page:" /><Pagination.Controls controls="simple" /></Pagination>;
 }
 
-function CreateConfigurationDialog({
-  request, users, templates, onClose, onCreated
-}: {
+export function MihomoConfigurationPage({ request }: { request: AdminRequest }) {
+  const navigate = useNavigate();
+  const { profile: profileID } = useParams();
+  const creating = !profileID;
+  const usersQuery = useQuery({
+    queryKey: ["admin", "users", "mihomo-configurations"],
+    queryFn: () => request<AdminUser[]>("/api/admin/users"),
+    enabled: creating
+  });
+  const templatesQuery = useQuery({
+    queryKey: ["admin", "mihomo-rewrite-templates"],
+    queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates")
+  });
+  const profileQuery = useQuery({
+    queryKey: ["admin", "mihomo-profile", profileID],
+    queryFn: () => request<MihomoProfile>(`/api/admin/mihomo/profiles/${profileID}`),
+    enabled: !creating
+  });
+  const error = usersQuery.error ?? templatesQuery.error ?? profileQuery.error;
+  const loading = templatesQuery.isLoading || (creating ? usersQuery.isLoading : profileQuery.isLoading);
+
+  if (error) {
+    return (
+      <ConfigurationPageShell title="Mihomo configuration" description="Unable to load this configuration." actions={<Button variant="secondary" onClick={() => navigate("/mihomo-profiles")}>Back</Button>}>
+        <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} />
+      </ConfigurationPageShell>
+    );
+  }
+  if (loading || !templatesQuery.data) {
+    return (
+      <ConfigurationPageShell title={creating ? "New Mihomo configuration" : "Mihomo configuration"} description="Loading configuration workbench…">
+        <div className="flex min-h-72 items-center justify-center"><Loader size={20} /></div>
+      </ConfigurationPageShell>
+    );
+  }
+  if (creating) {
+    const users = (usersQuery.data ?? []).filter((user) => !user.deleted_at);
+    return <NewConfigurationWorkbench request={request} users={users} templates={templatesQuery.data} />;
+  }
+  if (!profileQuery.data) return null;
+  return <SavedConfigurationWorkbench key={`${profileQuery.data.id}:${profileQuery.data.updated_at}`} request={request} profile={profileQuery.data} templates={templatesQuery.data} />;
+}
+
+function ConfigurationPageShell({ title, description, actions, children }: {
+  title: string;
+  description: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-full flex-col bg-kumo-canvas">
+      <PageTopBar current="Mihomo Profiles" />
+      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
+        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
+      </div>
+      <main className="w-full grow bg-kumo-canvas">
+        <PageHeader title={title} description={description} actions={actions} />
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function NewConfigurationWorkbench({ request, users, templates }: {
   request: AdminRequest;
   users: AdminUser[];
   templates: MihomoRewriteTemplate[];
-  onClose: () => void;
-  onCreated: (profile: MihomoProfile) => void;
 }) {
+  const navigate = useNavigate();
   const basic = templates.find((template) => template.built_in) ?? templates[0];
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
@@ -407,42 +432,37 @@ function CreateConfigurationDialog({
     request,
     (req) => req("/api/admin/mihomo/profiles", {
       method: "POST",
-      body: JSON.stringify({ name: name.trim(), description: description.trim(), user, draft: document })
+      body: JSON.stringify({ name: name.trim(), description: description.trim(), user, document })
     }),
-    { onSuccess: onCreated }
+    { onSuccess: (profile) => navigate(`/mihomo-profiles/${profile.id}/edit`) }
   );
   const userItems = useMemo(() => Object.fromEntries(users.map((item) => [item.name, item.display_name || item.name])), [users]);
 
   return (
-    <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="xl" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
-        <Dialog.Title className="text-xl font-semibold text-kumo-default">New Mihomo configuration</Dialog.Title>
-        <Dialog.Description className="mb-4 text-kumo-subtle">Step {step} of 2 · {step === 1 ? "Choose the proxy source" : "Build the initial rewrite pipeline"}</Dialog.Description>
+    <ConfigurationPageShell
+      title="New Mihomo configuration"
+      description={`Step ${step} of 2 · ${step === 1 ? "Choose the proxy source" : "Build the initial rewrite pipeline"}`}
+      actions={<Button variant="secondary" onClick={() => navigate("/mihomo-profiles")}>Cancel</Button>}
+    >
         {create.error ? <Banner variant="error" title={create.error.message} /> : null}
         {step === 1 ? (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <Surface className="flex max-w-2xl flex-col gap-4 rounded-lg p-5">
             <Input label="Configuration name" value={name} onChange={(event) => setName(event.target.value)} />
             <Select label="Proxies from user" value={user} items={userItems} onValueChange={(value) => value && setUser(value)} />
-            <div className="sm:col-span-2">
-              <Input label="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
-            </div>
-            <div className="sm:col-span-2 rounded-lg border border-kumo-line bg-kumo-tint p-3 text-sm text-kumo-subtle">
-              This user can own multiple configurations. Each one receives its own published revision and subscription URL.
-            </div>
-          </div>
+            <Input label="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
+          </Surface>
         ) : (
           <PipelineEditor document={document} setDocument={setDocument} templates={templates} />
         )}
-        <div className="mt-5 flex justify-between gap-2">
-          <Button variant="secondary" onClick={step === 1 ? onClose : () => setStep(1)}>{step === 1 ? "Cancel" : "Back"}</Button>
+        <div className="sticky bottom-0 z-10 flex justify-between gap-2 border-t border-kumo-line bg-kumo-canvas py-3">
+          <Button variant="secondary" onClick={step === 1 ? () => navigate("/mihomo-profiles") : () => setStep(1)}>{step === 1 ? "Cancel" : "Back"}</Button>
           {step === 1 ? (
             <Button disabled={!name.trim() || !user} onClick={() => setStep(2)}>Continue</Button>
           ) : (
             <Button loading={create.isPending} disabled={!document.rewrites.length} onClick={() => create.mutate({})}>Create configuration</Button>
           )}
         </div>
-      </Dialog>
-    </Dialog.Root>
+    </ConfigurationPageShell>
   );
 }
 
@@ -512,8 +532,8 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3 rounded-lg bg-kumo-canvas p-4">
-            <p className="text-sm text-kumo-subtle">{profile.published_version ? "No subscription link has been generated." : "Publish this configuration before generating its link."}</p>
-            <Button size="sm" icon={<LinkSimpleIcon />} disabled={!profile.published_version} loading={generate.isPending} onClick={() => generate.mutate(undefined)}>Generate link</Button>
+            <p className="text-sm text-kumo-subtle">No subscription link has been generated.</p>
+            <Button size="sm" icon={<LinkSimpleIcon />} loading={generate.isPending} onClick={() => generate.mutate(undefined)}>Generate link</Button>
           </div>
         )}
         <div className="mt-5 flex justify-end"><Button variant="secondary" onClick={onClose}>Close</Button></div>
@@ -522,47 +542,39 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
   );
 }
 
-function ConfigurationEditorDialog({ request, profile, templates, onClose }: {
+function SavedConfigurationWorkbench({ request, profile, templates }: {
   request: AdminRequest;
   profile: MihomoProfile;
   templates: MihomoRewriteTemplate[];
-  onClose: () => void;
 }) {
-  const [document, setDocument] = useState(() => copyDocument(profile.draft));
+  const navigate = useNavigate();
+  const [document, setDocument] = useState(() => copyDocument(profile.document));
   const [preview, setPreview] = useState<MihomoPreview | null>(null);
-  const dirty = JSON.stringify(document) !== JSON.stringify(profile.draft);
-  const save = useAdminMutation<MihomoProfileDocument, MihomoProfile>(request, (req, draft) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ draft }) })
+  const dirty = JSON.stringify(document) !== JSON.stringify(profile.document);
+  const save = useAdminMutation<MihomoProfileDocument, MihomoProfile>(request, (req, nextDocument) =>
+    req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ document: nextDocument }) })
   );
-  const runPreview = useAdminMutation<MihomoProfileDocument, MihomoPreview>(request, (req, draft) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}/preview`, { method: "POST", body: JSON.stringify({ draft }) }),
+  const runPreview = useAdminMutation<MihomoProfileDocument, MihomoPreview>(request, (req, nextDocument) =>
+    req(`/api/admin/mihomo/profiles/${profile.id}/preview`, { method: "POST", body: JSON.stringify({ document: nextDocument }) }),
     { onSuccess: setPreview }
   );
-  const publish = useAdminMutation<MihomoProfileDocument, MihomoProfileRevision>(request, async (req, draft) => {
-    await req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ draft }) });
-    return req(`/api/admin/mihomo/profiles/${profile.id}/publish`, { method: "POST", body: JSON.stringify({}) });
-  });
-  const error = save.error ?? runPreview.error ?? publish.error;
-  const busy = save.isPending || runPreview.isPending || publish.isPending;
+  const error = save.error ?? runPreview.error;
+  const busy = save.isPending || runPreview.isPending;
 
   return (
-    <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="xl" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <Dialog.Title className="text-xl font-semibold text-kumo-default">{profile.name}</Dialog.Title>
-            <Dialog.Description className="text-kumo-subtle">Proxies from {profile.proxy_user_name} · published {profile.published_version ? `v${profile.published_version}` : "never"}</Dialog.Description>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" icon={<FloppyDiskIcon />} disabled={!dirty || busy} onClick={() => save.mutate(document)}>Save draft</Button>
-            <Button variant="secondary" icon={<CodeIcon />} loading={runPreview.isPending} disabled={busy} onClick={() => runPreview.mutate(document)}>Preview config</Button>
-            <Button icon={<RocketLaunchIcon />} loading={publish.isPending} disabled={busy} onClick={() => publish.mutate(document)}>Publish</Button>
-          </div>
-        </div>
-        {error ? <div className="mt-4"><Banner variant="error" title={error.message} /></div> : null}
-        <div className="mt-5">
-          <PipelineEditor document={document} setDocument={(next) => { setDocument(next); setPreview(null); }} templates={templates} />
-        </div>
+    <ConfigurationPageShell
+      title={profile.name}
+      description={`Proxies from ${profile.proxy_user_name} · linked templates always use their latest saved content`}
+      actions={
+        <>
+          <Button variant="secondary" onClick={() => navigate("/mihomo-profiles")}>Back</Button>
+          <Button variant="secondary" icon={<CodeIcon />} loading={runPreview.isPending} disabled={busy} onClick={() => runPreview.mutate(document)}>Preview config</Button>
+          <Button loading={save.isPending} disabled={!dirty || busy} onClick={() => save.mutate(document)}>Save</Button>
+        </>
+      }
+    >
+        {error ? <Banner variant="error" title={error.message} /> : null}
+        <PipelineEditor document={document} setDocument={(next) => { setDocument(next); setPreview(null); }} templates={templates} />
 
         {preview ? (
           <Surface className="mt-5 rounded-lg p-4">
@@ -576,10 +588,7 @@ function ConfigurationEditorDialog({ request, profile, templates, onClose }: {
             <MihomoCodeEditor kind="yaml" value={preview.yaml} readOnly />
           </Surface>
         ) : null}
-
-        <div className="mt-5 flex justify-end"><Button variant="secondary" onClick={onClose}>Close</Button></div>
-      </Dialog>
-    </Dialog.Root>
+    </ConfigurationPageShell>
   );
 }
 
@@ -618,11 +627,11 @@ function PipelineEditor({ document, setDocument, templates }: {
   }
 
   return (
-    <div className="grid min-h-[38rem] gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
+    <div className="grid min-h-[38rem] gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
       <Surface className="rounded-lg p-3">
         <div className="mb-3">
           <Text bold>Processor pipeline</Text>
-          <p className="text-xs text-kumo-subtle">Runs from top to bottom. Disabled processors remain saved and published.</p>
+          <p className="text-xs text-kumo-subtle">Runs from top to bottom. Disabled processors remain saved.</p>
         </div>
         <div className="flex flex-col gap-2">
           {document.rewrites.map((rewrite, index) => (
@@ -676,7 +685,7 @@ function PipelineEditor({ document, setDocument, templates }: {
                 {selected.template_id ? (
                   <>
                     <Text bold>{selected.name}</Text>
-                    <p className="text-xs text-kumo-subtle">Template snapshot · read-only in this configuration</p>
+                    <p className="text-xs text-kumo-subtle">Linked template · always uses the latest saved version</p>
                   </>
                 ) : (
                   <Input label="Processor name" value={selected.name} onChange={(event) => update(selected.id, { name: event.target.value })} />
@@ -722,7 +731,7 @@ function RewriteTemplateDialog({ request, template, onClose }: {
     <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
       <Dialog size="xl" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">{readOnly ? "Preview rewrite template" : existing ? "Edit rewrite template" : "New rewrite template"}</Dialog.Title>
-        <Dialog.Description className="mb-4 text-kumo-subtle">Templates are reusable globally. Adding one to a configuration stores a read-only snapshot.</Dialog.Description>
+        <Dialog.Description className="mb-4 text-kumo-subtle">Templates are reusable globally. Saved changes apply to every linked configuration.</Dialog.Description>
         {save.error ? <Banner variant="error" title={save.error.message} /> : null}
         <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_14rem]">
           <Input label="Name" value={name} disabled={readOnly} onChange={(event) => setName(event.target.value)} />

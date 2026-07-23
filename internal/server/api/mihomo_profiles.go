@@ -15,20 +15,15 @@ type createMihomoProfileRequest struct {
 	Name        string                   `json:"name"`
 	Description string                   `json:"description"`
 	User        string                   `json:"user"`
-	Draft       db.MihomoProfileDocument `json:"draft"`
+	Document    db.MihomoProfileDocument `json:"document"`
 }
 
 type updateMihomoProfileRequest struct {
-	Draft db.MihomoProfileDocument `json:"draft"`
+	Document db.MihomoProfileDocument `json:"document"`
 }
 
-type mihomoProfileUserRequest struct {
-	User  string                    `json:"user"`
-	Draft *db.MihomoProfileDocument `json:"draft,omitempty"`
-}
-
-type mihomoProfileRollbackRequest struct {
-	RevisionID string `json:"revision_id"`
+type mihomoProfilePreviewRequest struct {
+	Document *db.MihomoProfileDocument `json:"document,omitempty"`
 }
 
 type mihomoRewriteTemplateRequest struct {
@@ -43,10 +38,9 @@ type assignMihomoProfileRequest struct {
 }
 
 type mihomoPreviewResponse struct {
-	YAML          string              `json:"yaml"`
-	PublishedYAML string              `json:"published_yaml"`
-	Logs          []mihomo.LogEntry   `json:"logs"`
-	Diagnostics   []mihomo.Diagnostic `json:"diagnostics"`
+	YAML        string              `json:"yaml"`
+	Logs        []mihomo.LogEntry   `json:"logs"`
+	Diagnostics []mihomo.Diagnostic `json:"diagnostics"`
 }
 
 func adminListMihomoProfilesHandler(store *db.DB) http.HandlerFunc {
@@ -114,8 +108,12 @@ func adminCreateMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
+		if err := validateSavedMihomoProfile(r, store, payload.User, payload.Document); err != nil {
+			writeAdminError(w, err)
+			return
+		}
 		profile, err := store.CreateMihomoProfile(r.Context(), db.CreateMihomoProfileParams{
-			Name: payload.Name, Description: payload.Description, UserName: payload.User, Draft: payload.Draft,
+			Name: payload.Name, Description: payload.Description, UserName: payload.User, Document: payload.Document,
 		})
 		if err != nil {
 			writeAdminError(w, err)
@@ -143,7 +141,17 @@ func adminUpdateMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		profile, err := store.UpdateMihomoProfileDraft(r.Context(), chi.URLParam(r, "profile"), payload.Draft)
+		profileID := chi.URLParam(r, "profile")
+		current, err := store.GetMihomoProfile(r.Context(), profileID)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		if err := validateSavedMihomoProfile(r, store, current.ProxyUserName, payload.Document); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		profile, err := store.UpdateMihomoProfileDocument(r.Context(), profileID, payload.Document)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -154,7 +162,7 @@ func adminUpdateMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 
 func adminPreviewMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var payload mihomoProfileUserRequest
+		var payload mihomoProfilePreviewRequest
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeAdminError(w, err)
 			return
@@ -164,59 +172,18 @@ func adminPreviewMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		draft := profile.Draft
-		if payload.Draft != nil {
-			draft = *payload.Draft
+		document := profile.Document
+		if payload.Document != nil {
+			document = *payload.Document
 		}
-		result, err := render.RenderMihomoConfiguration(r.Context(), store, profile.ProxyUserName, draft)
+		result, err := render.RenderMihomoConfiguration(r.Context(), store, profile.ProxyUserName, document)
 		if err != nil {
 			writeAdminError(w, err)
 			return
-		}
-		publishedYAML := ""
-		if profile.PublishedRevisionID != "" {
-			published, publishedErr := render.RenderMihomoConfiguration(r.Context(), store, profile.ProxyUserName, profile.Published)
-			if publishedErr != nil {
-				writeAdminError(w, publishedErr)
-				return
-			}
-			publishedYAML = string(published.YAML)
 		}
 		writeJSON(w, mihomoPreviewResponse{
-			YAML: string(result.YAML), PublishedYAML: publishedYAML,
-			Logs: result.Logs, Diagnostics: result.Diagnostics,
+			YAML: string(result.YAML), Logs: result.Logs, Diagnostics: result.Diagnostics,
 		})
-	}
-}
-
-func adminPublishMihomoProfileHandler(store *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var payload mihomoProfileUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		profileID := chi.URLParam(r, "profile")
-		profile, err := store.GetMihomoProfile(r.Context(), profileID)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		result, err := render.RenderMihomoConfiguration(r.Context(), store, profile.ProxyUserName, profile.Draft)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		if mihomo.HasErrors(result.Diagnostics) {
-			writeAdminError(w, &mihomoProfileValidationError{Diagnostics: result.Diagnostics})
-			return
-		}
-		revision, err := store.PublishMihomoProfile(r.Context(), profileID)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		writeJSON(w, revision)
 	}
 }
 
@@ -231,31 +198,15 @@ func (e *mihomoProfileValidationError) Error() string {
 	return "Mihomo profile validation failed: " + e.Diagnostics[0].Message
 }
 
-func adminListMihomoProfileRevisionsHandler(store *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		revisions, err := store.ListMihomoProfileRevisions(r.Context(), chi.URLParam(r, "profile"))
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		writeJSON(w, revisions)
+func validateSavedMihomoProfile(r *http.Request, store *db.DB, userName string, document db.MihomoProfileDocument) error {
+	result, err := render.RenderMihomoConfiguration(r.Context(), store, userName, document)
+	if err != nil {
+		return err
 	}
-}
-
-func adminRollbackMihomoProfileHandler(store *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var payload mihomoProfileRollbackRequest
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		profile, err := store.RollbackMihomoProfile(r.Context(), chi.URLParam(r, "profile"), payload.RevisionID)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		writeJSON(w, profile)
+	if mihomo.HasErrors(result.Diagnostics) {
+		return &mihomoProfileValidationError{Diagnostics: result.Diagnostics}
 	}
+	return nil
 }
 
 func adminAssignUserMihomoProfileHandler(store *db.DB) http.HandlerFunc {
@@ -277,17 +228,4 @@ func adminAssignUserMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 		}
 		writeJSON(w, profile)
 	}
-}
-
-func enabledMihomoRewrites(document db.MihomoProfileDocument) []mihomo.Rewrite {
-	rewrites := make([]mihomo.Rewrite, 0, len(document.Rewrites))
-	for _, rewrite := range document.Rewrites {
-		if !rewrite.Enabled {
-			continue
-		}
-		rewrites = append(rewrites, mihomo.Rewrite{
-			Name: rewrite.Name, Kind: mihomo.RewriteKind(rewrite.Kind), Content: rewrite.Content,
-		})
-	}
-	return rewrites
 }

@@ -38,6 +38,9 @@ const NetworkEventsPage = lazy(() =>
 const MihomoProfilesPage = lazy(() =>
   loadMihomoProfilesPage().then((module) => ({ default: module.MihomoProfilesPage }))
 );
+const MihomoConfigurationPage = lazy(() =>
+  loadMihomoProfilesPage().then((module) => ({ default: module.MihomoConfigurationPage }))
+);
 const NodesPage = lazy(() => loadNodesPage().then((module) => ({ default: module.NodesPage })));
 const OverviewPage = lazy(() => loadOverviewPage().then((module) => ({ default: module.OverviewPage })));
 const ProxiesPage = lazy(() => loadProxiesPage().then((module) => ({ default: module.ProxiesPage })));
@@ -128,6 +131,8 @@ function App() {
               <Route path="/proxies" element={<ProxiesPage request={request} />} />
               <Route path="/users" element={<UsersPage request={request} />} />
               <Route path="/mihomo-profiles" element={<MihomoProfilesPage request={request} />} />
+              <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage request={request} />} />
+              <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage request={request} />} />
               <Route path="/traffic" element={<ComingSoon />} />
               <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
               <Route path="/system-logs" element={<SystemLogsPage request={request} />} />

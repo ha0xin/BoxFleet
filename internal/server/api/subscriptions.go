@@ -109,12 +109,12 @@ func subscriptionMihomoProfileHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		if profileOK {
-			published, err := store.GetPublishedMihomoProfile(r.Context(), profileToken.ProfileID)
+			profile, err := store.GetMihomoProfile(r.Context(), profileToken.ProfileID)
 			if err != nil {
 				http.Error(w, "subscription is unavailable", http.StatusUnprocessableEntity)
 				return
 			}
-			result, err := render.RenderMihomoConfiguration(r.Context(), store, profileToken.ProxyUserName, published.Document)
+			result, err := render.RenderMihomoConfiguration(r.Context(), store, profileToken.ProxyUserName, profile.Document)
 			if err != nil || mihomo.HasErrors(result.Diagnostics) {
 				http.Error(w, "subscription is unavailable", http.StatusUnprocessableEntity)
 				return
