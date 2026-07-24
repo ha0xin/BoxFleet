@@ -7,7 +7,7 @@ binaries, or sing-box there.
 ## Layout
 
 ```text
-/opt/boxfleet/bin/{bf,boxfleet-server}
+/opt/boxfleet/bin/bfs
 /opt/boxfleet/server/boxfleet.db
 /opt/boxfleet/backups/
 /etc/boxfleet/server.env
@@ -31,33 +31,33 @@ gh release download "$VERSION" --dir /tmp/boxfleet-release
 
 `SHA256SUMS` names binaries below `artifacts/`. Individual GitHub downloads are
 flat, so either extract the release tarball or reconstruct that directory before
-checking every hash. Confirm both server-side candidates are x86-64 Linux
-executables.
+checking every hash. Confirm the server candidate is an x86-64 Linux
+executable.
 
 Upload only:
 
 ```text
-bf-<server-version>-linux-amd64
-boxfleet-server-<server-version>-linux-amd64
+bfs-<server-version>-linux-amd64
 ```
 
-Before stopping the service, verify their remote SHA256 values, run both with
-`--help`, and run the candidate `bf db status` against the production database.
+Before stopping the service, verify its remote SHA256 value and run it with
+`--help`.
 
 ## Replacement and rollback
 
 Use one remote `set -Eeuo pipefail` script with an `ERR` trap.
 
 1. Create `/opt/boxfleet/backups/pre-<version>-<UTC timestamp>/`.
-2. Back up current `bf` and `boxfleet-server`.
-3. If migrations are pending, also back up DB, WAL, and SHM files while the
-   service is stopped.
-4. Stop `boxfleet-server`, install candidates with mode `0755`, and start it.
+2. Back up the current server binary and `boxfleet-server.service` unit.
+3. Back up DB, WAL, and SHM files while the service is stopped.
+4. Stop `boxfleet-server`, install the candidate as `/opt/boxfleet/bin/bfs`
+   with mode `0755`, update `ExecStart`, run `systemctl daemon-reload`, and start it.
 5. Run all smoke checks before removing the trap.
 
 The trap must stop the candidate, restore binaries and any backed-up database
-files, then restart the old service. A release with no pending migration is a
-binary-only replacement.
+files plus the previous unit, run `systemctl daemon-reload`, then restart the old
+service. After a successful migration to `bfs`, remove the legacy
+`/opt/boxfleet/bin/boxfleet-server` binary.
 
 ## Smoke checks
 
@@ -66,7 +66,6 @@ Without exposing environment values, confirm:
 ```bash
 ssh azus 'curl -fsS http://127.0.0.1:18081/healthz'
 ssh azus 'sudo systemctl is-active boxfleet-server'
-ssh azus 'sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db status'
 ssh azus 'sudo journalctl -u boxfleet-server -n 30 --no-pager'
 ```
 

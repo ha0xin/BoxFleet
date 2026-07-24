@@ -63,8 +63,7 @@ jobs:
           server_ldflags="-s -w -X main.version=${{ steps.version.outputs.value }} -X main.agentVersion=${AGENT_REVISION}"
           agent_ldflags="-s -w -X main.version=${AGENT_REVISION}"
           boxfleet_version="${{ steps.version.outputs.value }}"
-          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.version=${boxfleet_version}" -o "dist/artifacts/bf-${boxfleet_version}-linux-amd64" ./cmd/bf
-          CGO_ENABLED=1 go build -trimpath -ldflags "$server_ldflags" -o "dist/artifacts/boxfleet-server-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-server
+          CGO_ENABLED=1 go build -trimpath -ldflags "$server_ldflags" -o "dist/artifacts/bfs-${boxfleet_version}-linux-amd64" ./cmd/bfs
           CGO_ENABLED=0 go build -trimpath -ldflags "$agent_ldflags" -o "dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64" ./cmd/boxfleet-agent
 
       - name: Build sing-box with V2Ray API
@@ -151,8 +150,7 @@ jobs:
             dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz \
             dist/SHA256SUMS \
             dist/boxfleet-update.json \
-            dist/artifacts/bf-${{ steps.version.outputs.value }}-linux-amd64 \
-            dist/artifacts/boxfleet-server-${{ steps.version.outputs.value }}-linux-amd64 \
+            dist/artifacts/bfs-${{ steps.version.outputs.value }}-linux-amd64 \
             dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64 \
             dist/artifacts/sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64 \
             --verify-tag \

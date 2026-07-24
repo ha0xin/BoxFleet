@@ -7,7 +7,7 @@ not edit both paths separately.
 
 ## What BoxFleet is
 
-A central server (`boxfleet-server`) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + `systemd` + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators drive the server with the `bf` CLI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
+A central server (`bfs`, the BoxFleet server) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + `systemd` + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators use the admin Web UI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
 
 Current target protocol is VLESS-Reality with `xtls-rprx-vision`; renderer rejects other protocols.
 
@@ -28,13 +28,9 @@ $(go env GOPATH)/bin/sqlc generate
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 
 # Local server (admin token is required by default — see "Admin auth")
-go run ./cmd/boxfleet-server --db /tmp/bf.db --admin-token devtoken
+go run ./cmd/bfs --db /tmp/bf.db --admin-token devtoken
 # Or for local development without a token:
-go run ./cmd/boxfleet-server --db /tmp/bf.db --allow-insecure-admin
-
-# CLI against a local db
-go run ./cmd/bf --db /tmp/bf.db db init
-go run ./cmd/bf --db /tmp/bf.db node create azus --public-host 1.2.3.4
+go run ./cmd/bfs --db /tmp/bf.db --allow-insecure-admin
 
 # Web UI dev (vite); build output is embedded into the server binary via go:embed
 npm --prefix web run dev
@@ -42,15 +38,14 @@ npm --prefix web run build
 
 # CI/CD mirrors these checks on GitHub:
 # - .github/workflows/ci.yml builds the embedded Web UI, runs Go tests, and runs go vet.
-# - .github/workflows/artifacts.yml builds downloadable Linux amd64 artifacts for bf, boxfleet-server, boxfleet-agent, and sing-box.
+# - .github/workflows/artifacts.yml builds downloadable Linux amd64 artifacts for bfs, boxfleet-agent, and sing-box.
 ```
 
 ## Architecture
 
-### Three binaries, two trust domains
+### Two binaries, two trust domains
 
-- `cmd/boxfleet-server` — central API + admin UI. Owns SQLite, renders sing-box configs, stores published config versions, accepts node reports.
-- `cmd/bf` — operator CLI. Opens the same SQLite directly (no server round-trip); runs migrations on demand via `withMigratedStore`. **Do not** introduce server round-trips here — `bf` is a local DB tool.
+- `cmd/bfs` — central API + admin UI. Owns SQLite, renders sing-box configs, stores published config versions, accepts node reports.
 - `cmd/boxfleet-agent` — runs on each node. Pulls config from server, runs `sing-box check`, atomically writes config, restarts `sing-box` via systemctl, reports back. Talks to server with bearer tokens; never trusts node-supplied identity (server overrides `NodeName` in all decoded payloads).
 
 ### Server-side data flow
@@ -68,7 +63,7 @@ queries/*.sql ──sqlc generate──▶ internal/server/store/sqlc/  (typed r
                                  internal/server/render/  (DB rows → sing-box JSON config)
 ```
 
-- `internal/server/db` is the only package allowed to touch sqlc-generated code. Everything else (api, render, cli) consumes the facade's domain types.
+- `internal/server/db` is the only package allowed to touch sqlc-generated code. Everything else (api and render) consumes the facade's domain types.
 - `proxy_details` and `proxy_access_details` SQL views flatten the joins so sqlc generates a single row type per query — this is why no `mapProxy(any)` type-switch exists anymore. Keep it that way: when adding a new proxy/access query, select from the view, not from raw tables.
 - API errors: `writeAdminError` returns 422 uniformly. If you need to distinguish NotFound, do it explicitly at the handler.
 
@@ -82,7 +77,7 @@ Payload structs live in `internal/model/` and are imported by both `internal/age
 
 Agent state (`State` in `internal/agent/agent.go`) tracks v2ray counter values plus a per-counter `CounterEpoch` to detect sing-box restarts (counter goes backwards → epoch++, treat current value as the delta). Do not switch to `reset=true` on v2ray `GetStats` — losing a single response loses traffic.
 
-Node lifecycle and disable semantics: a node is `pending` after bootstrap and becomes `active` on its first authenticated heartbeat (`RecordHeartbeat`). Disabling has two distinct paths that must stay distinct — **pause** (`PATCH /nodes/{node}` status / `bf node disable`) keeps the token valid; `GET /api/node/config` then returns `X-BoxFleet-Node-State: disabled` plus a valid no-inbound config (`render.RenderDisabledConfig`), and the agent stops `sing-box` while its daemon keeps polling. **Decommission** (`DELETE /nodes/{node}` / `bf node delete`) additionally revokes tokens (full cutoff). Token verification deliberately does **not** filter on node status — revocation is the kill switch, not the status — so do not re-add a `status != 'disabled'` clause to the node-token queries. The agent decides stop/restart from real `systemctl` `ActiveState`, never a persisted marker.
+Node lifecycle and disable semantics: a node is `pending` after bootstrap and becomes `active` on its first authenticated heartbeat (`RecordHeartbeat`). Disabling has two distinct paths that must stay distinct — **pause** (`PATCH /nodes/{node}` status) keeps the token valid; `GET /api/node/config` then returns `X-BoxFleet-Node-State: disabled` plus a valid no-inbound config (`render.RenderDisabledConfig`), and the agent stops `sing-box` while its daemon keeps polling. **Decommission** (`DELETE /nodes/{node}`) additionally revokes tokens (full cutoff). Token verification deliberately does **not** filter on node status — revocation is the kill switch, not the status — so do not re-add a `status != 'disabled'` clause to the node-token queries. The agent decides stop/restart from real `systemctl` `ActiveState`, never a persisted marker.
 
 ### Renderer and sing-box
 
@@ -92,7 +87,7 @@ Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the cli
 
 ### Web UI
 
-`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is built directly on **native Cloudflare Kumo** components. The previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` have been removed. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
+`web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is built directly on **native Cloudflare Kumo** components. The previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` have been removed. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `bfs` so embedded assets exist locally.
 
 Use the established frontend stack instead of hand-rolling UI behavior. See `docs/web-ui.md` for visual conventions and the Kumo CLI workflow.
 
@@ -114,15 +109,15 @@ Admin pages use client-side routes under the admin mount. Keep sidebar tabs link
 
 ## Admin auth
 
-`boxfleet-server` requires `--admin-token` (or `BOXFLEET_ADMIN_TOKEN`) by default. `--allow-insecure-admin` disables auth and logs a WARN — only for local dev. The `/api/node/*` paths use per-node bearer tokens (`bf node token issue <name>`) and are independent of admin auth.
+`bfs` requires `--admin-token` (or `BOXFLEET_ADMIN_TOKEN`) by default. `--allow-insecure-admin` disables auth and logs a WARN — only for local dev. The `/api/node/*` paths use per-node bearer tokens issued during Web UI enrollment or re-enrollment and are independent of admin auth.
 
 ## Library policy
 
-Use the established libraries listed in README (`cobra`, `viper`, `chi`, `goose`, `sqlc`, `zerolog`, `go-pretty/table`, `humanize`, `@cloudflare/kumo`, `@phosphor-icons/react`, etc.). Do not hand-roll command parsing, UUID generation, migration execution, SQL scanning, token hashing, routing, logging, byte-unit parsing, CLI table rendering, app UI primitives, or protocol clients.
+Use the established libraries listed in README (`cobra`, `viper`, `chi`, `goose`, `sqlc`, `zerolog`, `humanize`, `@cloudflare/kumo`, `@phosphor-icons/react`, etc.). Do not hand-roll command parsing, UUID generation, migration execution, SQL scanning, token hashing, routing, logging, byte-unit parsing, app UI primitives, or protocol clients.
 
 ## Tests
 
-Most coverage lives in `internal/agent`, `internal/cli/bf`, `internal/server/{api,db,render}`, `internal/v2raystats`. Renderer tests are golden-style: render against a fixed SQLite fixture, compare normalized JSON. SQLite tests use `t.TempDir()`. Agent tests fake out the `Runner` interface (`ExecRunner` is replaced) — never spawn real `sing-box` / `systemctl` / `journalctl` in unit tests. Real-node checks belong in the deployment smoke flow, not the regular test suite.
+Most coverage lives in `internal/agent`, `internal/server/{api,db,render}`, `internal/v2raystats`. Renderer tests are golden-style: render against a fixed SQLite fixture, compare normalized JSON. SQLite tests use `t.TempDir()`. Agent tests fake out the `Runner` interface (`ExecRunner` is replaced) — never spawn real `sing-box` / `systemctl` / `journalctl` in unit tests. Real-node checks belong in the deployment smoke flow, not the regular test suite.
 
 ## Docs to consult
 

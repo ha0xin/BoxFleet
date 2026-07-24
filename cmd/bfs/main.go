@@ -30,8 +30,9 @@ func main() {
 
 func newServerCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "boxfleet-server",
+		Use:           "bfs",
 		Short:         "Run the BoxFleet management server",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

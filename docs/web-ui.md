@@ -1,7 +1,7 @@
 # Web UI
 
 The React/Vite admin UI is served under `/admin` (or the configured hidden
-prefix) and embedded in `boxfleet-server`.
+prefix) and embedded in `bfs`.
 
 ```bash
 npm ci --prefix web

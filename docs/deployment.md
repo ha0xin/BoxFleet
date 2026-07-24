@@ -8,8 +8,7 @@ hosts. For the current management server, follow the stricter
 
 Pushing a `v*` tag runs `.github/workflows/artifacts.yml` and publishes:
 
-- `bf-<server-version>-linux-amd64`
-- `boxfleet-server-<server-version>-linux-amd64`
+- `bfs-<server-version>-linux-amd64`
 - `boxfleet-agent-<agent-version>-linux-amd64`
 - `sing-box-<sing-box-version>-linux-amd64`
 - a tarball, `boxfleet-update.json`, and `SHA256SUMS`
@@ -35,7 +34,7 @@ file before use.
 The host layout is:
 
 ```text
-/opt/boxfleet/bin/{bf,boxfleet-server}
+/opt/boxfleet/bin/bfs
 /opt/boxfleet/server/boxfleet.db
 /opt/boxfleet/backups/
 /etc/boxfleet/server.env
@@ -46,7 +45,7 @@ The service normally runs:
 ```ini
 [Service]
 EnvironmentFile=/etc/boxfleet/server.env
-ExecStart=/opt/boxfleet/bin/boxfleet-server --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db
+ExecStart=/opt/boxfleet/bin/bfs --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db
 Restart=always
 RestartSec=5s
 ```
@@ -54,13 +53,13 @@ RestartSec=5s
 Before replacement:
 
 1. Verify local and remote SHA256 values.
-2. Run both candidates with `--help`.
-3. Run the candidate `bf db status` against production.
-4. Back up binaries and, when migrations are pending, SQLite DB/WAL/SHM files.
+2. Run the server candidate with `--help`.
+3. Prepare a backup directory for the server binary and SQLite files.
 
 Stop, replace, restart, and smoke-test inside an `ERR`-trapped script that
-restores the backup on failure. Startup applies embedded migrations. A
-server-only release replaces only `bf` and `boxfleet-server`; never update node
+backs up the binary plus DB/WAL/SHM files after stopping the service and restores
+them on failure. Startup applies embedded migrations. A
+server-only release replaces only `bfs`; never update node
 components on the management host.
 
 Admin auth is mandatory through `BOXFLEET_ADMIN_TOKEN` unless the explicit
@@ -109,7 +108,6 @@ After deployment verify without printing secrets:
 ```bash
 curl -fsS http://127.0.0.1:18081/healthz
 sudo systemctl is-active boxfleet-server
-sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db status
 sudo journalctl -u boxfleet-server -n 30 --no-pager
 ```
 

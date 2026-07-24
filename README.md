@@ -11,10 +11,9 @@ traffic counters, apply results, and network logs.
 
 ## Components
 
-- `boxfleet-server`: central API, embedded Web UI, renderer, and SQLite owner.
-- `bf`: local operator CLI that opens the same SQLite database directly.
+- `bfs`: central API, embedded Web UI, renderer, and SQLite owner.
 - `boxfleet-agent`: node-side pull/apply/report daemon.
-- `web/`: React/Vite admin UI built into `boxfleet-server`.
+- `web/`: React/Vite admin UI built into `bfs`.
 
 Important directories:
 
@@ -52,10 +51,10 @@ $(go env GOPATH)/bin/sqlc generate
 Run a local server with authentication disabled only for development:
 
 ```bash
-go run ./cmd/boxfleet-server --db /tmp/boxfleet.db --allow-insecure-admin
+go run ./cmd/bfs --db /tmp/boxfleet.db --allow-insecure-admin
 ```
 
-Run `bf --help` or `boxfleet-agent --help` for the current command surface.
+Run `bfs --help`, `bfs --version`, or `boxfleet-agent --help` for the current command surface.
 
 ## Releases
 

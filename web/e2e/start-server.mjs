@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 
 const [serverPort, dbPath] = process.argv.slice(2);
@@ -7,17 +7,11 @@ if (!serverPort || !dbPath) {
 }
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
-const init = spawnSync("go", ["run", "./cmd/bf", "--db", dbPath, "db", "init"], {
-  cwd: repositoryRoot,
-  stdio: "inherit"
-});
-if (init.status !== 0) process.exit(init.status ?? 1);
-
 const server = spawn(
   "go",
   [
     "run",
-    "./cmd/boxfleet-server",
+    "./cmd/bfs",
     "--addr",
     `127.0.0.1:${serverPort}`,
     "--db",

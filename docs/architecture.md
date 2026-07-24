@@ -3,9 +3,7 @@
 BoxFleet uses a central-control, node-pull model.
 
 ```text
-bf CLI ───────────────┐
-                     ▼
-admin UI ──HTTP──▶ boxfleet-server ──▶ SQLite
+admin UI ──HTTP──▶ bfs (BoxFleet server) ──▶ SQLite
                          ▲
                          │ outbound HTTPS
                          │
@@ -14,10 +12,10 @@ admin UI ──HTTP──▶ boxfleet-server ──▶ SQLite
 
 ## Trust boundaries
 
-`boxfleet-server` owns users, nodes, proxies, access grants, configuration
+`bfs` owns users, nodes, proxies, access grants, configuration
 versions, subscriptions, operations, and telemetry. The admin API requires one
-operator token. `bf` is a local database tool and must not be converted into an
-HTTP client.
+operator token. The server is the sole SQLite owner and administrative write
+path.
 
 Each agent authenticates with a node-scoped bearer token. The server derives
 node identity from that token and ignores identity fields supplied in request
@@ -36,8 +34,8 @@ queries/*.sql ──sqlc──▶ internal/server/store/sqlc
                  internal/server/api  internal/server/render
 ```
 
-Only `internal/server/db` may use sqlc-generated types. API, renderer, CLI, and
-tests consume its domain types. Shared agent/server wire payloads live in
+Only `internal/server/db` may use sqlc-generated types. API, renderer, and tests
+consume its domain types. Shared agent/server wire payloads live in
 `internal/model`.
 
 The Web UI is compiled into `internal/server/webui/assets/generated` and

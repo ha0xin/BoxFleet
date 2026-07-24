@@ -27,8 +27,6 @@ must exist before Go tests because the server embeds them.
 - `internal/agent`: fake the command runner, service manager, filesystem-facing
   boundaries and HTTP servers. Unit tests must never invoke real `sing-box`,
   `systemctl`, or `journalctl`.
-- `internal/cli/bf`: invoke `NewRootCommand` with buffered I/O and a temporary
-  database.
 - `web/src/**/*.test.*`: API parsing, query serialization, hooks and mutation
   ordering under Vitest.
 - `web/e2e`: real server plus Vite, covering resource lifecycle, Mihomo workflow,
