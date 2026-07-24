@@ -11,24 +11,24 @@ import {
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
-  SortAscendingIcon,
-  SortDescendingIcon,
   TrashIcon,
   UserIcon,
   WarningCircleIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Loader, Meter, Pagination, Table } from "@cloudflare/kumo";
+import { Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
 
 import type { AdminUser, TrafficRow } from "../types";
 import { formatBytes } from "../utils";
 import { PageHeader, PageTopBar } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { AdminApiError, useAdminApi } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
+import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded" | "deleted";
 type UserSort = "name" | "status" | "traffic" | "quota" | "proxy_count" | "expire_at";
 type SortDirection = "asc" | "desc";
@@ -115,56 +115,9 @@ function compareText(left: string | number | undefined, right: string | number |
 
 function formatSupplementaryError(error: unknown): string {
   if (!(error instanceof Error)) return "Traffic request failed.";
-  const match = error.message.match(/^(\d{3})\s+(.+)$/);
-  if (!match) return error.message;
-  const [, status, body] = match;
-  try {
-    const parsed = JSON.parse(body) as { error?: string };
-    return `Traffic request failed (${status}): ${parsed.error || body}`;
-  } catch {
-    return `Traffic request failed (${status}): ${body}`;
-  }
-}
-
-function SortHead({
-  label,
-  column,
-  sort,
-  direction,
-  setSort,
-  className
-}: {
-  label: string;
-  column: UserSort;
-  sort: UserSort;
-  direction: SortDirection;
-  setSort: (column: UserSort) => void;
-  className?: string;
-}) {
-  const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
-  return (
-    <Table.Head className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong"
-        onClick={() => setSort(column)}
-      >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
-      </button>
-    </Table.Head>
-  );
-}
-
-function TableEmpty({ children }: { children: string }) {
-  return (
-    <Table.Row>
-      <Table.Cell colSpan={7}>
-        <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
-      </Table.Cell>
-    </Table.Row>
-  );
+  return error instanceof AdminApiError
+    ? `Traffic request failed (${error.status}): ${error.detail}`
+    : error.message;
 }
 
 function QuotaMeter({ user, traffic }: { user: AdminUser; traffic: UserTraffic }) {
@@ -180,7 +133,7 @@ function QuotaMeter({ user, traffic }: { user: AdminUser; traffic: UserTraffic }
   return (
     <div className="min-w-64">
       <Meter
-        label={quota > 0 ? "Quota" : "Traffic"}
+        label="Usage"
         value={value}
         max={max}
         customValue={quota > 0 ? `${formatBytes(total)} / ${formatBytes(quota)}` : `${formatBytes(total)} total`}
@@ -221,7 +174,8 @@ function sortRows(rows: UserRow[], sort: UserSort, direction: SortDirection): Us
   });
 }
 
-export function UsersPage({ request }: { request: AdminRequest }) {
+export function UsersPage() {
+  const { request } = useAdminApi();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [filter, setFilter] = useState<UserFilter>("all");
@@ -243,12 +197,16 @@ export function UsersPage({ request }: { request: AdminRequest }) {
   );
 
   const usersQuery = useQuery({
-    queryKey: ["admin", "users", filter === "deleted"],
-    queryFn: () => request<AdminUser[]>(filter === "deleted" ? "/api/admin/users?deleted=true" : "/api/admin/users")
+    queryKey: adminKeys.users(filter === "deleted"),
+    queryFn: () => request<AdminUser[]>(filter === "deleted" ? "/api/admin/users?deleted=true" : "/api/admin/users"),
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true
   });
   const trafficQuery = useQuery({
-    queryKey: ["admin", "traffic-users"],
-    queryFn: () => request<TrafficRow[]>("/api/admin/traffic/users")
+    queryKey: adminKeys.trafficUsers,
+    queryFn: () => request<TrafficRow[]>("/api/admin/traffic/users"),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true
   });
 
   function setSort(column: UserSort) {
@@ -301,12 +259,12 @@ export function UsersPage({ request }: { request: AdminRequest }) {
   const trafficError = trafficQuery.error ? formatSupplementaryError(trafficQuery.error) : "";
   const total = filtered.length;
 
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  if (page > lastPage) setPage(lastPage);
+
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Users" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="Users"
@@ -400,11 +358,11 @@ export function UsersPage({ request }: { request: AdminRequest }) {
             </div>
 
             <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[1215px]">
                   <Table.Header variant="compact">
                     <Table.Row>
-                      <SortHead label="User" column="name" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="User" column="name" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 bg-kumo-base" />
                       <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Traffic" column="traffic" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Quota" column="quota" sort={sort} direction={direction} setSort={setSort} />
@@ -417,21 +375,15 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                   </Table.Header>
                   <Table.Body>
                     {error ? (
-                      <TableEmpty>{error instanceof Error ? error.message : "Request failed."}</TableEmpty>
+                      <TableEmpty colSpan={7}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty>
                     ) : loading ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={7}>
-                          <div className="flex min-h-32 items-center justify-center">
-                            <Loader size={20} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
+                      <TableLoading colSpan={7} />
                     ) : visibleRows.length > 0 ? (
                       visibleRows.map((row) => {
                         const StatusIcon = row.status.icon;
                         return (
                           <Table.Row key={row.user.id}>
-                            <Table.Cell>
+                            <Table.Cell className="sticky left-0 z-10 bg-kumo-base">
                               <div className="flex min-w-52 items-center gap-2">
                                 <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
                                 <div className="min-w-0">
@@ -514,25 +466,14 @@ export function UsersPage({ request }: { request: AdminRequest }) {
                         );
                       })
                     ) : (
-                      <TableEmpty>No users match this filter.</TableEmpty>
+                      <TableEmpty colSpan={7}>No users match this filter.</TableEmpty>
                     )}
                   </Table.Body>
                 </Table>
               </div>
             </div>
 
-            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
-              <Pagination.Info>
-                {({ pageShowingRange, totalCount }) => (
-                  <span>
-                    <strong>{pageShowingRange}</strong> of {totalCount} items
-                  </span>
-                )}
-              </Pagination.Info>
-              <Pagination.Separator />
-              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
-              <Pagination.Controls controls="simple" />
-            </Pagination>
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>

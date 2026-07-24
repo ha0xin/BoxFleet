@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowDownIcon,
@@ -13,15 +13,17 @@ import {
   LinkSimpleIcon,
   PencilSimpleIcon,
   PlusIcon,
-  SortAscendingIcon,
-  SortDescendingIcon,
   TrashIcon
 } from "@phosphor-icons/react";
-import { Banner, Button, Dialog, DropdownMenu, Input, Loader, Pagination, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
+import { Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
 
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { MihomoCodeEditor } from "@/components/mihomo-code-editor";
-import type { AdminRequest } from "@/publish/publish-status";
+import { useAdminApi, type AdminRequest } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
+import { useSubscription } from "@/admin/use-subscription";
+import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
+import { copyText, formatDateTime } from "@/utils";
 import { formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName } from "./operations-common";
 import type {
   AdminUser,
@@ -39,8 +41,6 @@ type ConfigurationFilter = "all" | "yaml" | "javascript";
 type ConfigurationSort = "name" | "user" | "processors" | "updated";
 type TemplateFilter = "all" | "yaml" | "javascript";
 type TemplateSort = "name" | "type" | "availability" | "updated";
-
-const emptyDocument = (): MihomoProfileDocument => ({ rewrites: [] });
 
 function copyDocument(document: MihomoProfileDocument): MihomoProfileDocument {
   return { rewrites: (document.rewrites ?? []).map((rewrite) => ({ ...rewrite })) };
@@ -73,18 +73,19 @@ function customRewrite(kind: MihomoRewrite["kind"]): MihomoRewrite {
   };
 }
 
-export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
+export function MihomoProfilesPage() {
+  const { request } = useAdminApi();
   const navigate = useNavigate();
   const [tab, setTab] = useState<PageTab>("configurations");
   const [subscriptionProfile, setSubscriptionProfile] = useState<MihomoProfile | null>(null);
   const [templateDialog, setTemplateDialog] = useState<MihomoRewriteTemplate | "new" | null>(null);
 
   const profilesQuery = useQuery({
-    queryKey: ["admin", "mihomo-profiles"],
+    queryKey: adminKeys.mihomoProfiles,
     queryFn: () => request<MihomoProfile[]>("/api/admin/mihomo/profiles")
   });
   const templatesQuery = useQuery({
-    queryKey: ["admin", "mihomo-rewrite-templates"],
+    queryKey: adminKeys.mihomoTemplates,
     queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates")
   });
 
@@ -93,9 +94,6 @@ export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Mihomo Profiles" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="Mihomo Profiles"
@@ -133,25 +131,6 @@ export function MihomoProfilesPage({ request }: { request: AdminRequest }) {
         <RewriteTemplateDialog request={request} template={templateDialog} onClose={() => setTemplateDialog(null)} />
       ) : null}
     </div>
-  );
-}
-
-function SortHead({ label, column, sort, direction, setSort }: {
-  label: string;
-  column: string;
-  sort: string;
-  direction: SortDirection;
-  setSort: (column: string) => void;
-}) {
-  const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
-  return (
-    <Table.Head>
-      <button type="button" className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong" onClick={() => setSort(column)}>
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
-      </button>
-    </Table.Head>
   );
 }
 
@@ -232,7 +211,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
           </Table>
         </div>
       </div>
-      <InventoryPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
+      <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
     </section>
   );
 }
@@ -303,7 +282,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
           </Table.Body>
         </Table>
       </div></div>
-      <InventoryPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
+      <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
     </section>
   );
 }
@@ -339,33 +318,22 @@ function ConfigurationRowMenu({ profile, onEdit, onSubscription }: { profile: Mi
   </DropdownMenu>;
 }
 
-function TableEmpty({ children, colSpan }: { children: string; colSpan: number }) {
-  return <Table.Row><Table.Cell colSpan={colSpan}><div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div></Table.Cell></Table.Row>;
-}
-
-function TableLoading({ colSpan }: { colSpan: number }) {
-  return <Table.Row><Table.Cell colSpan={colSpan}><div className="flex min-h-32 items-center justify-center"><Loader size={20} /></div></Table.Cell></Table.Row>;
-}
-
-function InventoryPagination({ page, setPage, perPage, setPerPage, total }: { page: number; setPage: (page: number) => void; perPage: number; setPerPage: (size: number) => void; total: number }) {
-  return <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1"><Pagination.Info>{({ pageShowingRange, totalCount }) => <span><strong>{pageShowingRange}</strong> of {totalCount} items</span>}</Pagination.Info><Pagination.Separator /><Pagination.PageSize value={perPage} onChange={(value) => { setPerPage(value); setPage(1); }} options={[10, 25, 50, 100]} label="Items per page:" /><Pagination.Controls controls="simple" /></Pagination>;
-}
-
-export function MihomoConfigurationPage({ request }: { request: AdminRequest }) {
+export function MihomoConfigurationPage() {
+  const { request } = useAdminApi();
   const navigate = useNavigate();
   const { profile: profileID } = useParams();
   const creating = !profileID;
   const usersQuery = useQuery({
-    queryKey: ["admin", "users", "mihomo-configurations"],
+    queryKey: adminKeys.users(false),
     queryFn: () => request<AdminUser[]>("/api/admin/users"),
     enabled: creating
   });
   const templatesQuery = useQuery({
-    queryKey: ["admin", "mihomo-rewrite-templates"],
+    queryKey: adminKeys.mihomoTemplates,
     queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates")
   });
   const profileQuery = useQuery({
-    queryKey: ["admin", "mihomo-profile", profileID],
+    queryKey: adminKeys.mihomoProfile(profileID ?? "new"),
     queryFn: () => request<MihomoProfile>(`/api/admin/mihomo/profiles/${profileID}`),
     enabled: !creating
   });
@@ -390,7 +358,13 @@ export function MihomoConfigurationPage({ request }: { request: AdminRequest }) 
     const users = (usersQuery.data ?? []).filter((user) => !user.deleted_at);
     return <NewConfigurationWorkbench request={request} users={users} templates={templatesQuery.data} />;
   }
-  if (!profileQuery.data) return null;
+  if (!profileQuery.data) {
+    return (
+      <ConfigurationPageShell title="Mihomo configuration" description="The requested configuration was not returned." actions={<Button variant="secondary" onClick={() => navigate("/mihomo-profiles")}>Back</Button>}>
+        <Banner variant="error" title="Configuration not found" />
+      </ConfigurationPageShell>
+    );
+  }
   return <SavedConfigurationWorkbench key={`${profileQuery.data.id}:${profileQuery.data.updated_at}`} request={request} profile={profileQuery.data} templates={templatesQuery.data} />;
 }
 
@@ -403,9 +377,6 @@ function ConfigurationPageShell({ title, description, actions, children }: {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Mihomo Profiles" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader title={title} description={description} actions={actions} />
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
@@ -472,30 +443,23 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const [confirmation, setConfirmation] = useState<"rotate" | "revoke" | null>(null);
-  const subscriptionQuery = useQuery({
-    queryKey: ["admin", "mihomo-profile-subscription", profile.id],
-    queryFn: () => request<MihomoProfileSubscription>(`/api/admin/mihomo/profiles/${profile.id}/subscription`)
-  });
-  const generate = useAdminMutation<undefined, MihomoProfileSubscription>(request, (req) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}/subscription`, { method: "POST" })
-  );
-  const rotate = useAdminMutation<undefined, MihomoProfileSubscription>(request, (req) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}/subscription/rotate`, { method: "POST" }),
-    { onSuccess: () => setConfirmation(null) }
-  );
-  const revoke = useAdminMutation<undefined, MihomoProfileSubscription>(request, (req) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}/subscription`, { method: "DELETE" }),
-    { onSuccess: () => setConfirmation(null) }
+  const { query: subscriptionQuery, generate, rotate, revoke } = useSubscription<MihomoProfileSubscription>(
+    request,
+    adminKeys.subscription("mihomo-profile", profile.id),
+    `/api/admin/mihomo/profiles/${profile.id}/subscription`,
+    () => setConfirmation(null)
   );
   const subscription = subscriptionQuery.data;
   const error = subscriptionQuery.error ?? generate.error ?? rotate.error ?? revoke.error;
   return (
     <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="sm" className="p-6">
+      <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Subscription link</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">{profile.name} · proxies from {profile.proxy_user_name}</Dialog.Description>
         {error ? <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} /> : null}
+        {copyError ? <Banner variant="error" title={copyError} /> : null}
         {confirmation ? (
           <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-tint p-4">
             <Text bold>{confirmation === "rotate" ? "Rotate this subscription link?" : "Revoke this subscription link?"}</Text>
@@ -518,12 +482,16 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
         ) : subscription?.active ? (
           <div className="flex flex-col gap-4">
             <div className="flex items-end gap-2">
-              <Input label="Mihomo subscription URL" readOnly value={subscription.url} className="min-w-0 flex-1" />
-              <Button variant="secondary" icon={<CopyIcon />} onClick={() => { void navigator.clipboard.writeText(subscription.url); setCopied(true); }}>{copied ? "Copied" : "Copy"}</Button>
+              <div className="min-w-0 flex-1"><Input label="Mihomo subscription URL" readOnly value={subscription.url} className="w-full" /></div>
+              <Button variant="secondary" icon={<CopyIcon />} onClick={() => {
+                void copyText(subscription.url)
+                  .then(() => { setCopyError(""); setCopied(true); })
+                  .catch((copyFailure: unknown) => setCopyError(copyFailure instanceof Error ? copyFailure.message : "Unable to copy."));
+              }}>{copied ? "Copied" : "Copy"}</Button>
             </div>
             <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
-              <div><dt className="font-medium text-kumo-default">Created</dt><dd>{formatDate(subscription.created_at)}</dd></div>
-              <div><dt className="font-medium text-kumo-default">Last fetched</dt><dd>{subscription.last_used_at ? formatDate(subscription.last_used_at) : "Never"}</dd></div>
+              <div><dt className="font-medium text-kumo-default">Created</dt><dd>{formatDateTime(subscription.created_at)}</dd></div>
+              <div><dt className="font-medium text-kumo-default">Last fetched</dt><dd>{formatDateTime(subscription.last_used_at)}</dd></div>
             </dl>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" icon={<ArrowsClockwiseIcon />} onClick={() => setConfirmation("rotate")}>Rotate link</Button>
@@ -554,10 +522,14 @@ function SavedConfigurationWorkbench({ request, profile, templates }: {
   const save = useAdminMutation<MihomoProfileDocument, MihomoProfile>(request, (req, nextDocument) =>
     req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ document: nextDocument }) })
   );
-  const runPreview = useAdminMutation<MihomoProfileDocument, MihomoPreview>(request, (req, nextDocument) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}/preview`, { method: "POST", body: JSON.stringify({ document: nextDocument }) }),
-    { onSuccess: setPreview }
-  );
+  const runPreview = useMutation({
+    mutationFn: (nextDocument: MihomoProfileDocument) =>
+      request<MihomoPreview>(`/api/admin/mihomo/profiles/${profile.id}/preview`, {
+        method: "POST",
+        body: JSON.stringify({ document: nextDocument })
+      }),
+    onSuccess: setPreview
+  });
   const error = save.error ?? runPreview.error;
   const busy = save.isPending || runPreview.isPending;
 
@@ -729,7 +701,7 @@ function RewriteTemplateDialog({ request, template, onClose }: {
   );
   return (
     <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="xl" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
+      <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">{readOnly ? "Preview rewrite template" : existing ? "Edit rewrite template" : "New rewrite template"}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">Templates are reusable globally. Saved changes apply to every linked configuration.</Dialog.Description>
         {save.error ? <Banner variant="error" title={save.error.message} /> : null}
@@ -750,9 +722,4 @@ function RewriteTemplateDialog({ request, template, onClose }: {
 
 function EmptyRow({ children }: { children: string }) {
   return <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">{children}</div>;
-}
-
-function formatDate(value: string) {
-  const time = new Date(value);
-  return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
 }

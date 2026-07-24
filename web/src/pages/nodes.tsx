@@ -11,28 +11,26 @@ import {
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
-  SortAscendingIcon,
-  SortDescendingIcon,
   TrashIcon
 } from "@phosphor-icons/react";
-import { Banner, Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Banner, Button, DropdownMenu, Input, Table } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodesResponse, AdminRelease, NodeUpdateCampaignDetail } from "../types";
 import {
-  adminPath,
   formatNodeVersion,
   formatRelativeTime,
   nodeHealth,
   PageHeader,
   PageTopBar,
-  rowLinkClassName
 } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
 import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
 import { NodeUpdateDialog, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type NodeFilter = "all" | "active" | "disabled" | "degraded" | "deleted";
 type NodeSort = "name" | "status" | "public_host" | "last_seen_at" | "sing_box_version";
 type SortDirection = "asc" | "desc";
@@ -40,16 +38,6 @@ type UpdateDialogState =
   | { mode: "node"; node: AdminNode; components?: Array<"agent" | "sing_box"> }
   | { mode: "all"; campaign?: NodeUpdateCampaignDetail }
   | null;
-
-function queryString(params: Record<string, string | number | undefined>) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === "") continue;
-    query.set(key, String(value));
-  }
-  const text = query.toString();
-  return text ? `?${text}` : "";
-}
 
 function nodeStatusFilter(filter: NodeFilter): string | undefined {
   return filter === "all" || filter === "deleted" ? undefined : filter;
@@ -97,7 +85,7 @@ function nodeUpdateStatus(node: AdminNode, release?: AdminRelease) {
   if (!hasCapability(node, "operations.v1")) {
     return { label: "Manual agent upgrade required", className: "text-kumo-warning" };
   }
-  const agentOutdated = !versionsEqual(node.agent_version, release.boxfleet_version);
+  const agentOutdated = !versionsEqual(node.agent_version, release.agent_version);
   const singBoxOutdated = !versionsEqual(node.sing_box_version, release.sing_box_version);
   const canUpdateAgent = agentOutdated && hasCapability(node, "update.agent.v1");
   const canUpdateSingBox = singBoxOutdated && hasCapability(node, "update.sing_box.v1");
@@ -110,48 +98,8 @@ function nodeUpdateStatus(node: AdminNode, release?: AdminRelease) {
   return { label: "Up to date", className: "text-kumo-success" };
 }
 
-function SortHead({
-  label,
-  column,
-  sort,
-  direction,
-  setSort,
-  className
-}: {
-  label: string;
-  column: NodeSort;
-  sort: NodeSort;
-  direction: SortDirection;
-  setSort: (column: NodeSort) => void;
-  className?: string;
-}) {
-  const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
-  return (
-    <Table.Head className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong"
-        onClick={() => setSort(column)}
-      >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
-      </button>
-    </Table.Head>
-  );
-}
-
-function TableEmpty({ children }: { children: string }) {
-  return (
-    <Table.Row>
-      <Table.Cell colSpan={9}>
-        <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
-      </Table.Cell>
-    </Table.Row>
-  );
-}
-
-export function NodesPage({ request }: { request: AdminRequest }) {
+export function NodesPage() {
+  const { request } = useAdminApi();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [filter, setFilter] = useState<NodeFilter>("all");
@@ -205,20 +153,20 @@ export function NodesPage({ request }: { request: AdminRequest }) {
       direction
     });
   const nodesQuery = useQuery({
-    queryKey: ["admin", "nodes-page", perPage, offset, search, filter, sort, direction],
+    queryKey: adminKeys.nodesPage(perPage, offset, search, filter, sort, direction),
     queryFn: () => request<AdminNodesResponse>(path),
     placeholderData: (previous) => previous,
     refetchInterval: (query) =>
       query.state.data?.nodes.some((node) => node.active_operation) ? 2000 : 15000
   });
   const releaseQuery = useQuery({
-    queryKey: ["admin", "release"],
+    queryKey: adminKeys.release,
     queryFn: () => request<AdminRelease>("/api/admin/release"),
     staleTime: 5 * 60 * 1000
   });
   const campaignQuery = useQuery({
-    queryKey: ["admin", "node-update-campaign", "current"],
-    queryFn: () => request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current"),
+    queryKey: adminKeys.nodeUpdateCampaign("current"),
+    queryFn: async () => (await request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current")) ?? null,
     refetchInterval: (query) => (query.state.data ? 2000 : 15000)
   });
   const pageData = nodesQuery.data;
@@ -226,14 +174,14 @@ export function NodesPage({ request }: { request: AdminRequest }) {
   const total = pageData?.total ?? 0;
   const error = nodesQuery.error instanceof Error ? nodesQuery.error.message : "Request failed.";
   const release = releaseQuery.data;
-  const campaign = campaignQuery.data;
+  const campaign = campaignQuery.data ?? undefined;
+
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  if (page > lastPage) setPage(lastPage);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Nodes" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="Nodes"
@@ -342,11 +290,11 @@ export function NodesPage({ request }: { request: AdminRequest }) {
             </div>
 
             <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[1180px]">
                   <Table.Header variant="compact">
                     <Table.Row>
-                      <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 bg-kumo-base" />
                       <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
                       <Table.Head>Agent</Table.Head>
@@ -361,15 +309,9 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                   </Table.Header>
                   <Table.Body>
                     {nodesQuery.error ? (
-                      <TableEmpty>{error}</TableEmpty>
+                      <TableEmpty colSpan={9}>{error}</TableEmpty>
                     ) : nodesQuery.isLoading ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={9}>
-                          <div className="flex min-h-32 items-center justify-center">
-                            <Loader size={20} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
+                      <TableLoading colSpan={9} />
                     ) : nodes.length > 0 ? (
                       nodes.map((node) => {
                         const health = node.deleted_at
@@ -379,12 +321,10 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                         const statusClassName = health.label === "Disabled" ? "text-kumo-subtle" : health.className;
                         return (
                           <Table.Row key={node.id}>
-                            <Table.Cell>
+                            <Table.Cell className="sticky left-0 z-10 bg-kumo-base">
                               <div className="flex min-w-44 items-center gap-2">
                                 <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
-                                <Link href={adminPath(`/nodes?node=${encodeURIComponent(node.name)}`)} variant="current" className={rowLinkClassName}>
-                                  <span className="truncate">{node.name}</span>
-                                </Link>
+                                <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
                               </div>
                             </Table.Cell>
                             <Table.Cell>
@@ -402,7 +342,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                               </span>
                             </Table.Cell>
                             <Table.Cell>
-                              <VersionTarget current={node.agent_version} target={release?.boxfleet_version ?? node.agent_version ?? "n/a"} />
+                              <VersionTarget current={node.agent_version} target={release?.agent_version ?? node.agent_version ?? "n/a"} />
                             </Table.Cell>
                             <Table.Cell>
                               <VersionTarget current={node.sing_box_version} target={release?.sing_box_version ?? node.sing_box_version ?? "n/a"} />
@@ -431,7 +371,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                   </Button>
                                 ) : release?.updates_enabled &&
                                   hasCapability(node, "operations.v1") &&
-                                  ((!versionsEqual(node.agent_version, release.boxfleet_version) && hasCapability(node, "update.agent.v1")) ||
+                                  ((!versionsEqual(node.agent_version, release.agent_version) && hasCapability(node, "update.agent.v1")) ||
                                     (!versionsEqual(node.sing_box_version, release.sing_box_version) && hasCapability(node, "update.sing_box.v1"))) &&
                                   !node.deleted_at && node.has_active_token !== false ? (
                                   <Button size="sm" onClick={() => setUpdateDialog({ mode: "node", node })}>
@@ -459,7 +399,7 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                                     </DropdownMenu.Item>
                                   ) : release?.updates_enabled && hasCapability(node, "operations.v1") ? (
                                     <>
-                                      {!versionsEqual(node.agent_version, release.boxfleet_version) && hasCapability(node, "update.agent.v1") ? (
+                                      {!versionsEqual(node.agent_version, release.agent_version) && hasCapability(node, "update.agent.v1") ? (
                                         <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node, components: ["agent"] })}>
                                           Update agent
                                         </DropdownMenu.Item>
@@ -513,25 +453,14 @@ export function NodesPage({ request }: { request: AdminRequest }) {
                         );
                       })
                     ) : (
-                      <TableEmpty>No nodes match this filter.</TableEmpty>
+                      <TableEmpty colSpan={9}>No nodes match this filter.</TableEmpty>
                     )}
                   </Table.Body>
                 </Table>
               </div>
             </div>
 
-            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
-              <Pagination.Info>
-                {({ pageShowingRange, totalCount }) => (
-                  <span>
-                    <strong>{pageShowingRange}</strong> of {totalCount} items
-                  </span>
-                )}
-              </Pagination.Info>
-              <Pagination.Separator />
-              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
-              <Pagination.Controls controls="simple" />
-            </Pagination>
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>

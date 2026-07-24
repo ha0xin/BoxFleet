@@ -48,6 +48,7 @@ type adminProxiesPage struct {
 type adminRelease struct {
 	Repo            string `json:"repo"`
 	BoxFleetVersion string `json:"boxfleet_version"`
+	AgentVersion    string `json:"agent_version"`
 	SingBoxVersion  string `json:"sing_box_version"`
 	UpdatesEnabled  bool   `json:"updates_enabled"`
 	UpdateError     string `json:"update_error,omitempty"`
@@ -332,6 +333,7 @@ func adminOverviewHandler(store *db.DB, options Options) http.HandlerFunc {
 			Release: adminRelease{
 				Repo:            releaseRepo(options),
 				BoxFleetVersion: releaseVersion(options),
+				AgentVersion:    releaseAgentVersion(options),
 				SingBoxVersion:  releaseSingBoxVersion(options),
 			},
 		})
@@ -533,6 +535,14 @@ func releaseVersion(options Options) string {
 	version := strings.TrimSpace(options.Version)
 	if version == "" {
 		return "dev"
+	}
+	return version
+}
+
+func releaseAgentVersion(options Options) string {
+	version := strings.TrimSpace(options.AgentVersion)
+	if version == "" {
+		return releaseVersion(options)
 	}
 	return version
 }
@@ -1791,7 +1801,9 @@ func nullInt(value sql.NullInt64) string {
 }
 
 func writeAdminError(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

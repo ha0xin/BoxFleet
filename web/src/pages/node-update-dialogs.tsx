@@ -10,7 +10,8 @@ import {
 import { Banner, Button, Checkbox, Dialog, Meter, Select, Table } from "@cloudflare/kumo";
 
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import type { AdminRequest } from "@/publish/publish-status";
+import { adminKeys } from "@/admin/query";
+import type { AdminRequest } from "@/admin/api";
 import type {
   AdminNode,
   AdminRelease,
@@ -19,6 +20,7 @@ import type {
   NodeOperationEvent,
   NodeUpdateCampaignDetail
 } from "@/types";
+import { formatDateTime } from "@/utils";
 
 type UpdateComponent = "agent" | "sing_box";
 
@@ -78,7 +80,7 @@ function OperationProgress({ detail }: { detail: NodeOperationDetail }) {
           <span className={`text-sm font-medium ${operationStatusClass(operation.status)}`}>{operation.status}</span>
         </div>
         <p className="mt-1 text-sm text-kumo-subtle">
-          Attempt {operation.attempt || 0} · updated {new Date(operation.updated_at).toLocaleString()}
+          Attempt {operation.attempt || 0} · updated {formatDateTime(operation.updated_at, "n/a")}
         </p>
       </div>
       {progress ? (
@@ -135,7 +137,7 @@ export function NodeUpdateDialog({
   initialOperation?: NodeOperation;
   onClose: () => void;
 }) {
-  const agentOutdated = !versionsEqual(node.agent_version, release.boxfleet_version);
+  const agentOutdated = !versionsEqual(node.agent_version, release.agent_version);
   const singBoxOutdated = !versionsEqual(node.sing_box_version, release.sing_box_version);
   const agentSupported = node.capabilities?.includes("update.agent.v1") ?? false;
   const singBoxSupported = node.capabilities?.includes("update.sing_box.v1") ?? false;
@@ -147,7 +149,7 @@ export function NodeUpdateDialog({
   const [operationID, setOperationID] = useState(initialOperation?.id ?? "");
 
   const operationQuery = useQuery({
-    queryKey: ["admin", "node-operation", node.name, operationID],
+    queryKey: adminKeys.nodeOperation(node.name, operationID),
     queryFn: () =>
       request<NodeOperationDetail>(
         `/api/admin/nodes/${encodeURIComponent(node.name)}/operations/${encodeURIComponent(operationID)}`
@@ -187,7 +189,7 @@ export function NodeUpdateDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-4 sm:w-[32rem] sm:p-6 lg:w-[40rem]">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:w-[32rem] sm:p-6 lg:w-[40rem]">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Update {node.name}</Dialog.Title>
         <Dialog.Description className="mb-5 text-kumo-subtle">
           The agent will claim this operation over HTTPS. No SSH session is used.
@@ -207,7 +209,7 @@ export function NodeUpdateDialog({
               label={
                 <span className="inline-flex items-center gap-2">
                   Agent <span className="text-kumo-subtle">{node.agent_version || "unknown"}</span>
-                  <ArrowRightIcon className="size-3.5 text-kumo-inactive" /> {release.boxfleet_version}
+                  <ArrowRightIcon className="size-3.5 text-kumo-inactive" /> {release.agent_version}
                 </span>
               }
             />
@@ -293,7 +295,7 @@ export function UpdateAllDialog({
   const [batchSize, setBatchSize] = useState("2");
   const [campaignID, setCampaignID] = useState(initialCampaign?.campaign.id ?? "");
   const campaignQuery = useQuery({
-    queryKey: ["admin", "node-update-campaign", campaignID],
+    queryKey: adminKeys.nodeUpdateCampaign(campaignID),
     queryFn: () => request<NodeUpdateCampaignDetail>(`/api/admin/node-update-campaigns/${encodeURIComponent(campaignID)}`),
     enabled: campaignID !== "",
     refetchInterval: (query) =>
@@ -339,7 +341,7 @@ export function UpdateAllDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-4 sm:w-[36rem] sm:p-6 lg:w-[48rem]">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:w-[36rem] sm:p-6 lg:w-[48rem]">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Update all nodes</Dialog.Title>
         <Dialog.Description className="mb-5 text-kumo-subtle">
           One online node is updated as canary, then the remaining nodes advance in bounded batches.
@@ -362,7 +364,7 @@ export function UpdateAllDialog({
               <Banner
                 icon={<CheckCircleIcon weight="fill" />}
                 title="Rollout complete"
-                description={`All eligible nodes reached ${release.boxfleet_version}.`}
+                description={`All eligible nodes reached agent ${release.agent_version}.`}
               />
             ) : null}
             <Meter
@@ -406,7 +408,7 @@ export function UpdateAllDialog({
             <Checkbox
               checked={components.includes("agent")}
               onCheckedChange={(checked) => toggle("agent", checked)}
-              label={`Agent → ${release.boxfleet_version}`}
+              label={`Agent → ${release.agent_version}`}
             />
             <Checkbox
               checked={components.includes("sing_box")}

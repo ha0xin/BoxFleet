@@ -15,7 +15,6 @@ import {
   ArrowClockwiseIcon,
   CalendarBlankIcon,
   CheckCircleIcon,
-  DotsThreeIcon,
   FunnelIcon,
   InfoIcon,
   WarningCircleIcon,
@@ -29,8 +28,6 @@ import {
   Combobox,
   DatePicker,
   Input,
-  Loader,
-  Pagination,
   Popover,
   Select,
   Table
@@ -47,9 +44,11 @@ import {
 } from "date-fns";
 
 import type { AdminNode, AdminUser, NetworkEvent, NetworkEventsResponse } from "../types";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { AdminPagination, TableLoading } from "@/components/admin-table";
 import { PageHeader, PageTopBar } from "./operations-common";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type RangePreset = "1h" | "24h" | "7d" | "30d" | "custom" | "all";
 
 type ColumnMeta = {
@@ -91,16 +90,6 @@ function parseDateParam(value: string | null): Date | null {
   if (!value) return null;
   const date = parseISO(value);
   return isValid(date) ? date : null;
-}
-
-function queryString(params: Record<string, string | number | undefined>) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === "") continue;
-    query.set(key, String(value));
-  }
-  const text = query.toString();
-  return text ? `?${text}` : "";
 }
 
 function filtersFromSearchParams(params: URLSearchParams): FilterValues {
@@ -206,10 +195,11 @@ function columnClass(column: { columnDef: { meta?: unknown } }, key: keyof Colum
 function EventActivity({ events }: { events: NetworkEvent[] }) {
   const counts = actionCounts(events);
   const data = chartData(events);
+  if (data.length === 0) return null;
   return (
     <div className="flex flex-col gap-3 px-2 pt-2 pb-1">
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        {counts.length > 0 ? counts.map(([action, count]) => {
+        {counts.map(([action, count]) => {
           const meta = actionMeta(action);
           const Icon = meta.icon;
           return (
@@ -219,10 +209,10 @@ function EventActivity({ events }: { events: NetworkEvent[] }) {
               <span className="font-semibold tabular-nums">{count}</span>
             </span>
           );
-        }) : <span className="text-sm text-kumo-subtle">No events in this page.</span>}
+        })}
       </div>
       <div className="h-[108px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 80 }}>
           <AreaChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id="network-events-gradient" x1="0" y1="0" x2="0" y2="1">
@@ -247,7 +237,8 @@ function EventActivity({ events }: { events: NetworkEvent[] }) {
   );
 }
 
-export function NetworkEventsPage({ request }: { request: AdminRequest }) {
+export function NetworkEventsPage() {
+  const { request } = useAdminApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const [nowAnchor, setNowAnchor] = useState(() => new Date());
   const [refreshGeneration, setRefreshGeneration] = useState(0);
@@ -272,6 +263,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
   }, [endParam, filters, nowAnchor, startParam]);
 
   function writeParams(values: FilterValues, nextLimit = perPage, nextOffset = 0, nextStart = startParam, nextEnd = endParam) {
+    if (values.range !== "custom") setNowAnchor(new Date());
     const next = new URLSearchParams();
     if (values.search.trim()) next.set("search", values.search.trim());
     if (values.action !== "all") next.set("action", values.action);
@@ -332,7 +324,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
     // millisecond timestamps. This lets a quick route revisit use TanStack's
     // short-lived cache; once stale, the current queryFn still fetches a fresh
     // time window. Custom ranges retain their exact boundaries in the key.
-    queryKey: ["admin", "network-events", {
+    queryKey: adminKeys.networkEvents({
       search: filters.search.trim(),
       action: filters.action,
       node: filters.node,
@@ -343,20 +335,20 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
       limit: perPage,
       offset,
       refreshGeneration
-    }],
+    }),
     queryFn: ({ signal }) => request<NetworkEventsResponse>(path, { signal }),
     placeholderData: (previous) => previous
   });
   const nodesQuery = useQuery({
-    queryKey: ["admin", "network-events-options", "nodes"],
+    queryKey: adminKeys.nodes,
     queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
   const usersQuery = useQuery({
-    queryKey: ["admin", "users", false],
+    queryKey: adminKeys.users(false),
     queryFn: ({ signal }) => request<AdminUser[]>("/api/admin/users", { signal })
   });
 
-  const events = eventsQuery.data?.events ?? [];
+  const events = useMemo(() => eventsQuery.data?.events ?? [], [eventsQuery.data?.events]);
   const total = eventsQuery.data?.total ?? 0;
   const error = eventsQuery.error instanceof Error ? eventsQuery.error.message : "Request failed.";
   const actionOptions = useMemo(() => {
@@ -413,17 +405,20 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
     }),
     columnHelper.accessor("user_name", {
       header: "User",
-      cell: (info) => <span className="whitespace-nowrap text-kumo-default">{info.getValue() || "n/a"}</span>,
-      meta: { headClassName: "w-28", cellClassName: "w-28" }
+      cell: (info) => <span className="block truncate text-kumo-default" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      meta: {
+        headClassName: "sticky left-0 z-20 w-40 bg-kumo-base",
+        cellClassName: "sticky left-0 z-10 w-40 bg-kumo-base"
+      }
     }),
     columnHelper.accessor("node_name", {
       header: "Node",
-      cell: (info) => <span className="whitespace-nowrap text-kumo-subtle">{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
       meta: { headClassName: "w-28", cellClassName: "w-28" }
     }),
     columnHelper.accessor("source_ip", {
       header: "Source IP",
-      cell: (info) => <span className="whitespace-nowrap font-mono text-sm text-kumo-subtle">{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block truncate font-mono text-sm text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
       meta: { headClassName: "w-36", cellClassName: "w-36" }
     }),
     columnHelper.display({
@@ -446,18 +441,6 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
       header: "Message",
       cell: (info) => <span className="block max-w-80 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
       meta: { headClassName: "w-80", cellClassName: "w-80" }
-    }),
-    columnHelper.display({
-      id: "actions",
-      header: () => <span className="sr-only">Actions</span>,
-      cell: (info) => (
-        <div className="text-right">
-          <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for event ${info.row.id}`}>
-            <DotsThreeIcon className="size-4" />
-          </Button>
-        </div>
-      ),
-      meta: { headClassName: "w-12 text-right", cellClassName: "w-12 text-right" }
     })
   ], []);
 
@@ -472,9 +455,6 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Network Events" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="Network Events"
@@ -554,7 +534,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
                             setDraftRange(range ?? { from: undefined });
                             form.setValue("range", "custom");
                           }}
-                          numberOfMonths={2}
+                          numberOfMonths={1}
                         />
                       </div>
                       <div className="mt-3 flex justify-end gap-2">
@@ -644,8 +624,8 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
             <EventActivity events={events} />
 
             <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="overflow-x-auto">
-                <Table className="min-w-[1440px] table-fixed">
+              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[1600px] table-fixed">
                   <Table.Header variant="compact">
                     {table.getHeaderGroups().map((headerGroup) => (
                       <Table.Row key={headerGroup.id}>
@@ -665,13 +645,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
                         </Table.Cell>
                       </Table.Row>
                     ) : eventsQuery.isLoading ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={columns.length}>
-                          <div className="flex min-h-32 items-center justify-center">
-                            <Loader size={20} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
+                      <TableLoading colSpan={columns.length} />
                     ) : table.getRowModel().rows.length > 0 ? (
                       table.getRowModel().rows.map((row) => (
                         <Table.Row key={row.id}>
@@ -694,18 +668,7 @@ export function NetworkEventsPage({ request }: { request: AdminRequest }) {
               </div>
             </div>
 
-            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
-              <Pagination.Info>
-                {({ pageShowingRange, totalCount }) => (
-                  <span>
-                    <strong>{pageShowingRange}</strong> of {totalCount} items
-                  </span>
-                )}
-              </Pagination.Info>
-              <Pagination.Separator />
-              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
-              <Pagination.Controls controls="simple" />
-            </Pagination>
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>

@@ -771,6 +771,7 @@ func TestInstallScriptEndpoint(t *testing.T) {
 	router := NewRouter(Options{
 		DB:             store,
 		Version:        "v0.1.0",
+		AgentVersion:   "v0.0.9",
 		Repo:           "ha0xin/BoxFleet",
 		SingBoxVersion: "v1.13.13",
 	})
@@ -785,8 +786,9 @@ func TestInstallScriptEndpoint(t *testing.T) {
 	for _, want := range []string{
 		`REPO="${BOXFLEET_REPO:-ha0xin/BoxFleet}"`,
 		`BOXFLEET_VERSION="${BOXFLEET_VERSION_OVERRIDE:-v0.1.0}"`,
+		`AGENT_VERSION="${BOXFLEET_AGENT_VERSION:-v0.0.9}"`,
 		`SING_BOX_VERSION="${BOXFLEET_SING_BOX_VERSION:-v1.13.13}"`,
-		`agent_asset="boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"`,
+		`agent_asset="boxfleet-agent-${AGENT_VERSION}-linux-amd64"`,
 		`sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"`,
 		"boxfleet-agent\" bootstrap \"$BOOTSTRAP_STRING\"",
 	} {

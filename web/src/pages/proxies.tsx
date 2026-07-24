@@ -8,34 +8,24 @@ import {
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
-  SortAscendingIcon,
-  SortDescendingIcon,
   TrashIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Link, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Button, DropdownMenu, Input, Table } from "@cloudflare/kumo";
 
 import type { AdminProxy, AdminProxiesResponse } from "../types";
-import { adminPath, formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName } from "./operations-common";
+import { formatRelativeTime, PageHeader, PageTopBar } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
 import { ProxyFormDialog } from "./proxy-dialogs";
 import type { ProxyDialogState } from "./proxy-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type ProxyFilter = "all" | "enabled" | "disabled" | "deleted";
 type ProxySort = "node_name" | "name" | "protocol" | "listen_port" | "enabled" | "traffic_multiplier" | "updated_at";
 type SortDirection = "asc" | "desc";
-
-function queryString(params: Record<string, string | number | undefined>) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === "") continue;
-    query.set(key, String(value));
-  }
-  const text = query.toString();
-  return text ? `?${text}` : "";
-}
 
 function proxyEnabledFilter(filter: ProxyFilter): string | undefined {
   if (filter === "enabled") return "true";
@@ -62,48 +52,8 @@ function multiplier(value: number): string {
   return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}x`;
 }
 
-function SortHead({
-  label,
-  column,
-  sort,
-  direction,
-  setSort,
-  className
-}: {
-  label: string;
-  column: ProxySort;
-  sort: ProxySort;
-  direction: SortDirection;
-  setSort: (column: ProxySort) => void;
-  className?: string;
-}) {
-  const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
-  return (
-    <Table.Head className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong"
-        onClick={() => setSort(column)}
-      >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
-      </button>
-    </Table.Head>
-  );
-}
-
-function TableEmpty({ children }: { children: string }) {
-  return (
-    <Table.Row>
-      <Table.Cell colSpan={10}>
-        <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
-      </Table.Cell>
-    </Table.Row>
-  );
-}
-
-export function ProxiesPage({ request }: { request: AdminRequest }) {
+export function ProxiesPage() {
+  const { request } = useAdminApi();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [filter, setFilter] = useState<ProxyFilter>("all");
@@ -160,7 +110,7 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
       direction
     });
   const proxiesQuery = useQuery({
-    queryKey: ["admin", "proxies-page", perPage, offset, search, filter, sort, direction],
+    queryKey: adminKeys.proxiesPage(perPage, offset, search, filter, sort, direction),
     queryFn: () => request<AdminProxiesResponse>(path),
     placeholderData: (previous) => previous
   });
@@ -169,12 +119,12 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
   const total = pageData?.total ?? 0;
   const error = proxiesQuery.error instanceof Error ? proxiesQuery.error.message : "Request failed.";
 
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  if (page > lastPage) setPage(lastPage);
+
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Proxies" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="Proxies"
@@ -255,11 +205,11 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
             </div>
 
             <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[1280px]">
                   <Table.Header variant="compact">
                     <Table.Row>
-                      <SortHead label="Proxy" column="name" sort={sort} direction={direction} setSort={setSort} />
+                      <SortHead label="Proxy" column="name" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 bg-kumo-base" />
                       <SortHead label="Node" column="node_name" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Status" column="enabled" sort={sort} direction={direction} setSort={setSort} />
                       <SortHead label="Protocol" column="protocol" sort={sort} direction={direction} setSort={setSort} />
@@ -275,27 +225,19 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
                   </Table.Header>
                   <Table.Body>
                     {proxiesQuery.error ? (
-                      <TableEmpty>{error}</TableEmpty>
+                      <TableEmpty colSpan={10}>{error}</TableEmpty>
                     ) : proxiesQuery.isLoading ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={10}>
-                          <div className="flex min-h-32 items-center justify-center">
-                            <Loader size={20} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
+                      <TableLoading colSpan={10} />
                     ) : proxies.length > 0 ? (
                       proxies.map((proxy) => {
                         const status = proxyStatus(proxy);
                         const StatusIcon = status.icon;
                         return (
                           <Table.Row key={proxy.id}>
-                            <Table.Cell>
+                            <Table.Cell className="sticky left-0 z-10 bg-kumo-base">
                               <div className="flex min-w-48 items-center gap-2">
                                 <PathIcon className="size-4 shrink-0 text-kumo-subtle" />
-                                <Link href={adminPath(`/proxies?proxy=${encodeURIComponent(proxy.name)}`)} variant="current" className={rowLinkClassName}>
-                                  <span className="truncate">{proxy.name}</span>
-                                </Link>
+                                <span className="truncate text-base font-medium text-kumo-default" title={proxy.name}>{proxy.name}</span>
                               </div>
                             </Table.Cell>
                             <Table.Cell>
@@ -363,25 +305,14 @@ export function ProxiesPage({ request }: { request: AdminRequest }) {
                         );
                       })
                     ) : (
-                      <TableEmpty>No proxies match this filter.</TableEmpty>
+                      <TableEmpty colSpan={10}>No proxies match this filter.</TableEmpty>
                     )}
                   </Table.Body>
                 </Table>
               </div>
             </div>
 
-            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
-              <Pagination.Info>
-                {({ pageShowingRange, totalCount }) => (
-                  <span>
-                    <strong>{pageShowingRange}</strong> of {totalCount} items
-                  </span>
-                )}
-              </Pagination.Info>
-              <Pagination.Separator />
-              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
-              <Pagination.Controls controls="simple" />
-            </Pagination>
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>

@@ -4,36 +4,25 @@ import type { Icon } from "@phosphor-icons/react";
 import {
   ArrowClockwiseIcon,
   CheckCircleIcon,
-  DotsThreeIcon,
   FunnelIcon,
   InfoIcon,
-  SortAscendingIcon,
-  SortDescendingIcon,
   TerminalWindowIcon,
   WarningCircleIcon,
   XCircleIcon
 } from "@phosphor-icons/react";
-import { Button, Collapsible, Combobox, Input, Loader, Pagination, Select, Table } from "@cloudflare/kumo";
+import { Button, Collapsible, Combobox, Input, Select, Table } from "@cloudflare/kumo";
 
 import type { SystemLog, SystemLogsResponse } from "../types";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
 import { PageHeader, PageTopBar } from "./operations-common";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 type LevelFilter = "all" | "error" | "warn" | "info" | "debug";
 type LogSort = "observed_at" | "node" | "service" | "level" | "message" | "ingested_at";
 type SortDirection = "asc" | "desc";
 
 const fetchLimitOptions = [100, 250, 500] as const;
-
-function queryString(params: Record<string, string | number | undefined>) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === "") continue;
-    query.set(key, String(value));
-  }
-  const text = query.toString();
-  return text ? `?${text}` : "";
-}
 
 function normalizeLevel(level: string): Exclude<LevelFilter, "all"> {
   const value = (level || "").trim().toLowerCase();
@@ -97,48 +86,8 @@ function sortLogs(logs: SystemLog[], sort: LogSort, direction: SortDirection): S
   });
 }
 
-function SortHead({
-  label,
-  column,
-  sort,
-  direction,
-  setSort,
-  className
-}: {
-  label: string;
-  column: LogSort;
-  sort: LogSort;
-  direction: SortDirection;
-  setSort: (column: LogSort) => void;
-  className?: string;
-}) {
-  const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
-  return (
-    <Table.Head className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 text-left font-medium text-kumo-default hover:text-kumo-strong"
-        onClick={() => setSort(column)}
-      >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
-      </button>
-    </Table.Head>
-  );
-}
-
-function TableEmpty({ children }: { children: string }) {
-  return (
-    <Table.Row>
-      <Table.Cell colSpan={7}>
-        <div className="flex min-h-32 items-center justify-center text-sm text-kumo-subtle">{children}</div>
-      </Table.Cell>
-    </Table.Row>
-  );
-}
-
-export function SystemLogsPage({ request }: { request: AdminRequest }) {
+export function SystemLogsPage() {
+  const { request } = useAdminApi();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(25);
   const [fetchLimit, setFetchLimit] = useState<(typeof fetchLimitOptions)[number]>(100);
@@ -153,12 +102,12 @@ export function SystemLogsPage({ request }: { request: AdminRequest }) {
 
   const path = "/api/admin/system-logs" + queryString({ limit: fetchLimit });
   const logsQuery = useQuery({
-    queryKey: ["admin", "system-logs", fetchLimit],
+    queryKey: adminKeys.systemLogs(fetchLimit),
     queryFn: () => request<SystemLogsResponse>(path),
     placeholderData: (previous) => previous
   });
 
-  const logs = logsQuery.data?.logs ?? [];
+  const logs = useMemo(() => logsQuery.data?.logs ?? [], [logsQuery.data?.logs]);
   const note = logsQuery.data?.note ?? "";
   const nodeOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.node).filter(Boolean))).sort(), [logs]);
   const serviceOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.service).filter(Boolean))).sort(), [logs]);
@@ -240,9 +189,6 @@ export function SystemLogsPage({ request }: { request: AdminRequest }) {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="System Logs" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="System Logs"
@@ -376,32 +322,23 @@ export function SystemLogsPage({ request }: { request: AdminRequest }) {
             </Collapsible.Root>
 
             <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="overflow-x-auto">
-                <Table className="w-full table-fixed">
+              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
+                <Table className="min-w-[900px] table-fixed">
                   <Table.Header variant="compact">
                     <Table.Row>
                       <SortHead label="Observed" column="observed_at" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                      <SortHead label="Node" column="node" sort={sort} direction={direction} setSort={setSort} className="w-24" />
+                      <SortHead label="Node" column="node" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 w-40 bg-kumo-base" />
                       <SortHead label="Service" column="service" sort={sort} direction={direction} setSort={setSort} className="w-36" />
                       <SortHead label="Level" column="level" sort={sort} direction={direction} setSort={setSort} className="w-20" />
                       <SortHead label="Message" column="message" sort={sort} direction={direction} setSort={setSort} className="w-[35%]" />
                       <SortHead label="Ingested" column="ingested_at" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                      <Table.Head className="w-12 text-right">
-                        <span className="sr-only">Actions</span>
-                      </Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {logsQuery.error ? (
-                      <TableEmpty>{error}</TableEmpty>
+                      <TableEmpty colSpan={6}>{error}</TableEmpty>
                     ) : logsQuery.isLoading ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={7}>
-                          <div className="flex min-h-32 items-center justify-center">
-                            <Loader size={20} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
+                      <TableLoading colSpan={6} />
                     ) : visibleRows.length > 0 ? (
                       visibleRows.map((log, index) => {
                         const meta = levelMeta(log.level);
@@ -412,8 +349,8 @@ export function SystemLogsPage({ request }: { request: AdminRequest }) {
                             <Table.Cell className="w-36">
                               <span className="whitespace-nowrap text-kumo-subtle">{formatTimestamp(log.observed_at)}</span>
                             </Table.Cell>
-                            <Table.Cell className="w-24">
-                              <span className="whitespace-nowrap text-kumo-default">{log.node || "n/a"}</span>
+                            <Table.Cell className="sticky left-0 z-10 w-40 bg-kumo-base">
+                              <span className="block truncate text-kumo-default" title={log.node}>{log.node || "n/a"}</span>
                             </Table.Cell>
                             <Table.Cell className="w-36">
                               <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-kumo-subtle">
@@ -435,34 +372,18 @@ export function SystemLogsPage({ request }: { request: AdminRequest }) {
                             <Table.Cell className="w-36">
                               <span className="whitespace-nowrap text-kumo-subtle">{formatTimestamp(log.ingested_at)}</span>
                             </Table.Cell>
-                            <Table.Cell className="w-12 text-right">
-                              <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for log from ${log.node || "node"}`}>
-                                <DotsThreeIcon className="size-4" />
-                              </Button>
-                            </Table.Cell>
                           </Table.Row>
                         );
                       })
                     ) : (
-                      <TableEmpty>No logs match this filter.</TableEmpty>
+                      <TableEmpty colSpan={6}>No logs match this filter.</TableEmpty>
                     )}
                   </Table.Body>
                 </Table>
               </div>
             </div>
 
-            <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
-              <Pagination.Info>
-                {({ pageShowingRange, totalCount }) => (
-                  <span>
-                    <strong>{pageShowingRange}</strong> of {totalCount} items
-                  </span>
-                )}
-              </Pagination.Info>
-              <Pagination.Separator />
-              <Pagination.PageSize value={perPage} onChange={setPageSize} options={[10, 25, 50, 100]} label="Items per page:" />
-              <Pagination.Controls controls="simple" />
-            </Pagination>
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>

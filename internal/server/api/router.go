@@ -22,6 +22,7 @@ type Options struct {
 	AdminPathToken     string
 	AllowInsecureAdmin bool
 	Version            string
+	AgentVersion       string
 	Repo               string
 	SingBoxVersion     string
 }
@@ -142,6 +143,7 @@ func installScriptHandler(options Options) http.HandlerFunc {
 		script, err := install.Script(install.ScriptData{
 			Repo:            options.Repo,
 			BoxFleetVersion: options.Version,
+			AgentVersion:    options.AgentVersion,
 			SingBoxVersion:  options.SingBoxVersion,
 		})
 		if err != nil {

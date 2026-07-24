@@ -20,18 +20,14 @@ go test ./...
 go vet ./...
 ```
 
-For visual work, start Vite and inspect with Playwright + system Chrome:
+For visual work, run the Playwright suite (it starts both servers itself):
 
 ```bash
-npm --prefix web run dev
-# open http://127.0.0.1:5173/admin/
+npm --prefix web run test:e2e
 ```
 
-In Playwright, launch Chrome with:
-
-```ts
-chromium.launch({ executablePath: "/usr/bin/google-chrome-stable" })
-```
+The config discovers Chrome on macOS, Linux, and Windows and falls back to the
+bundled browser.
 
 Kumo is the source of truth for component APIs and examples. From `web/`, run:
 

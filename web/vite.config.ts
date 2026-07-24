@@ -9,6 +9,7 @@ import { adminMockPlugin } from "./mocks/admin";
 // a running boxfleet-server. Set BOXFLEET_DEV_API=1 (or use `npm run dev:api`) to
 // proxy /api to a real server on :18081 instead.
 const useRealApi = process.env.BOXFLEET_DEV_API === "1";
+const apiPort = Number(process.env.BOXFLEET_E2E_SERVER_PORT ?? "18081");
 
 export default defineConfig({
   // The server may mount the admin UI behind a secret path prefix. Relative
@@ -34,7 +35,7 @@ export default defineConfig({
   server: useRealApi
     ? {
         proxy: {
-          "/api": "http://127.0.0.1:18081"
+          "/api": `http://127.0.0.1:${apiPort}`
         }
       }
     : undefined

@@ -40,7 +40,7 @@ func TestAdminNodeUpdateUsesOnlyFixedCatalogAssets(t *testing.T) {
 	if err := os.MkdirAll(assetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	agentName, singBoxName := "boxfleet-agent-v0.2.0-linux-amd64", "sing-box-v1.13.13-linux-amd64"
+	agentName, singBoxName := "boxfleet-agent-v0.1.9-linux-amd64", "sing-box-v1.13.13-linux-amd64"
 	agentData, singBoxData := []byte("agent release bytes"), []byte("sing-box release bytes")
 	if err := os.WriteFile(filepath.Join(assetDir, agentName), agentData, 0o755); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestAdminNodeUpdateUsesOnlyFixedCatalogAssets(t *testing.T) {
 	manifest := updateManifest{
 		Release: "v0.2.0",
 		Platforms: map[string]updateManifestPlatform{"linux/amd64": {
-			Agent:   updateManifestAsset{Version: "v0.2.0", Name: agentName, SHA256: testSHA256(agentData), Size: int64(len(agentData))},
+			Agent:   updateManifestAsset{Version: "v0.1.9", Name: agentName, SHA256: testSHA256(agentData), Size: int64(len(agentData))},
 			SingBox: updateManifestAsset{Version: "v1.13.13", Name: singBoxName, SHA256: testSHA256(singBoxData), Size: int64(len(singBoxData))},
 		}},
 	}
@@ -61,7 +61,7 @@ func TestAdminNodeUpdateUsesOnlyFixedCatalogAssets(t *testing.T) {
 	}
 	server := httptest.NewServer(NewRouter(Options{
 		DB: store, ArtifactDir: artifactDir, AllowInsecureAdmin: true,
-		Version: "v0.2.0", Repo: "ha0xin/BoxFleet", SingBoxVersion: "v1.13.13",
+		Version: "v0.2.0", AgentVersion: "v0.1.9", Repo: "ha0xin/BoxFleet", SingBoxVersion: "v1.13.13",
 	}))
 	t.Cleanup(server.Close)
 

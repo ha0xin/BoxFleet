@@ -9,6 +9,7 @@ fi
 
 REPO="${BOXFLEET_REPO:-{{ .Repo }}}"
 BOXFLEET_VERSION="${BOXFLEET_VERSION_OVERRIDE:-{{ .BoxFleetVersion }}}"
+AGENT_VERSION="${BOXFLEET_AGENT_VERSION:-{{ .AgentVersion }}}"
 SING_BOX_VERSION="${BOXFLEET_SING_BOX_VERSION:-{{ .SingBoxVersion }}}"
 INSTALL_DIR="${BOXFLEET_INSTALL_DIR:-/opt/boxfleet}"
 BIN_DIR="${INSTALL_DIR}/bin"
@@ -42,7 +43,7 @@ release_url() {
   printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$BOXFLEET_VERSION" "$asset"
 }
 
-agent_asset="boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"
+agent_asset="boxfleet-agent-${AGENT_VERSION}-linux-amd64"
 sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"
 
 mkdir -p "$TMP_DIR/artifacts"

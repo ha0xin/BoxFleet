@@ -106,7 +106,7 @@ Use the established frontend stack instead of hand-rolling UI behavior. See `doc
 - date-fns plus react-day-picker for date/time formatting, duration math, and date/range picking.
 - `@phosphor-icons/react` for app icons (Kumo's own components use Phosphor internally, so the app matches).
 
-For visual checks, use Playwright with system Chrome (`/usr/bin/google-chrome-stable`) and inspect rendered geometry/computed styles directly. `refs/kumo/` is a local checkout of Cloudflare Kumo for reference only: use `refs/kumo/packages/kumo-docs-astro/` for demo usage patterns and `refs/kumo/packages/kumo/src/` for component source; do not import from `refs/`.
+For visual checks, run `npm --prefix web run test:e2e` and inspect rendered geometry/computed styles directly. The repository Playwright configuration discovers Chrome on macOS, Linux, and Windows and falls back to bundled Chromium. `refs/kumo/` is a local checkout of Cloudflare Kumo for reference only: use `refs/kumo/packages/kumo-docs-astro/` for demo usage patterns and `refs/kumo/packages/kumo/src/` for component source; do not import from `refs/`.
 
 Network Events is the reference implementation for this stack: the page uses server-side pagination/filtering, URL-synced filters, TanStack Query, TanStack Table, react-hook-form/zod filters, and a react-day-picker date range. Time inputs are interpreted in the browser's local timezone and sent to the server as RFC3339 UTC query parameters. Structured network events are retained for `network_event_retention_days` from `settings` (default 90); raw network log rows are not retained.
 

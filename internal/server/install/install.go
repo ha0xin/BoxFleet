@@ -17,6 +17,7 @@ var scriptTemplate string
 type ScriptData struct {
 	Repo            string
 	BoxFleetVersion string
+	AgentVersion    string
 	SingBoxVersion  string
 }
 
@@ -26,6 +27,9 @@ func Script(data ScriptData) ([]byte, error) {
 	}
 	if data.BoxFleetVersion == "" {
 		data.BoxFleetVersion = "dev"
+	}
+	if data.AgentVersion == "" {
+		data.AgentVersion = data.BoxFleetVersion
 	}
 	if data.SingBoxVersion == "" {
 		data.SingBoxVersion = DefaultSingBoxVersion

@@ -98,10 +98,8 @@ The active native-Kumo shell was checkpointed after the rewrite:
   and a bottom `Sidebar.Trigger`.
 - `web/src/components/app-page-header.tsx` is the active page header. Its top
   breadcrumb/action bar is `h-[58px]` to align with Kumo `Sidebar.Header`.
-- `web/src/pages/overview.tsx` and `web/src/pages/settings.tsx` are implemented
-  on native Kumo. Other pages are placeholders until rewritten.
-- `web/src/components/kumo/page-header/page-header.tsx` is a vendored Kumo block
-  reference, not the active header.
+- Admin pages are implemented on native Kumo. No Kumo page-level block is
+  currently vendored; add one only when it will be adapted and used.
 
 Future page-header work should use the existing `actions` slot for review/publish
 controls and should preserve the 58px top-bar alignment. Pending/unpublished
@@ -110,13 +108,14 @@ semantic Kumo tokens and avoid raw color utilities.
 
 ## Visual Verification
 
-Use Playwright for layout-sensitive UI checks. Launch system Chrome directly:
+Use the repository Playwright configuration for layout-sensitive UI checks:
 
-```ts
-chromium.launch({ executablePath: "/usr/bin/google-chrome-stable" })
+```bash
+npm --prefix web run test:e2e
 ```
 
-This avoids relying on a user's default Chrome profile. If comparing with a
+It discovers Chrome on macOS, Linux, and Windows, then falls back to Playwright's
+bundled Chromium. If comparing with a
 running Cloudflare UI or a local dev server, measure actual DOM geometry and
 computed styles rather than eyeballing. The 58px header/sidebar alignment was
 verified this way by comparing the two elements' bounding boxes.

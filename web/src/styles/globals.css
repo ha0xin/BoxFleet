@@ -43,23 +43,9 @@
     }
   }
 
-  @keyframes bf-pulse-sparkline {
-    0%,
-    100% {
-      opacity: 0.45;
-    }
-    50% {
-      opacity: 0.9;
-    }
-  }
-
   .animate-fade-slide-in {
     animation: bf-fade-slide-in 260ms ease-out both;
     animation-delay: var(--row-delay, 0ms);
-  }
-
-  .animate-pulse-sparkline {
-    animation: bf-pulse-sparkline 1.6s ease-in-out infinite;
   }
 
   /* iPhone "slide to unlock" style sheen that sweeps across the publish bar
@@ -92,9 +78,8 @@
     animation: bf-slide-unlock 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .animate-fade-slide-in,
-    .animate-pulse-sparkline {
+@media (prefers-reduced-motion: reduce) {
+    .animate-fade-slide-in {
       animation: none;
     }
 
@@ -103,4 +88,20 @@
       opacity: 0;
     }
   }
+}
+
+.bf-table-scroll {
+  scrollbar-color: var(--color-kumo-line) transparent;
+  scrollbar-width: thin;
+}
+
+.bf-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.bf-table-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--color-kumo-line);
+  background-clip: padding-box;
 }

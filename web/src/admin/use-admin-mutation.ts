@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import type { AdminRequest } from "@/publish/publish-status";
+import type { AdminRequest } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 
 /**
  * Shared admin mutation. On success it invalidates every `["admin", ...]` query.
@@ -12,14 +13,14 @@ import type { AdminRequest } from "@/publish/publish-status";
 export function useAdminMutation<TVars, TData = unknown>(
   request: AdminRequest,
   mutationFn: (request: AdminRequest, vars: TVars) => Promise<TData>,
-  options?: { onSuccess?: (data: TData, vars: TVars) => void }
+  options?: { onSuccess?: (data: TData, vars: TVars) => void | Promise<void> }
 ) {
   const queryClient = useQueryClient();
   return useMutation<TData, Error, TVars>({
     mutationFn: (vars) => mutationFn(request, vars),
-    onSuccess: (data, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ["admin"] });
-      options?.onSuccess?.(data, vars);
+    onSuccess: async (data, vars) => {
+      await queryClient.invalidateQueries({ queryKey: adminKeys.root });
+      await options?.onSuccess?.(data, vars);
     }
   });
 }

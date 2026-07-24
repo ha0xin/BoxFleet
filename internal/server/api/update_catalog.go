@@ -58,6 +58,7 @@ func adminReleaseHandler(options Options, catalog *updateCatalog) http.HandlerFu
 	return func(w http.ResponseWriter, r *http.Request) {
 		release := adminRelease{
 			Repo: releaseRepo(options), BoxFleetVersion: releaseVersion(options),
+			AgentVersion:   releaseAgentVersion(options),
 			SingBoxVersion: releaseSingBoxVersion(options),
 		}
 		if _, err := catalog.load(r.Context()); err != nil {
@@ -180,7 +181,7 @@ func (c *updateCatalog) validateManifest(manifest updateManifest) error {
 		if strings.Count(platform, "/") != 1 {
 			return fmt.Errorf("invalid update platform %q", platform)
 		}
-		if err := validateManifestAsset(assets.Agent, release, "agent"); err != nil {
+		if err := validateManifestAsset(assets.Agent, releaseAgentVersion(c.options), "agent"); err != nil {
 			return fmt.Errorf("platform %s: %w", platform, err)
 		}
 		if err := validateManifestAsset(assets.SingBox, releaseSingBoxVersion(c.options), "sing_box"); err != nil {

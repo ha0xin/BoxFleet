@@ -34,6 +34,12 @@ jobs:
       - name: Build embedded web UI
         run: npm --prefix web run build
 
+      - name: Lint web UI
+        run: npm --prefix web run lint
+
+      - name: Run web unit tests
+        run: npm --prefix web test
+
       - name: Run Go tests
         run: go test ./...
 

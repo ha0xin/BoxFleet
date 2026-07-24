@@ -5,13 +5,11 @@ import {
   CalendarBlankIcon,
   ChartLineUpIcon,
   CheckCircleIcon,
-  DotsThreeIcon,
   GaugeIcon,
   HardDrivesIcon,
   ListChecksIcon,
   PlusIcon,
   ShieldCheckIcon,
-  TagIcon,
   TrendUpIcon,
   UsersIcon,
   XCircleIcon
@@ -41,14 +39,17 @@ import {
 
 type TrafficByUser = { user: string; upload: number; download: number };
 
-const MOCK_NODE_SPARKLINES = [
+// Placeholder shapes preserve the dashboard layout until the server exposes
+// time-series telemetry. They must not be interpreted as measurements. When the
+// time-series API lands, enable the time-range control and the tile's "live" delta.
+const PLACEHOLDER_NODE_SPARKLINES = [
   [18, 17, 19, 18, 21, 20, 22, 23, 21, 24, 26, 25, 27, 29, 31, 28, 30, 33],
   [8, 8, 9, 40, 10, 9, 11, 33, 10, 9, 10, 9, 11, 10, 12, 16, 10, 9],
   [12, 14, 11, 26, 13, 12, 15, 32, 14, 23, 13, 12, 11, 26, 12, 13, 11, 12],
   [10, 10, 10, 11, 10, 10, 12, 10, 10, 11, 10, 10, 10, 11, 10, 10, 10, 10],
 ] as const;
 
-const ANALYTICS_SPARKLINES = {
+const PLACEHOLDER_ANALYTICS_SPARKLINES = {
   traffic: [0, 12, 8, 18, 16, 22, 20, 26, 24, 29, 28, 36, 34, 41, 39, 44, 42, 48],
   users: [8, 9, 10, 10, 12, 12, 13, 15, 15, 16, 18, 19, 18, 21, 23, 22, 24, 26],
   logs: [4, 8, 5, 12, 7, 10, 13, 9, 14, 18, 16, 20, 17, 22, 24, 21, 23, 25],
@@ -68,8 +69,8 @@ function groupTrafficByUser(rows: TrafficRow[]): TrafficByUser[] {
   return [...byUser.values()].sort((a, b) => b.upload + b.download - (a.upload + a.download));
 }
 
-function mockNodeSparkline(index: number): SparklinePoint[] {
-  return toSparkline(MOCK_NODE_SPARKLINES[index % MOCK_NODE_SPARKLINES.length]);
+function placeholderNodeSparkline(index: number): SparklinePoint[] {
+  return toSparkline(PLACEHOLDER_NODE_SPARKLINES[index % PLACEHOLDER_NODE_SPARKLINES.length]);
 }
 
 function AnalyticsTile({
@@ -198,13 +199,13 @@ function SimpleListWidget({
                     {ItemIcon ? (
                       <ItemIcon className={`size-4 shrink-0 ${item.iconClassName ?? "text-kumo-subtle"}`} />
                     ) : null}
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       <Link
                         href={item.href}
                         variant="current"
                         target={item.external ? "_blank" : undefined}
                         rel={item.external ? "noreferrer" : undefined}
-                        className="flex min-w-0 items-center gap-2 !no-underline !decoration-[0.1em] text-base font-medium text-kumo-default hover:!underline"
+                        className="flex w-full min-w-0 items-center gap-2 overflow-hidden !no-underline !decoration-[0.1em] text-base font-medium text-kumo-default hover:!underline"
                       >
                         <span className="truncate">{item.label}</span>
                         {item.external ? <ArrowRightIcon className="size-4 shrink-0 text-kumo-subtle" /> : null}
@@ -213,7 +214,7 @@ function SimpleListWidget({
                     </div>
                   </div>
                   {item.value ? (
-                    <span className={`whitespace-nowrap text-sm font-medium tabular-nums ${toneClass(item.valueTone ?? "subtle")}`}>
+                    <span className={`max-w-[40%] shrink-0 truncate whitespace-nowrap text-sm font-medium tabular-nums ${toneClass(item.valueTone ?? "subtle")}`} title={item.value}>
                       {item.value}
                     </span>
                   ) : null}
@@ -236,7 +237,6 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
         count={nodes.length}
         href={adminPath("/nodes")}
         actionHref={adminPath("/nodes")}
-        starred
       />
       <LayerCard.Primary className="flex-1 p-0">
         <div className="relative flex-1">
@@ -248,7 +248,7 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
                 return (
                   <li
                     key={node.id}
-                    className="group/row grid h-12 grid-cols-[auto_minmax(0,1fr)_4rem] items-center gap-2 px-1 animate-fade-slide-in"
+                    className="group/row grid h-12 grid-cols-[auto_minmax(0,1fr)_7rem] items-center gap-2 px-1 animate-fade-slide-in"
                     style={rowDelay(index)}
                   >
                     <StatusIcon className={`size-5 shrink-0 ${status.className}`} aria-label={status.label} />
@@ -257,16 +257,17 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
                         <Link
                           href={adminPath("/nodes")}
                           variant="current"
-                          className="truncate bg-kumo-base pr-1 text-base font-medium text-kumo-default !no-underline !decoration-[0.1em] group-hover/row:!underline"
+                          className="block max-w-full truncate bg-kumo-base pr-2 text-base font-medium text-kumo-default !no-underline !decoration-[0.1em] group-hover/row:!underline"
+                          title={node.name}
                         >
                           {node.name}
                         </Link>
                       </div>
                       <div className="absolute right-0 bottom-0 flex h-8 w-[40%] min-w-0 items-center pb-px">
-                        <SparkArea data={mockNodeSparkline(index)} gradientId={`node-sparkline-${index}`} />
+                        <SparkArea data={placeholderNodeSparkline(index)} gradientId={`node-sparkline-${index}`} />
                       </div>
                     </div>
-                    <span className="text-right text-sm text-kumo-subtle">{formatNodeVersion(node)}</span>
+                    <span className="truncate text-right text-sm text-kumo-subtle" title={formatNodeVersion(node)}>{formatNodeVersion(node)}</span>
                   </li>
                 );
               })}
@@ -408,21 +409,12 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <PageTopBar current="Account home" />
-      <div className="relative z-[19] min-h-21 bg-kumo-canvas pb-2">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pt-3 pb-1 md:px-8 lg:px-10" />
-      </div>
       <main className="w-full grow bg-kumo-canvas">
         <PageHeader
           title="BoxFleet Admin"
           description="Central control plane for nodes, users, traffic, and config versions."
           actions={
             <>
-              <Button variant="secondary" shape="square" aria-label="Manage tags">
-                <TagIcon />
-              </Button>
-              <Button variant="secondary" shape="square" aria-label="Actions">
-                <DotsThreeIcon />
-              </Button>
               <LinkButton href={adminPath("/nodes")} variant="primary" icon={PlusIcon}>
                 Add
               </LinkButton>
@@ -435,14 +427,14 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
               <div className="col-span-6">
                 <section aria-label="Analytics" className="w-full space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 flex-wrap items-center gap-3">
+                    <div>
                       <h2 className="text-base font-semibold text-kumo-default">Analytics</h2>
+                      <p className="text-xs text-kumo-subtle">Trend lines are layout previews until historical telemetry is available.</p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2 pt-0">
-                      <Button variant="secondary" icon={CalendarBlankIcon}>
-                        Last 24 hours
-                      </Button>
-                    </div>
+                    {/* TODO(time-series): enable this picker when its value drives the telemetry query. */}
+                    <Button variant="secondary" icon={CalendarBlankIcon} disabled>
+                      Last 24 hours
+                    </Button>
                   </div>
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <AnalyticsCard
@@ -471,9 +463,9 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
                           label: "Billable traffic",
                           value: formatBytes(totalTraffic),
                           href: adminPath("/traffic"),
-                          sparkline: toSparkline(ANALYTICS_SPARKLINES.traffic),
-                          gradientId: "traffic-analytics-sparkline",
-                          delta: trafficRows.length > 0 ? "live" : undefined
+                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.traffic),
+                          gradientId: "traffic-analytics-sparkline"
+                          // TODO(time-series): add delta="live" only after the sparkline is backed by telemetry.
                         },
                         {
                           label: "Traffic users",
@@ -491,14 +483,14 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
                           label: "Active nodes",
                           value: `${activeNodes}/${nodes.length}`,
                           href: adminPath("/nodes"),
-                          sparkline: toSparkline(ANALYTICS_SPARKLINES.users),
+                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.users),
                           gradientId: "nodes-analytics-sparkline"
                         },
                         {
                           label: "Recent logs",
                           value: formatCompactNumber(logs.length),
                           href: adminPath("/system-logs"),
-                          sparkline: toSparkline(ANALYTICS_SPARKLINES.logs),
+                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.logs),
                           gradientId: "logs-analytics-sparkline"
                         }
                       ]}

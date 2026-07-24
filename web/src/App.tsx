@@ -1,14 +1,15 @@
 import { GearSixIcon } from "@phosphor-icons/react";
-import { lazy, Suspense, useState } from "react";
-import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Banner, Loader, Sidebar, Text } from "@cloudflare/kumo";
+import { Banner, Button, Loader, Sidebar, Text } from "@cloudflare/kumo";
 
 import { AppPageHeader } from "@/components/app-page-header";
+import { AdminApiProvider, useAdminApi } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 import { PublishStatusProvider } from "@/publish/publish-status";
-import type { AdminRequest } from "@/publish/publish-status";
 import { PublishDiffDialog } from "@/publish/publish-diff-dialog";
-import { adminBasename, navGroups, pages, settingsNav } from "./navigation";
+import { navGroups, pages, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
 import type { Overview } from "./types";
 
@@ -50,52 +51,23 @@ const SystemLogsPage = lazy(() =>
 );
 const UsersPage = lazy(() => loadUsersPage().then((module) => ({ default: module.UsersPage })));
 
-function adminRequestPath(path: string): string {
-  if (!path.startsWith("/api/admin")) {
-    return path;
-  }
-  const basename = adminBasename();
-  if (basename === "/admin") {
-    return path;
-  }
-  return `${basename.slice(0, -"/admin".length)}${path}`;
-}
-
 function App() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [activeToken, setActiveToken] = useState(() => localStorage.getItem("boxfleet.adminToken") ?? "");
   const [tokenInput, setTokenInput] = useState(activeToken);
   const [authVersion, setAuthVersion] = useState(0);
-  const adminFetching = useIsFetching({ queryKey: ["admin"] }) > 0;
-
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const headers = new Headers(init.headers);
-    if (!headers.has("Content-Type") && init.body) {
-      headers.set("Content-Type", "application/json");
-    }
-    if (activeToken.trim()) {
-      headers.set("Authorization", `Bearer ${activeToken.trim()}`);
-    }
-    const response = await fetch(adminRequestPath(path), { ...init, headers });
-    if (!response.ok) {
-      const body = await response.text();
-      if (response.status === 401) {
-        throw new Error("Admin token is missing or invalid.");
-      }
-      throw new Error(`${response.status} ${body}`);
-    }
-    if (response.status === 204) {
-      return undefined as T;
-    }
-    const contentType = response.headers.get("Content-Type") ?? "";
-    if (contentType.includes("application/json")) {
-      return (await response.json()) as T;
-    }
-    return (await response.text()) as T;
-  }
+  const [authRequired, setAuthRequired] = useState(false);
+  const authRequiredRef = useRef(false);
+  const handleUnauthorized = useCallback(() => {
+    if (authRequiredRef.current) return;
+    authRequiredRef.current = true;
+    setAuthRequired(true);
+    navigate("/settings", { replace: true });
+  }, [navigate]);
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ["admin"] });
+    await queryClient.invalidateQueries({ queryKey: adminKeys.root });
   }
 
   function applyToken() {
@@ -107,6 +79,8 @@ function App() {
       localStorage.removeItem("boxfleet.adminToken");
     }
     queryClient.clear();
+    authRequiredRef.current = false;
+    setAuthRequired(false);
     setAuthVersion((value) => value + 1);
   }
 
@@ -115,27 +89,78 @@ function App() {
     setActiveToken("");
     localStorage.removeItem("boxfleet.adminToken");
     queryClient.clear();
+    authRequiredRef.current = true;
+    setAuthRequired(true);
     setAuthVersion((value) => value + 1);
   }
 
+  return (
+    <AdminApiProvider token={activeToken} onUnauthorized={handleUnauthorized}>
+      <AdminApp
+        tokenInput={tokenInput}
+        setTokenInput={setTokenInput}
+        activeToken={activeToken}
+        authVersion={authVersion}
+        applyToken={applyToken}
+        logout={logout}
+        refresh={() => void refresh()}
+        authRequired={authRequired}
+      />
+    </AdminApiProvider>
+  );
+}
+
+function AdminApp({
+  tokenInput,
+  setTokenInput,
+  activeToken,
+  authVersion,
+  applyToken,
+  logout,
+  refresh,
+  authRequired
+}: {
+  tokenInput: string;
+  setTokenInput: (value: string) => void;
+  activeToken: string;
+  authVersion: number;
+  applyToken: () => void;
+  logout: () => void;
+  refresh: () => void;
+  authRequired: boolean;
+}) {
   return (
     <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <PublishStatusProvider request={request}>
+        <PublishStatusProvider>
+          {authRequired ? (
+            <div className="px-4 pt-4 md:px-8">
+              <Banner
+                variant="error"
+                title="Admin authentication required"
+                description="The saved token was rejected. Enter a valid admin token in Settings to reconnect."
+                action={
+                  <Button variant="secondary" onClick={() => document.getElementById("admin-token-input")?.focus()}>
+                    Enter token
+                  </Button>
+                }
+              />
+            </div>
+          ) : null}
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              <Route path="/" element={<OverviewRoute request={request} authVersion={authVersion} />} />
-              <Route path="/nodes" element={<NodesPage request={request} />} />
-              <Route path="/proxies" element={<ProxiesPage request={request} />} />
-              <Route path="/users" element={<UsersPage request={request} />} />
-              <Route path="/mihomo-profiles" element={<MihomoProfilesPage request={request} />} />
-              <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage request={request} />} />
-              <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage request={request} />} />
+              <Route path="/" element={<OverviewRoute authVersion={authVersion} />} />
+              <Route path="/nodes" element={<NodesPage />} />
+              <Route path="/proxies" element={<ProxiesPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/mihomo-profiles" element={<MihomoProfilesPage />} />
+              <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage />} />
+              <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage />} />
               <Route path="/traffic" element={<ComingSoon />} />
-              <Route path="/network-events" element={<NetworkEventsPage request={request} />} />
-              <Route path="/system-logs" element={<SystemLogsPage request={request} />} />
+              <Route path="/network-events" element={<NetworkEventsPage />} />
+              <Route path="/system-logs" element={<SystemLogsPage />} />
               <Route
                 path="/settings"
                 element={
@@ -145,8 +170,7 @@ function App() {
                     activeToken={activeToken}
                     applyToken={applyToken}
                     logout={logout}
-                    refresh={() => void refresh()}
-                    refreshing={adminFetching}
+                    refresh={refresh}
                   />
                 }
               />
@@ -161,10 +185,13 @@ function App() {
   );
 }
 
-function OverviewRoute({ request, authVersion }: { request: AdminRequest; authVersion: number }) {
+function OverviewRoute({ authVersion }: { authVersion: number }) {
+  const { request } = useAdminApi();
   const overviewQuery = useQuery({
-    queryKey: ["admin", "overview", authVersion],
-    queryFn: () => request<Overview>("/api/admin/overview")
+    queryKey: adminKeys.overview(authVersion),
+    queryFn: () => request<Overview>("/api/admin/overview"),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true
   });
 
   if (overviewQuery.error) {

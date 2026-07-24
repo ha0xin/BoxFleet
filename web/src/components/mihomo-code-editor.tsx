@@ -90,14 +90,27 @@ export function MihomoCodeEditor({
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const changeRef = useRef(onChange);
-  changeRef.current = onChange;
+  const valueRef = useRef(value);
+
+  useEffect(() => {
+    changeRef.current = onChange;
+    valueRef.current = value;
+  }, [onChange, value]);
+
+  useEffect(() => {
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const syncTheme = () => monaco.editor.setTheme(colorScheme.matches ? "vs-dark" : "vs");
+    syncTheme();
+    colorScheme.addEventListener("change", syncTheme);
+    return () => colorScheme.removeEventListener("change", syncTheme);
+  }, []);
 
   useEffect(() => {
     if (!hostRef.current) return;
     const uri = monaco.Uri.parse(
       kind === "yaml" ? `file:///rewrite-${crypto.randomUUID()}.boxfleet-rewrite.yaml` : `file:///rewrite-${crypto.randomUUID()}.js`
     );
-    const model = monaco.editor.createModel(value, kind === "yaml" ? "yaml" : "javascript", uri);
+    const model = monaco.editor.createModel(valueRef.current, kind === "yaml" ? "yaml" : "javascript", uri);
     const editor = monaco.editor.create(hostRef.current, { ...editorOptions, model, readOnly });
     editorRef.current = editor;
     const subscription = editor.onDidChangeModelContent(() => changeRef.current?.(editor.getValue()));
@@ -113,30 +126,6 @@ export function MihomoCodeEditor({
     const editor = editorRef.current;
     if (editor && editor.getValue() !== value) editor.setValue(value);
   }, [value]);
-
-  return <div ref={hostRef} className="h-[34rem] overflow-hidden rounded-lg border border-kumo-line" />;
-}
-
-export function MihomoDiffEditor({ original, modified }: { original: string; modified: string }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!hostRef.current) return;
-    const originalModel = monaco.editor.createModel(original, "yaml");
-    const modifiedModel = monaco.editor.createModel(modified, "yaml");
-    const editor = monaco.editor.createDiffEditor(hostRef.current, {
-      ...editorOptions,
-      readOnly: true,
-      originalEditable: false,
-      renderSideBySide: true
-    });
-    editor.setModel({ original: originalModel, modified: modifiedModel });
-    return () => {
-      editor.dispose();
-      originalModel.dispose();
-      modifiedModel.dispose();
-    };
-  }, [original, modified]);
 
   return <div ref={hostRef} className="h-[34rem] overflow-hidden rounded-lg border border-kumo-line" />;
 }

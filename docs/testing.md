@@ -112,7 +112,9 @@ The embedded admin frontend should pass:
 
 ```bash
 $(go env GOPATH)/bin/sqlc generate
-npm --prefix web install
+npm --prefix web ci
+npm --prefix web run lint
+npm --prefix web test
 npm --prefix web run build
 go test ./...
 go vet ./...
@@ -166,9 +168,13 @@ plan tests protect bounded traffic, heartbeat, and Network Events reads; the
 documented P95 targets are verified against a production-shaped database on the
 release host because absolute timings are hardware-dependent.
 
-The Playwright config uses `/usr/bin/google-chrome-stable` by default to avoid
-downloading a browser. Override it if needed:
+The Playwright config discovers Chrome on macOS, Linux, and Windows, falling
+back to Playwright's bundled Chromium. Override it if needed, or select multiple
+browser engines:
 
 ```bash
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/chrome npm --prefix web run test:e2e
+npm --prefix web run test:e2e:all
 ```
+
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` remains available when a specific Chrome
+binary is required; set it with the environment-variable syntax for your shell.

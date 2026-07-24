@@ -17,6 +17,7 @@ jobs:
     env:
       GOOS: linux
       GOARCH: amd64
+      AGENT_REVISION: v0.6.1
       SING_BOX_REVISION: v1.13.13
       SING_BOX_TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,badlinkname,tfogo_checklinkname0,with_v2ray_api
 
@@ -59,11 +60,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/artifacts
-          ldflags="-s -w -X main.version=${{ steps.version.outputs.value }}"
+          server_ldflags="-s -w -X main.version=${{ steps.version.outputs.value }} -X main.agentVersion=${AGENT_REVISION}"
+          agent_ldflags="-s -w -X main.version=${AGENT_REVISION}"
           boxfleet_version="${{ steps.version.outputs.value }}"
-          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/bf-${boxfleet_version}-linux-amd64" ./cmd/bf
-          CGO_ENABLED=1 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/boxfleet-server-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-server
-          CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "dist/artifacts/boxfleet-agent-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-agent
+          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.version=${boxfleet_version}" -o "dist/artifacts/bf-${boxfleet_version}-linux-amd64" ./cmd/bf
+          CGO_ENABLED=1 go build -trimpath -ldflags "$server_ldflags" -o "dist/artifacts/boxfleet-server-${boxfleet_version}-linux-amd64" ./cmd/boxfleet-server
+          CGO_ENABLED=0 go build -trimpath -ldflags "$agent_ldflags" -o "dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64" ./cmd/boxfleet-agent
 
       - name: Build sing-box with V2Ray API
         shell: bash
@@ -87,7 +89,7 @@ jobs:
           set -euo pipefail
           chmod 0755 dist/artifacts/*
           boxfleet_version="${{ steps.version.outputs.value }}"
-          agent_name="boxfleet-agent-${boxfleet_version}-linux-amd64"
+          agent_name="boxfleet-agent-${AGENT_REVISION}-linux-amd64"
           sing_box_name="sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64"
           agent_sha256="$(sha256sum "dist/artifacts/${agent_name}" | awk '{print $1}')"
           sing_box_sha256="$(sha256sum "dist/artifacts/${sing_box_name}" | awk '{print $1}')"
@@ -95,7 +97,7 @@ jobs:
           sing_box_size="$(stat -c '%s' "dist/artifacts/${sing_box_name}")"
           jq -n \
             --arg release "$boxfleet_version" \
-            --arg agent_version "$boxfleet_version" \
+            --arg agent_version "$AGENT_REVISION" \
             --arg agent_name "$agent_name" \
             --arg agent_sha256 "$agent_sha256" \
             --argjson agent_size "$agent_size" \
@@ -151,7 +153,7 @@ jobs:
             dist/boxfleet-update.json \
             dist/artifacts/bf-${{ steps.version.outputs.value }}-linux-amd64 \
             dist/artifacts/boxfleet-server-${{ steps.version.outputs.value }}-linux-amd64 \
-            dist/artifacts/boxfleet-agent-${{ steps.version.outputs.value }}-linux-amd64 \
+            dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64 \
             dist/artifacts/sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64 \
             --verify-tag \
             --generate-notes

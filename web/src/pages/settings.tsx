@@ -1,6 +1,8 @@
 import { ArrowsClockwiseIcon, CheckIcon, SignOutIcon } from "@phosphor-icons/react";
 import { Button, Grid, SensitiveInput, Surface, Text } from "@cloudflare/kumo";
+import { useIsFetching } from "@tanstack/react-query";
 
+import { adminKeys } from "@/admin/query";
 import { AppPageHeader } from "@/components/app-page-header";
 
 export function SettingsPage({
@@ -9,8 +11,7 @@ export function SettingsPage({
   activeToken,
   applyToken,
   logout,
-  refresh,
-  refreshing
+  refresh
 }: {
   tokenInput: string;
   setTokenInput: (value: string) => void;
@@ -18,14 +19,14 @@ export function SettingsPage({
   applyToken: () => void;
   logout: () => void;
   refresh: () => void;
-  refreshing: boolean;
 }) {
+  const refreshing = useIsFetching({ queryKey: adminKeys.root }) > 0;
   const unchanged = tokenInput.trim() === activeToken.trim();
 
   return (
     <AppPageHeader title="Settings" description="Admin authentication and data.">
       <Grid variant="2up" gap="base">
-        <Surface className="rounded-lg p-5">
+        <Surface id="admin-token" className="rounded-lg p-5 scroll-mt-4">
           <Text variant="heading3" as="h2">
             Admin token
           </Text>
@@ -42,6 +43,7 @@ export function SettingsPage({
             }}
           >
             <SensitiveInput
+              id="admin-token-input"
               size="sm"
               placeholder="Admin token"
               value={tokenInput}

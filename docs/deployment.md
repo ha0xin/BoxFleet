@@ -42,16 +42,20 @@ The release workflow uploads:
 
 - `bf-<boxfleet-version>-linux-amd64`
 - `boxfleet-server-<boxfleet-version>-linux-amd64`
-- `boxfleet-agent-<boxfleet-version>-linux-amd64`
+- `boxfleet-agent-<agent-version>-linux-amd64`
 - `sing-box-v1.13.13-linux-amd64` built with `with_v2ray_api`
 - `boxfleet-<boxfleet-version>-linux-amd64.tar.gz`
 - `boxfleet-update.json`
 - `SHA256SUMS`
 
-The release workflow builds `sing-box` from pinned upstream tag `v1.13.13` with
-the BoxFleet-required tags. The Build Artifacts workflow can also be manually
-dispatched for pre-release testing, but server deployments should use GitHub
-Releases.
+Server, agent, and sing-box versions are independent. The release workflow's
+`AGENT_REVISION` changes only when agent code or its runtime contract changes;
+`SING_BOX_REVISION` changes only when the pinned upstream build changes. A
+server-only release therefore keeps nodes on their existing component versions
+and does not advertise a no-op update. The workflow still packages those pinned
+components so new nodes can bootstrap from one release. The Build Artifacts
+workflow can also be manually dispatched for pre-release testing, but server
+deployments should use GitHub Releases.
 
 Wait for the release workflow to finish, then download the release on a Linux
 amd64 host:
@@ -145,9 +149,10 @@ sudo sh /tmp/boxfleet-install.sh 'boxfleet-bootstrap:...'
 ```
 
 The embedded install script downloads
-`boxfleet-agent-<boxfleet-version>-linux-amd64` and
+`boxfleet-agent-<agent-version>-linux-amd64` and
 `sing-box-v1.13.13-linux-amd64` from the GitHub Release matching the running
-server version, verifies checksums when supported by `sha256sum`, installs both
+server version. The component versions are embedded independently in the server
+binary, matching `boxfleet-update.json`. The script verifies checksums, installs both
 under `/opt/boxfleet/bin`, then runs `boxfleet-agent bootstrap`.
 
 The agent writes `/etc/boxfleet/agent.json`, verifies the installed `sing-box`
@@ -196,8 +201,9 @@ it is never the durable queue. The 45-second wait is below Cloudflare's
 seconds. Preserve POST requests and disable caching on `/api/node/*`; do not set
 a reverse-proxy timeout below 55 seconds.
 
-The Nodes page compares heartbeat versions with the formal server release. A
-single update can select agent, sing-box, or both. `Update all` releases one
+The Nodes page compares heartbeat versions with the agent and sing-box targets
+advertised by the formal server release; it does not use the server version as
+the agent target. A single update can select agent, sing-box, or both. `Update all` releases one
 online active canary, then batches of at most two; a failure pauses expansion.
 After repairing the cause, `Retry failed batch` creates explicit `retry_of`
 operations. Offline nodes keep queued work. A paused/disabled node may update,

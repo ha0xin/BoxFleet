@@ -1,19 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
   ArrowRightIcon,
-  DotsThreeIcon,
-  LightningIcon,
   ListChecksIcon,
   PlusIcon,
-  StarIcon,
-  UsersIcon,
   WarningCircleIcon,
   XCircleIcon,
   CheckCircleIcon
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
-import { Badge, Breadcrumbs, Button, LayerCard, Link, LinkButton } from "@cloudflare/kumo";
+import { Badge, Breadcrumbs, LayerCard, Link, LinkButton, Sidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
@@ -124,7 +120,7 @@ export function SparkArea({
 }) {
   return (
     <div className={`pointer-events-none ${className}`} aria-hidden="true">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 32 }}>
         <AreaChart data={data} margin={{ top: 1, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -152,25 +148,22 @@ export function PageTopBar({ current }: { current: string }) {
   const { status } = usePublishStatus();
   return (
     <div
-      className={`flex h-[58px] shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-6 transition-colors duration-300 ${publishBarToneClass(status)}`}
+      className={`flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6 ${publishBarToneClass(status)}`}
     >
-      <Breadcrumbs size="sm">
-        <Breadcrumbs.Link href={adminPath("/")}>BoxFleet</Breadcrumbs.Link>
-        <Breadcrumbs.Separator />
-        <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
-      </Breadcrumbs>
-      <div className="ml-auto flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2">
+        <Sidebar.Trigger className="md:hidden" />
+        <Breadcrumbs size="sm">
+          <Breadcrumbs.Link href={adminPath("/")}>BoxFleet</Breadcrumbs.Link>
+          <Breadcrumbs.Separator />
+          <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
+        </Breadcrumbs>
+      </div>
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
         <PublishStrip />
         <div className="flex gap-1">
-          <Button variant="ghost" size="sm" icon={LightningIcon}>
-            <span className="hidden md:inline">Ask AI</span>
-          </Button>
           <LinkButton href={adminPath("/system-logs")} variant="ghost" size="sm" icon={ListChecksIcon}>
             <span className="hidden md:inline">Logs</span>
           </LinkButton>
-          <Button variant="ghost" size="sm" shape="square" aria-label="User menu">
-            <UsersIcon className="size-4 text-kumo-subtle" />
-          </Button>
         </div>
       </div>
     </div>
@@ -188,14 +181,7 @@ export function PageHeader({
 }) {
   return (
     <div className="mx-auto w-full max-w-[1400px] px-6 py-0 md:px-8 lg:px-10">
-      <div className="flex items-center gap-2">
-        <nav className="mr-4 flex h-12 min-w-0 grow items-center gap-1 overflow-hidden whitespace-nowrap text-base" aria-label="breadcrumb">
-          <div className="flex min-w-0 max-w-full items-center gap-1 font-medium" aria-current="page">
-            <span className="truncate">{title}</span>
-          </div>
-        </nav>
-      </div>
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-4">
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-4 pt-6">
         <div className="flex min-w-0 flex-col">
           <h1 className="mb-1.5 text-xl font-semibold text-kumo-default md:text-3xl">{title}</h1>
           <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p>
@@ -212,8 +198,7 @@ export function WidgetHeader({
   icon: Icon,
   href,
   actionHref,
-  actionLabel = "Add",
-  starred = false
+  actionLabel = "Add"
 }: {
   title: string;
   count?: number;
@@ -221,7 +206,6 @@ export function WidgetHeader({
   href?: string;
   actionHref?: string;
   actionLabel?: string;
-  starred?: boolean;
 }) {
   return (
     <LayerCard.Secondary className="h-14 justify-between py-0">
@@ -231,19 +215,11 @@ export function WidgetHeader({
         {typeof count === "number" ? <Badge variant="secondary">{count}</Badge> : null}
       </div>
       <div className="flex shrink-0 items-center justify-center gap-1.5">
-        {starred ? (
-          <Button variant="secondary" size="sm" shape="square" aria-label="Starred">
-            <StarIcon className="size-4" />
-          </Button>
-        ) : null}
         {actionHref ? (
           <LinkButton href={actionHref} variant="secondary" size="sm" shape="square" aria-label={actionLabel}>
             <PlusIcon className="size-4" />
           </LinkButton>
         ) : null}
-        <Button variant="ghost" size="sm" shape="square" aria-label={`${title} actions`}>
-          <DotsThreeIcon className="size-4" />
-        </Button>
         {href ? (
           <Link href={href} variant="current" aria-label={`Open ${title}`} className="flex !no-underline text-kumo-default">
             <ArrowRightIcon className="pointer-events-none size-4 shrink-0" />
@@ -252,51 +228,4 @@ export function WidgetHeader({
       </div>
     </LayerCard.Secondary>
   );
-}
-
-export function SplitMetricCard({
-  title,
-  icon,
-  tiles
-}: {
-  title: string;
-  icon: Icon;
-  tiles: Array<{
-    label: string;
-    value: string;
-    detail?: string;
-    tone?: Tone;
-    sparkline?: SparklinePoint[];
-    gradientId?: string;
-  }>;
-}) {
-  return (
-    <LayerCard className="flex h-full w-full flex-col">
-      <WidgetHeader title={title} icon={icon} />
-      <LayerCard.Primary className="flex-1 p-0">
-        <div className="grid h-full auto-rows-fr grid-cols-1 sm:grid-cols-2">
-          {tiles.map((tile, index) => (
-            <div key={tile.label} className={index === 0 ? "border-b border-kumo-line sm:border-r sm:border-b-0" : ""}>
-              <div className="flex h-full min-h-22 flex-col gap-2 overflow-hidden bg-kumo-base px-4 pt-4 pb-4 animate-fade-slide-in" style={rowDelay(index)}>
-                <div className="text-xs font-medium text-kumo-subtle">{tile.label}</div>
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className={`text-xl font-semibold leading-none ${toneClass(tile.tone)}`}>{tile.value}</span>
-                  {tile.detail ? <span className="text-sm font-medium text-kumo-subtle">{tile.detail}</span> : null}
-                </div>
-                {tile.sparkline && tile.gradientId ? (
-                  <div className="-mx-4 mt-auto w-[calc(100%+2rem)] min-w-0">
-                    <SparkArea data={tile.sparkline} gradientId={tile.gradientId} />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      </LayerCard.Primary>
-    </LayerCard>
-  );
-}
-
-export function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="flex min-h-36 items-center justify-center px-4 py-8 text-sm text-kumo-subtle">{children}</div>;
 }

@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useAdminApi } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 import type { AdminNode, ConfigChange, ConfigChangesResponse, PublishResponse } from "@/types";
-
-export type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /**
  * Visible state of the global publish bar.
@@ -63,7 +63,8 @@ function nodeApplied(node: AdminNode): boolean {
   return node.apply_status === "applied";
 }
 
-export function PublishStatusProvider({ request, children }: { request: AdminRequest; children: ReactNode }) {
+export function PublishStatusProvider({ children }: { children: ReactNode }) {
+  const { request } = useAdminApi();
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>("browsing");
   const [isDiffOpen, setDiffOpen] = useState(false);
@@ -83,10 +84,14 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
   }, []);
 
   const changesQuery = useQuery({
-    queryKey: ["admin", "config-changes"],
+    queryKey: adminKeys.configChanges,
     queryFn: () => request<ConfigChangesResponse>("/api/admin/config/changes"),
     enabled: configCheckEnabled,
-    staleTime: Infinity
+    // Rendering/comparing configs is expensive. Treat a recent result as fresh,
+    // but re-check on focus once it is at least a minute old so CLI/other-tab
+    // changes cannot remain invisible indefinitely.
+    staleTime: 60_000,
+    refetchOnWindowFocus: true
   });
   const changes = useMemo(() => changesQuery.data?.changed ?? [], [changesQuery.data]);
   // Surface a failing /config/changes instead of silently reading as idle: a
@@ -101,7 +106,7 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
   // keep polling after a failure so an agent that retries and converges is seen.
   const polling = phase === "applying" || phase === "error";
   const nodesQuery = useQuery({
-    queryKey: ["admin", "publish-nodes"],
+    queryKey: adminKeys.publishNodes,
     queryFn: () => request<AdminNode[]>("/api/admin/nodes"),
     enabled: polling,
     refetchInterval: polling ? 4_000 : false
@@ -159,10 +164,10 @@ export function PublishStatusProvider({ request, children }: { request: AdminReq
       // Drop the stale node snapshot from the previous apply: its versions match
       // and would otherwise trip an immediate false "applied" before the first
       // fresh poll carrying the just-published target arrives.
-      queryClient.removeQueries({ queryKey: ["admin", "publish-nodes"] });
+      queryClient.removeQueries({ queryKey: adminKeys.publishNodes });
       setPhase("applying");
       void changesQuery.refetch();
-      void queryClient.invalidateQueries({ queryKey: ["admin"] });
+      void queryClient.invalidateQueries({ queryKey: adminKeys.root });
     },
     onError: () => setPhase("error")
   });

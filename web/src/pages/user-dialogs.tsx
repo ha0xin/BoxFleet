@@ -20,9 +20,12 @@ import type {
   AdminUser,
   UserConnectionInfo
 } from "../types";
-import type { AdminRequest } from "@/publish/publish-status";
+import type { AdminRequest } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSubscription } from "@/admin/use-subscription";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { copyText as writeClipboard, formatDateTime } from "@/utils";
 
 export type UserDialogState =
   | { mode: "create" }
@@ -100,8 +103,7 @@ export function UserFormDialog({
   });
   useEffect(() => {
     form.reset(defaults(state));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.mode, isEdit ? state.user.id : "create"]);
+  }, [form, state]);
 
   const mutation = useAdminMutation<UserFormValues, AdminUser>(
     request,
@@ -149,7 +151,7 @@ export function UserFormDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="p-6">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">
           {isEdit ? `Edit ${state.user.name}` : "Create user"}
         </Dialog.Title>
@@ -272,18 +274,17 @@ export function ManageAccessDialog({
 }) {
   const [selectedIDs, setSelectedIDs] = useState<string[]>([]);
   const [issueError, setIssueError] = useState("");
-  const queryClient = useQueryClient();
 
   const accessQuery = useQuery({
-    queryKey: ["admin", "user-access", user.name],
+    queryKey: adminKeys.userAccess(user.name),
     queryFn: () => request<AdminProxyAccess[]>(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`)
   });
   const proxiesQuery = useQuery({
-    queryKey: ["admin", "proxies-all"],
+    queryKey: adminKeys.proxies,
     queryFn: () => request<AdminProxiesResponse>("/api/admin/proxies?limit=500")
   });
 
-  const accesses = accessQuery.data ?? [];
+  const accesses = useMemo(() => accessQuery.data ?? [], [accessQuery.data]);
   const existing = useMemo(
     () => new Set(accesses.map((a) => `${a.node_name}\u0000${a.proxy_name}`)),
     [accesses]
@@ -299,11 +300,12 @@ export function ManageAccessDialog({
     () => available.filter((proxy) => selectedIDs.includes(proxy.id)),
     [available, selectedIDs]
   );
-  const issue = useMutation({
-    mutationFn: async (proxies: AdminProxy[]) => {
+  const issue = useAdminMutation<AdminProxy[], { succeeded: AdminProxy[]; failed: AdminProxy[] }>(
+    request,
+    async (req, proxies) => {
       const results = await Promise.allSettled(
         proxies.map((proxy) =>
-          request(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`, {
+          req(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`, {
             method: "POST",
             body: JSON.stringify({ node_name: proxy.node_name, proxy_name: proxy.name })
           })
@@ -316,24 +318,24 @@ export function ManageAccessDialog({
       });
       return { succeeded, failed };
     },
-    onMutate: () => setIssueError(""),
-    onSuccess: ({ succeeded, failed }) => {
-      void queryClient.invalidateQueries({ queryKey: ["admin"] });
-      setSelectedIDs(failed.map((proxy) => proxy.id));
-      if (failed.length > 0) {
-        const labels = failed.map((proxy) => `${proxy.node_name} / ${proxy.name}`).join(", ");
-        setIssueError(
-          `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
-        );
+    {
+      onSuccess: ({ succeeded, failed }) => {
+        setSelectedIDs(failed.map((proxy) => proxy.id));
+        if (failed.length > 0) {
+          const labels = failed.map((proxy) => `${proxy.node_name} / ${proxy.name}`).join(", ");
+          setIssueError(
+            `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
+          );
+        }
       }
     }
-  });
+  );
 
   const loading = accessQuery.isLoading || proxiesQuery.isLoading;
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="p-6">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Manage access</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           Issue or revoke proxy access for <span className="font-medium text-kumo-default">{user.name}</span>.
@@ -407,7 +409,10 @@ export function ManageAccessDialog({
               icon={PlusIcon}
               loading={issue.isPending}
               disabled={selected.length === 0}
-              onClick={() => issue.mutate(selected)}
+              onClick={() => {
+                setIssueError("");
+                issue.mutate(selected);
+              }}
             >
               Grant access{selected.length > 0 ? ` (${selected.length})` : ""}
             </Button>
@@ -446,16 +451,6 @@ export function ManageAccessDialog({
 type ConnectionProxy = UserConnectionInfo["nodes"][number]["proxies"][number];
 type ConfirmationAction = "rotate" | "revoke";
 
-function formatTimestamp(value: string): string {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
-}
-
 function proxyDetails(node: string, proxy: ConnectionProxy): string {
   return JSON.stringify(
     {
@@ -492,20 +487,20 @@ export function ConnectionInfoDialog({
   const encodedUser = encodeURIComponent(user.name);
 
   const connectionQuery = useQuery({
-    queryKey: ["admin", "user-connection-info", user.name],
+    queryKey: adminKeys.userConnection(user.name),
     queryFn: () =>
       request<UserConnectionInfo>(`/api/admin/users/${encodedUser}/connection-info`)
   });
-  const subscriptionQuery = useQuery({
-    queryKey: ["admin", "user-subscription", user.name],
-    queryFn: () =>
-      request<AdminSubscription>(`/api/admin/users/${encodedUser}/subscription`)
-  });
+  const { query: subscriptionQuery, generate, rotate, revoke } = useSubscription<AdminSubscription>(
+    request,
+    adminKeys.subscription("user", user.name),
+    `/api/admin/users/${encodedUser}/subscription`,
+    () => setConfirmation(null)
+  );
 
   async function copyText(value: string, key: string) {
     try {
-      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
-      await navigator.clipboard.writeText(value);
+      await writeClipboard(value);
       setCopyError("");
       setCopied(key);
     } catch (error) {
@@ -518,24 +513,6 @@ export function ConnectionInfoDialog({
       request<string>(`/api/admin/users/${encodedUser}/proxy-provider`),
     onSuccess: (yaml) => void copyText(yaml, "provider")
   });
-  const generate = useAdminMutation<void, AdminSubscription>(
-    request,
-    (req) =>
-      req(`/api/admin/users/${encodedUser}/subscription`, { method: "POST" })
-  );
-  const rotate = useAdminMutation<void, AdminSubscription>(
-    request,
-    (req) =>
-      req(`/api/admin/users/${encodedUser}/subscription/rotate`, { method: "POST" }),
-    { onSuccess: () => setConfirmation(null) }
-  );
-  const revoke = useAdminMutation<void, AdminSubscription>(
-    request,
-    (req) =>
-      req(`/api/admin/users/${encodedUser}/subscription`, { method: "DELETE" }),
-    { onSuccess: () => setConfirmation(null) }
-  );
-
   const subscription = subscriptionQuery.data;
   const nodes = connectionQuery.data?.nodes ?? [];
   const proxyCount = nodes.reduce((total, node) => total + node.proxies.length, 0);
@@ -550,7 +527,7 @@ export function ConnectionInfoDialog({
   return (
     <>
       <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-        <Dialog size="xl" className="max-h-[calc(100vh-2rem)] overflow-y-auto p-6">
+        <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
           <Dialog.Title className="text-xl font-semibold text-kumo-default">
             Connection info
           </Dialog.Title>
@@ -594,12 +571,9 @@ export function ConnectionInfoDialog({
             ) : subscription?.active ? (
               <div className="mt-4 flex flex-col gap-3">
                 <div className="flex items-end gap-2">
-                  <Input
-                    label="Mihomo Profile URL"
-                    readOnly
-                    value={subscription.mihomo_url || subscription.url}
-                    className="min-w-0 flex-1"
-                  />
+                  <div className="min-w-0 flex-1">
+                    <Input label="Mihomo Profile URL" readOnly value={subscription.mihomo_url || subscription.url} className="w-full" />
+                  </div>
                   <Button
                     variant="secondary"
                     icon={CopyIcon}
@@ -611,12 +585,9 @@ export function ConnectionInfoDialog({
                   </Button>
                 </div>
                 <div className="flex items-end gap-2">
-                  <Input
-                    label="Legacy provider URL"
-                    readOnly
-                    value={subscription.provider_url || subscription.url}
-                    className="min-w-0 flex-1"
-                  />
+                  <div className="min-w-0 flex-1">
+                    <Input label="Legacy provider URL" readOnly value={subscription.provider_url || subscription.url} className="w-full" />
+                  </div>
                   <Button
                     variant="secondary"
                     icon={CopyIcon}
@@ -630,11 +601,11 @@ export function ConnectionInfoDialog({
                 <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
                   <div>
                     <dt className="font-medium text-kumo-default">Created</dt>
-                    <dd>{formatTimestamp(subscription.created_at)}</dd>
+                    <dd>{formatDateTime(subscription.created_at)}</dd>
                   </div>
                   <div>
                     <dt className="font-medium text-kumo-default">Last fetched</dt>
-                    <dd>{formatTimestamp(subscription.last_used_at)}</dd>
+                    <dd>{formatDateTime(subscription.last_used_at)}</dd>
                   </div>
                 </dl>
                 <div className="flex flex-wrap gap-2">
@@ -756,7 +727,7 @@ export function ConnectionInfoDialog({
         open={confirmation !== null}
         onOpenChange={(open) => (open ? undefined : setConfirmation(null))}
       >
-        <Dialog size="sm" className="p-6">
+        <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
           <Dialog.Title className="text-xl font-semibold text-kumo-default">
             {confirmation === "rotate" ? "Rotate subscription link?" : "Revoke subscription link?"}
           </Dialog.Title>

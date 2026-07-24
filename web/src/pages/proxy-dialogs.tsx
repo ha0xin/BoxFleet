@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -6,7 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Banner, Button, Dialog, Input, Select, Switch } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminProxy } from "../types";
-import type { AdminRequest } from "@/publish/publish-status";
+import type { AdminRequest } from "@/admin/api";
+import { adminKeys } from "@/admin/query";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 
 export type ProxyDialogState =
@@ -117,15 +118,17 @@ export function ProxyFormDialog({
   // Reset whenever the dialog target changes.
   useEffect(() => {
     form.reset(defaults(state));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.mode, isEdit ? state.proxy.id : "create"]);
+  }, [form, state]);
 
   const nodesQuery = useQuery({
-    queryKey: ["admin", "nodes-all"],
+    queryKey: adminKeys.nodes,
     queryFn: () => request<AdminNode[]>("/api/admin/nodes"),
     enabled: !isEdit
   });
-  const nodeItems = (nodesQuery.data ?? []).map((n) => ({ value: n.name, label: n.name }));
+  const nodeItems = useMemo(
+    () => (nodesQuery.data ?? []).map((n) => ({ value: n.name, label: n.name })),
+    [nodesQuery.data]
+  );
 
   // Default the node select to the first node once the list loads.
   const nodeName = form.watch("node_name");
@@ -133,8 +136,7 @@ export function ProxyFormDialog({
     if (!isEdit && !nodeName && nodeItems.length > 0) {
       form.setValue("node_name", nodeItems[0].value, { shouldValidate: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEdit, nodeName, nodeItems.length]);
+  }, [form, isEdit, nodeItems, nodeName]);
 
   const mutation = useAdminMutation<ProxyFormValues, AdminProxy>(
     request,
@@ -181,7 +183,7 @@ export function ProxyFormDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="p-6">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">
           {isEdit ? `Edit ${state.proxy.name}` : "Create proxy"}
         </Dialog.Title>

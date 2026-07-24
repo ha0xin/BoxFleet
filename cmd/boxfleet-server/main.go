@@ -16,7 +16,10 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/install"
 )
 
-var version = "dev"
+var (
+	version      = "dev"
+	agentVersion = "dev"
+)
 
 func main() {
 	if err := newServerCommand().Execute(); err != nil {
@@ -83,6 +86,7 @@ func runServer(ctx context.Context) error {
 		AdminPathToken:     adminPathToken,
 		AllowInsecureAdmin: allowInsecureAdmin,
 		Version:            version,
+		AgentVersion:       agentVersion,
 		Repo:               install.DefaultRepo,
 		SingBoxVersion:     install.DefaultSingBoxVersion,
 	})

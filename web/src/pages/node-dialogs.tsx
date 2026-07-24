@@ -6,8 +6,10 @@ import { CopyIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { Banner, Button, Dialog, Input, Switch } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodeBootstrap } from "../types";
-import type { AdminRequest } from "@/publish/publish-status";
+import type { AdminRequest } from "@/admin/api";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
+import { SoftDeleteDialog } from "./soft-delete-dialog";
+import { copyText } from "@/utils";
 
 export type NodeDialogState =
   | { mode: "enroll" }
@@ -31,6 +33,7 @@ function installCommand(scriptUrl: string, bootstrap: string): string {
 
 function CopyField({ label, value, wrap = false }: { label: string; value: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm font-medium text-kumo-default">{label}</span>
@@ -48,15 +51,18 @@ function CopyField({ label, value, wrap = false }: { label: string; value: strin
           shape="square"
           aria-label={`Copy ${label}`}
           onClick={() => {
-            void navigator.clipboard?.writeText(value);
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
+            void copyText(value).then(() => {
+              setCopyError("");
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            }).catch((error: unknown) => setCopyError(error instanceof Error ? error.message : "Unable to copy."));
           }}
         >
           <CopyIcon className="size-4" />
         </Button>
       </div>
       {copied ? <span className="text-xs text-kumo-success">Copied</span> : null}
+      {copyError ? <span className="text-xs text-kumo-danger">{copyError}</span> : null}
     </div>
   );
 }
@@ -103,7 +109,7 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="lg" className="p-6">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Enroll node</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           {result
@@ -172,7 +178,7 @@ export function ReenrollNodeDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="lg" className="p-6">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">
           {isRestore ? `Re-enroll ${node.name}` : `Install command for ${node.name}`}
         </Dialog.Title>
@@ -290,8 +296,7 @@ export function EditNodeDialog({
   const { fields, append, remove } = useFieldArray({ control: form.control, name: "hosts" });
   useEffect(() => {
     form.reset(editDefaults(node));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id]);
+  }, [form, node]);
 
   const mutation = useAdminMutation<EditValues, AdminNode>(
     request,
@@ -312,7 +317,7 @@ export function EditNodeDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="p-6">
+      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Edit {node.name}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           Update the node's name, hosts, and API URL. Use Disable or Decommission to change its status.
@@ -333,7 +338,7 @@ export function EditNodeDialog({
               generates a client connection profile.
             </span>
             {fields.map((field, index) => (
-              <div key={field.id} className="grid grid-cols-[minmax(0,2fr)_minmax(7rem,1fr)_auto_auto] items-start gap-2">
+              <div key={field.id} className="grid grid-cols-[minmax(0,2fr)_minmax(7rem,1fr)_auto_auto] items-center gap-2">
                 <Input
                   placeholder="203.0.113.10 · example.com · 2606:4700::1"
                   error={form.formState.errors.hosts?.[index]?.host?.message}
@@ -400,33 +405,19 @@ export function DeleteNodeDialog({
   node: AdminNode;
   onClose: () => void;
 }) {
-  const mutation = useAdminMutation<void, unknown>(
-    request,
-    (req) => req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, { method: "DELETE" }),
-    { onSuccess: onClose }
-  );
-
   return (
-    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="sm" className="p-6">
-        <Dialog.Title className="text-xl font-semibold text-kumo-default">Delete node</Dialog.Title>
-        <Dialog.Description className="mb-4 text-kumo-subtle">
+    <SoftDeleteDialog
+      request={request}
+      endpoint={`/api/admin/nodes/${encodeURIComponent(node.name)}`}
+      title="Delete node"
+      description={
+        <>
           Delete <span className="font-medium text-kumo-default">{node.name}</span>? This disables it,
           revokes its agent token, and hides it from the default inventory. You can restore it from the Deleted
           filter. Use <span className="font-medium text-kumo-default">Disable</span> instead to only pause serving.
-        </Dialog.Description>
-
-        {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-            Delete
-          </Button>
-        </div>
-      </Dialog>
-    </Dialog.Root>
+        </>
+      }
+      onClose={onClose}
+    />
   );
 }

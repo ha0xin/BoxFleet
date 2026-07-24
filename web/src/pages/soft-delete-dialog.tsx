@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Banner, Button, Dialog } from "@cloudflare/kumo";
 
-import type { AdminRequest } from "@/publish/publish-status";
+import type { AdminRequest } from "@/admin/api";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 
 export function SoftDeleteDialog({
@@ -25,7 +25,7 @@ export function SoftDeleteDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="sm" className="p-6">
+      <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">{title}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">{description}</Dialog.Description>
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}

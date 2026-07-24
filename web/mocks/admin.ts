@@ -7,7 +7,6 @@ import type {
   AdminProxy,
   AdminProxyAccess,
   AdminProxiesResponse,
-  AdminSettings,
   AdminSubscription,
   AdminUser,
   MihomoPreview,
@@ -17,6 +16,9 @@ import type {
   MihomoRewriteTemplate,
   NetworkEvent,
   NetworkEventsResponse,
+  NodeOperation,
+  NodeOperationDetail,
+  NodeUpdateCampaignDetail,
   Overview,
   SystemLog,
   SystemLogsResponse,
@@ -34,6 +36,67 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const GiB = 1024 ** 3;
+
+const mockOperations = new Map<string, NodeOperationDetail>();
+const mockCampaigns = new Map<string, NodeUpdateCampaignDetail>();
+
+function completedOperation(nodeName: string): NodeOperationDetail {
+  const timestamp = new Date().toISOString();
+  const operation: NodeOperation = {
+    id: `op_mock_${Date.now()}`,
+    node_id: nodes.find((node) => node.name === nodeName)?.id ?? nodeName,
+    kind: "update",
+    status: "succeeded",
+    phase: "completed",
+    payload: {},
+    result: {},
+    idempotency_key: `mock:${nodeName}:${Date.now()}`,
+    required_capabilities: [],
+    attempt: 1,
+    cancel_requested: false,
+    requested_at: timestamp,
+    started_at: timestamp,
+    finished_at: timestamp,
+    updated_at: timestamp
+  };
+  const detail = { operation, events: [] };
+  mockOperations.set(operation.id, detail);
+  return detail;
+}
+
+function completedCampaign(nodeNames: string[]): NodeUpdateCampaignDetail {
+  const timestamp = new Date().toISOString();
+  const id = `campaign_mock_${Date.now()}`;
+  const detail: NodeUpdateCampaignDetail = {
+    campaign: {
+      id,
+      release: "mock",
+      components: ["agent", "sing_box"],
+      status: "succeeded",
+      idempotency_key: `mock:${id}`,
+      batch_size: Math.max(nodeNames.length, 1),
+      current_batch: 0,
+      requested_at: timestamp,
+      started_at: timestamp,
+      finished_at: timestamp,
+      updated_at: timestamp
+    },
+    members: nodeNames.map((nodeName, position) => ({
+      campaign_id: id,
+      node_id: nodes.find((node) => node.name === nodeName)?.id ?? nodeName,
+      node_name: nodeName,
+      position,
+      batch_number: 0,
+      kind: "update",
+      status: "succeeded",
+      updated_at: timestamp,
+      started_at: timestamp,
+      finished_at: timestamp
+    }))
+  };
+  mockCampaigns.set(id, detail);
+  return detail;
+}
 
 const nodes: AdminNode[] = [
   {
@@ -231,6 +294,7 @@ const overview: Overview = {
   release: {
     repo: "haoxin/boxfleet",
     boxfleet_version: "0.4.1",
+    agent_version: "0.4.1",
     sing_box_version: "1.9.3"
   }
 };
@@ -429,7 +493,6 @@ const networkEvents: NetworkEvent[] = Array.from({ length: 96 }, (_, i) => {
   };
 });
 
-const settings: AdminSettings = { network_event_retention_days: 90 };
 
 const basicMihomoYAML = `mixed-port: 7890
 mode: rule
@@ -616,6 +679,50 @@ type Route = { method: string; pattern: RegExp; handler: Handler };
 
 const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/admin\/overview$/, handler: () => overview },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/release$/,
+    handler: () => ({
+      repo: "example/boxfleet",
+      boxfleet_version: "0.4.1",
+      agent_version: "0.4.1",
+      sing_box_version: "1.9.3",
+      updates_enabled: true
+    })
+  },
+  { method: "GET", pattern: /^\/api\/admin\/node-update-campaigns\/current$/, handler: () => null },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/updates$/,
+    handler: ({ match }) => completedOperation(decodeURIComponent(match?.[1] ?? "")).operation
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/operations\/([^/]+)$/,
+    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? "")) ?? completedOperation(decodeURIComponent(match?.[1] ?? ""))
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/nodes\/([^/]+)\/operations\/([^/]+)\/cancel$/,
+    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? ""))?.operation ?? completedOperation(decodeURIComponent(match?.[1] ?? "")).operation
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/node-updates\/bulk$/,
+    handler: ({ body }) => completedCampaign(
+      Array.isArray(body?.nodes) ? body.nodes : nodes.filter((node) => node.status === "active").map((node) => node.name)
+    )
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/node-update-campaigns\/([^/]+)$/,
+    handler: ({ match }) => mockCampaigns.get(decodeURIComponent(match?.[1] ?? ""))
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/node-update-campaigns\/([^/]+)\/(?:cancel|resume)$/,
+    handler: ({ match }) => mockCampaigns.get(decodeURIComponent(match?.[1] ?? ""))
+  },
   { method: "GET", pattern: /^\/api\/admin\/system-logs$/, handler: ({ query }) => systemLogsResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/config\/changes$/, handler: () => configChanges },
   {
@@ -703,6 +810,14 @@ const routes: Route[] = [
       };
       mihomoSubscriptions.set(match?.[1] ?? "", subscription);
       return subscription;
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/subscription$/,
+    handler: ({ match }) => {
+      mihomoSubscriptions.delete(match?.[1] ?? "");
+      return { active: false, url: "", created_at: "", last_used_at: "" };
     }
   },
   { method: "POST", pattern: /^\/api\/admin\/mihomo\/profiles\/([^/]+)\/preview$/, handler: () => mihomoPreview() },
@@ -809,8 +924,6 @@ const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes.filter((node) => !node.deleted_at) },
   { method: "GET", pattern: /^\/api\/admin\/users$/, handler: ({ query }) => users.filter((user) => query.get("deleted") === "true" ? Boolean(user.deleted_at) : !user.deleted_at) },
   { method: "GET", pattern: /^\/api\/admin\/traffic\/users$/, handler: () => traffic },
-  { method: "GET", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
-  { method: "PUT", pattern: /^\/api\/admin\/settings$/, handler: () => settings },
   {
     method: "GET",
     pattern: /^\/api\/admin\/network-events$/,
@@ -844,7 +957,6 @@ const routes: Route[] = [
       return { events: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
     }
   },
-  { method: "GET", pattern: /^\/api\/admin\/nodes\/([^/]+)\/status$/, handler: ({ match }) => nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? "")) ?? nodes[0] },
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/bootstrap$/,

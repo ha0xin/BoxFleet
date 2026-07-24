@@ -74,6 +74,7 @@ export type NodeOperationDetail = {
 export type AdminRelease = {
   repo: string;
   boxfleet_version: string;
+  agent_version: string;
   sing_box_version: string;
   updates_enabled: boolean;
   update_error?: string;
@@ -341,6 +342,7 @@ export type Overview = {
   release: {
     repo: string;
     boxfleet_version: string;
+    agent_version: string;
     sing_box_version: string;
     updates_enabled?: boolean;
     update_error?: string;

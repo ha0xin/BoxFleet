@@ -142,10 +142,9 @@ main                    AppPageHeader (breadcrumbs + actions + title) + page con
 - Kumo blocks are vendored source, not importable dependencies. `kumo add` writes
   blocks under `web/kumo.json`'s `blocksDir` (`src/components/kumo`), after which
   BoxFleet may adapt the copied source.
-- The vendored `web/src/components/kumo/page-header/page-header.tsx` is a
-  reference copy of Kumo's `PageHeader` block. The active app header is
-  `AppPageHeader`, because BoxFleet needs the 58px sidebar-aligned top bar and a
-  stable right-side actions slot for future review/publish controls.
+- No Kumo block is currently vendored. The active app header is `AppPageHeader`,
+  because BoxFleet needs the 58px sidebar-aligned top bar and a stable
+  right-side actions slot for future review/publish controls.
 - Use `@phosphor-icons/react`; Kumo uses Phosphor internally.
 - Inter is loaded through `@fontsource-variable/inter` and `--font-sans:
   "Inter Variable", ...` in `globals.css`. Kumo's compact line heights assume
@@ -162,11 +161,11 @@ main                    AppPageHeader (breadcrumbs + actions + title) + page con
 
 ## Visual verification
 
-For layout-sensitive changes, inspect the rendered UI with Playwright and system
-Chrome:
+For layout-sensitive changes, inspect the rendered UI with the repository's
+cross-platform Playwright configuration:
 
-```ts
-chromium.launch({ executablePath: "/usr/bin/google-chrome-stable" })
+```bash
+npm --prefix web run test:e2e
 ```
 
 Prefer measuring actual DOM rectangles and computed styles over judging from
