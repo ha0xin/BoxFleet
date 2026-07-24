@@ -1,322 +1,133 @@
-# BoxFleet Deployment
+# Deployment
 
-This document covers the artifact-based deployment path for the management
-server and native node agent.
+BoxFleet deploys prebuilt Linux amd64 artifacts. Do not build on production
+hosts. For the current management server, follow the stricter
+[azus runbook](azus-runbook.md).
 
-For the current `azus` management host, including its resource constraints,
-paths, backup policy, GitHub Actions commands, and smoke checks, see
-[`azus-runbook.md`](azus-runbook.md).
+## Releases
 
-## Shape
+Pushing a `v*` tag runs `.github/workflows/artifacts.yml` and publishes:
+
+- `bf-<server-version>-linux-amd64`
+- `boxfleet-server-<server-version>-linux-amd64`
+- `boxfleet-agent-<agent-version>-linux-amd64`
+- `sing-box-<sing-box-version>-linux-amd64`
+- a tarball, `boxfleet-update.json`, and `SHA256SUMS`
+
+Server, agent, and sing-box versions are independent. Change
+`AGENT_REVISION` only when agent code or its runtime contract changes, and
+`SING_BOX_REVISION` only when the pinned upstream build changes. Server-only
+releases therefore do not advertise no-op node upgrades.
+
+```bash
+git tag -a vX.Y.Z -m 'BoxFleet vX.Y.Z'
+git push origin main vX.Y.Z
+gh run list --workflow artifacts.yml --limit 3
+gh run watch <run-id> --exit-status
+```
+
+Download the release, reconstruct the `artifacts/` layout expected by
+`SHA256SUMS` if individual GitHub assets were downloaded flat, and verify every
+file before use.
+
+## Management server
+
+The host layout is:
 
 ```text
-management/server host
-  - boxfleet-server
-  - embedded /admin Web UI
-  - embedded /install.sh node installer
-  - bf CLI
-  - SQLite database
-
-proxy node
-  - boxfleet-agent systemd service
-  - boxfleet-sing-box systemd service
-  - pulled sing-box config
-  - local-only V2Ray API at 127.0.0.1:18082
-  - public VLESS Reality proxy port, default 39090/tcp
+/opt/boxfleet/bin/{bf,boxfleet-server}
+/opt/boxfleet/server/boxfleet.db
+/opt/boxfleet/backups/
+/etc/boxfleet/server.env
 ```
 
-Quota enforcement, rate limits, and abuse detection are not implemented yet.
-Per-user Mihomo proxy-provider URLs are available from the admin Users page.
-
-## Release Artifacts
-
-GitHub Actions builds Linux amd64 release artifacts when a `v*` tag is pushed.
-Create a release by tagging the commit you want to deploy:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The release workflow uploads:
-
-- `bf-<boxfleet-version>-linux-amd64`
-- `boxfleet-server-<boxfleet-version>-linux-amd64`
-- `boxfleet-agent-<agent-version>-linux-amd64`
-- `sing-box-v1.13.13-linux-amd64` built with `with_v2ray_api`
-- `boxfleet-<boxfleet-version>-linux-amd64.tar.gz`
-- `boxfleet-update.json`
-- `SHA256SUMS`
-
-Server, agent, and sing-box versions are independent. The release workflow's
-`AGENT_REVISION` changes only when agent code or its runtime contract changes;
-`SING_BOX_REVISION` changes only when the pinned upstream build changes. A
-server-only release therefore keeps nodes on their existing component versions
-and does not advertise a no-op update. The workflow still packages those pinned
-components so new nodes can bootstrap from one release. The Build Artifacts
-workflow can also be manually dispatched for pre-release testing, but server
-deployments should use GitHub Releases.
-
-Wait for the release workflow to finish, then download the release on a Linux
-amd64 host:
-
-```bash
-BOXFLEET_VERSION=v0.1.0
-curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/boxfleet-${BOXFLEET_VERSION}-linux-amd64.tar.gz"
-curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/SHA256SUMS"
-sha256sum -c --ignore-missing SHA256SUMS
-tar -xzf "boxfleet-${BOXFLEET_VERSION}-linux-amd64.tar.gz"
-```
-
-## Server Install
-
-> No host SQLite is required: the binary bundles its own SQLite (via CGO in
-> `mattn/go-sqlite3`), so `ALTER TABLE ... DROP COLUMN` and other recent features
-> work regardless of any system SQLite. See `docs/db-schema.md`.
-
-Install the server-side binaries:
-
-```bash
-sudo install -d -m 0755 /opt/boxfleet/bin /opt/boxfleet/server
-sudo install -m 0755 "bf-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/bf
-sudo install -m 0755 "boxfleet-server-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/boxfleet-server
-sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db init
-```
-
-The running server normally reads `boxfleet-update.json` and its fixed assets
-from the matching GitHub Release. For an air-gapped or local mirror, copy the
-catalog plus its `artifacts/` directory to one directory and add
-`--artifact-dir /opt/boxfleet/releases/<version>` to the server command. The
-server serves only that directory under `/artifacts`.
-
-Create a systemd unit for the management server:
+The service normally runs:
 
 ```ini
-[Unit]
-Description=BoxFleet management server
-After=network-online.target
-Wants=network-online.target
-
 [Service]
-Type=simple
-Environment=BOXFLEET_ADMIN_TOKEN=<admin-token>
-ExecStart=/opt/boxfleet/bin/boxfleet-server --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db --admin-path-token <path-token>
+EnvironmentFile=/etc/boxfleet/server.env
+ExecStart=/opt/boxfleet/bin/boxfleet-server --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db
 Restart=always
 RestartSec=5s
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
 ```
 
-Then start it:
+Before replacement:
+
+1. Verify local and remote SHA256 values.
+2. Run both candidates with `--help`.
+3. Run the candidate `bf db status` against production.
+4. Back up binaries and, when migrations are pending, SQLite DB/WAL/SHM files.
+
+Stop, replace, restart, and smoke-test inside an `ERR`-trapped script that
+restores the backup on failure. Startup applies embedded migrations. A
+server-only release replaces only `bf` and `boxfleet-server`; never update node
+components on the management host.
+
+Admin auth is mandatory through `BOXFLEET_ADMIN_TOKEN` unless the explicit
+development-only `--allow-insecure-admin` flag is used. A hidden admin prefix
+may be configured with `BOXFLEET_ADMIN_PATH_TOKEN`.
+
+## Node bootstrap
+
+Enroll a node in the Web UI and run its generated command on the node:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now boxfleet-server
-curl -fsS http://127.0.0.1:18081/healthz
-```
-
-Prefer private-network access or a reverse proxy for the admin UI. The admin API
-requires `BOXFLEET_ADMIN_TOKEN` or `--admin-token` by default. Use
-`--allow-insecure-admin` only for local development.
-
-## Local Build
-
-```bash
-npm --prefix web install
-npm --prefix web run build
-go test ./...
-go build -o dist/deploy/bf ./cmd/bf
-go build -o dist/deploy/boxfleet-server ./cmd/boxfleet-server
-go build -o dist/deploy/boxfleet-agent ./cmd/boxfleet-agent
-```
-
-`npm --prefix web run build` writes generated static assets into
-`internal/server/webui/assets/generated`, which are embedded into
-`boxfleet-server`. Those generated files are ignored by Git.
-
-## Node Bootstrap
-
-Create a node from the Web UI's Nodes page. The generated modal returns a
-`boxfleet-bootstrap:...` string and an install command that downloads
-`/install.sh` from the management server. On the node, run the generated
-command:
-
-```bash
-curl -fsSL https://<server-host>:18081/install.sh -o /tmp/boxfleet-install.sh
+curl -fsSL https://<server>/install.sh -o /tmp/boxfleet-install.sh
 sudo sh /tmp/boxfleet-install.sh 'boxfleet-bootstrap:...'
 ```
 
-The embedded install script downloads
-`boxfleet-agent-<agent-version>-linux-amd64` and
-`sing-box-v1.13.13-linux-amd64` from the GitHub Release matching the running
-server version. The component versions are embedded independently in the server
-binary, matching `boxfleet-update.json`. The script verifies checksums, installs both
-under `/opt/boxfleet/bin`, then runs `boxfleet-agent bootstrap`.
+The server embeds component versions independently. The script downloads the
+matching agent and sing-box assets from the server release, verifies both
+against `SHA256SUMS`, installs them under `/opt/boxfleet/bin`, and runs
+`boxfleet-agent bootstrap`.
 
-The agent writes `/etc/boxfleet/agent.json`, verifies the installed `sing-box`
-has `with_v2ray_api`, installs systemd units, pulls config, and starts
-`boxfleet-agent.service`. The bootstrap API still accepts an explicit
-`sing_box_url` for custom installs, but the Web UI's default flow relies on the
-server install script instead.
+Bootstrap writes `/etc/boxfleet/agent.json`, checks for `with_v2ray_api`,
+installs systemd units, applies config, and starts the agent. The node begins
+`pending`; its first authenticated heartbeat promotes it to `active`.
 
-A bootstrapped node starts in `pending` status and is excluded from rendering
-and publishing until its agent checks in. The agent's first authenticated
-heartbeat promotes it to `active`. After that, `bf node disable` pauses a node
-(the agent stops `sing-box` but the daemon keeps reporting and the node can be
-re-enabled), while `bf node delete` decommissions it (revokes its tokens).
+## Managed updates
 
-## Config Flow
-
-The operator edits nodes, proxies, users, and access grants through `bf` and
-the Web UI. Publishing a node config stores a target config version in SQLite:
-
-```bash
-bf --db /opt/boxfleet/server/boxfleet.db config publish --node <node-name>
-```
-
-The node is not changed through SSH after bootstrap. `boxfleet-agent` polls:
+Agents claim durable operations through outbound HTTPS. Downloads stream to
+same-filesystem partial files, verify size and SHA256, then install under:
 
 ```text
-GET /api/node/config
+/opt/boxfleet/releases/<component>/<version>/
 ```
 
-When the target version or hash changes, the agent writes a candidate config,
-runs `sing-box check`, atomically replaces the active config, restarts
-`sing-box`, and reports the result.
+Stable paths are atomically switched symlinks. sing-box failures restore the
+previous target; an agent update guard restores an agent candidate after three
+failed starts. Disabled nodes stay disabled throughout updates.
 
-## Managed Operations And Updates
+Existing agents without `operations.v1` need one manual agent installation
+before managed updates can reach them. After that, capability names—not one
+global protocol number—negotiate features. See [node operations](node-operations.md).
 
-Privileged commands use a separate outbound HTTPS long poll:
+## Verification
 
-```text
-POST /api/node/operations/claim   (45-second wait)
-```
-
-The server stores every operation, lease, progress event, retry, and rollout
-member in SQLite. An in-memory notification only wakes a waiting request early;
-it is never the durable queue. The 45-second wait is below Cloudflare's
-120-second proxy read timeout and the Tunnel `keepAliveTimeout` default of 90
-seconds. Preserve POST requests and disable caching on `/api/node/*`; do not set
-a reverse-proxy timeout below 55 seconds.
-
-The Nodes page compares heartbeat versions with the agent and sing-box targets
-advertised by the formal server release; it does not use the server version as
-the agent target. A single update can select agent, sing-box, or both. `Update all` releases one
-online active canary, then batches of at most two; a failure pauses expansion.
-After repairing the cause, `Retry failed batch` creates explicit `retry_of`
-operations. Offline nodes keep queued work. A paused/disabled node may update,
-but its sing-box service remains stopped throughout and after the update.
-
-Downloads stream directly into
-`/opt/boxfleet/downloads/<operation>/...partial`; the agent never buffers a
-binary in memory. Immutable partial downloads may resume. Exact size and SHA256
-are checked before the candidate is installed under
-`/opt/boxfleet/releases/<component>/<version>/`; stable paths in
-`/opt/boxfleet/bin` are atomically switched symlinks.
-
-Before a sing-box switch, the agent persists pending traffic and checks the
-current config with the candidate. A failed restart restores and verifies the
-previous sing-box target. Agent updates use a stable
-`/opt/boxfleet/libexec/boxfleet-agent-guard` in systemd `ExecStartPre`; three
-failed candidate starts restore the prior agent target.
-
-See [`node-operations.md`](node-operations.md) for the complete protocol and
-state model.
-
-### One-time transition for existing nodes
-
-Legacy agents do not know the claim endpoint, so they cannot receive their
-first managed self-update. Install one formal operations-capable release
-manually on every existing node:
+After deployment verify without printing secrets:
 
 ```bash
-BOXFLEET_VERSION=v0.5.0
-curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64"
-curl -fsSLO "https://github.com/ha0xin/BoxFleet/releases/download/${BOXFLEET_VERSION}/SHA256SUMS"
-sha256sum -c --ignore-missing SHA256SUMS
-sudo install -m 0755 "boxfleet-agent-${BOXFLEET_VERSION}-linux-amd64" /opt/boxfleet/bin/boxfleet-agent
-sudo systemctl restart boxfleet-agent.service
+curl -fsS http://127.0.0.1:18081/healthz
+sudo systemctl is-active boxfleet-server
+sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db db status
+sudo journalctl -u boxfleet-server -n 30 --no-pager
 ```
 
-Wait for “Manual agent upgrade required” to disappear from the Nodes page
-before starting a rollout. No `update_protocol` migration is needed; heartbeat
-capability names are the compatibility contract.
+Also confirm:
 
-### Operational inspection
+- installed hashes match the release;
+- startup logs report the expected server version;
+- hidden Admin UI and authenticated Admin API return 200;
+- `/sub/not-a-valid-token` returns 404;
+- `/api/admin/release` reports the intended independent component versions.
+
+Node diagnostics:
 
 ```bash
 systemctl status boxfleet-agent boxfleet-sing-box --no-pager
 readlink -f /opt/boxfleet/bin/boxfleet-agent
-readlink -f /opt/boxfleet/bin/boxfleet-agent.previous
 readlink -f /opt/boxfleet/bin/sing-box
-sudo test -f /opt/boxfleet/state/operation-state.json && sudo cat /opt/boxfleet/state/operation-state.json
-sudo test -f /opt/boxfleet/state/agent-update-guard.json && sudo cat /opt/boxfleet/state/agent-update-guard.json
 ```
 
-Do not delete a local operation state file while its server operation is active.
-Use safe cancel in the UI and wait for a terminal event. The `.previous` link
-and immutable release targets remain available for emergency inspection.
-
-## Verify
-
-```bash
-curl -fsS http://127.0.0.1:18081/healthz
-sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db config status --node <node-name>
-systemctl status boxfleet-server boxfleet-agent boxfleet-sing-box --no-pager
-```
-
-User-facing node information:
-
-```bash
-sudo /opt/boxfleet/bin/bf --db /opt/boxfleet/server/boxfleet.db user node-info <user-name> --node <node-name> --format json
-```
-
-Live V2Ray API diagnostics can be run through SSH forwarding:
-
-```bash
-ssh -N -L 127.0.0.1:18083:127.0.0.1:18082 <node-ssh-target>
-bf stats v2ray --addr 127.0.0.1:18083 --pattern 'user>>><auth-name>>>>traffic>>>' --format json
-```
-
-## Logs And Traffic
-
-Traffic:
-
-- `sing-box` exposes V2Ray API on `127.0.0.1:18082`.
-- The agent reads user counters and uploads positive deltas.
-- The first read after a fresh state file is a baseline and does not create
-  usage rows.
-
-Network logs:
-
-- The agent streams `sing-box` journald entries with cursor-based deltas.
-- Uploads are split into bounded batches instead of reading all logs into
-  memory.
-- The server parses known access log shapes into compact structured
-  `log_events`.
-- Raw network log rows are not retained in normal operation. Keep connection
-  activity in structured fields such as node, user, source IP, target host,
-  target port, action, count, window start, and window end.
-- Structured network events are retained for `network_event_retention_days`
-  from the `settings` table. The default is 90 days and can be changed from the
-  Network Events page or `/api/admin/settings`.
-
-System logs:
-
-- The agent can upload `boxfleet-agent.service` and `boxfleet-sing-box.service`
-  journald entries, but the server currently does not retain system log rows.
-- System logs remain separate from structured network events if storage is
-  re-enabled later.
-
-## Notes
-
-- The public proxy port must be allowed by the cloud firewall.
-- Do not expose `127.0.0.1:18082` publicly.
-- Reality requires the node to reach `www.amazon.com:443` for the current
-  default handshake.
-- Current production path is VLESS Reality with `xtls-rprx-vision`.
-- Shadowsocks 2022 and Hysteria2 are present in the data model and CLI create
-  commands, but full access issuing, rendering, and client information are not
-  the current tested path.
+Never expose admin/path/node tokens, subscription URLs, environment contents,
+or database data in deployment logs.

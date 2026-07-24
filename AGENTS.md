@@ -94,7 +94,7 @@ Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the cli
 
 `web/src/` is a Vite+React SPA built into `internal/server/webui/assets/generated/` and served via `go:embed` under `/admin` by the server. `types.ts` (the API contract mirroring the Go db facade) and `navigation.ts` are stable; the presentation layer is built directly on **native Cloudflare Kumo** components. The previous shadcn-shaped compatibility wrappers under `components/ui/` and the Geist `--ds-*` token overrides in `globals.css` have been removed. `internal/server/webui/assets/generated/` is generated output and ignored; run `npm --prefix web run build` before building or testing `boxfleet-server` so embedded assets exist locally.
 
-Use the established frontend stack instead of hand-rolling UI behavior. See `docs/design-system.md` for visual conventions and `docs/web-ui.md` for the Kumo CLI workflow.
+Use the established frontend stack instead of hand-rolling UI behavior. See `docs/web-ui.md` for visual conventions and the Kumo CLI workflow.
 
 - Cloudflare Kumo for all app UI: dialogs, dropdowns, popovers, selects, switches, tables, labels, buttons, inputs, banners, badges, surfaces, grids, and other interactive controls. Import native components from `@cloudflare/kumo` directly; use Base UI primitives re-exported by `@cloudflare/kumo/primitives/*` only when a styled Kumo component is not available.
 - **Semantic tokens only** — `bg-kumo-base`, `text-kumo-default`, `bg-kumo-canvas`, `kumo-hairline`, etc. Never raw Tailwind colors and never `dark:` variants (Kumo handles light/dark via `light-dark()`).
@@ -126,9 +126,7 @@ Most coverage lives in `internal/agent`, `internal/cli/bf`, `internal/server/{ap
 
 ## Docs to consult
 
-- `docs/agent-handoff.md` — current admin UI handoff, known caveats, and next tasks for follow-up agents.
 - `docs/deployment.md` — artifact-based server and node deployment flow.
-- `docs/testing.md` — current layer-by-layer test strategy and the gap list.
-- `docs/mvp-decisions.md` — why SQLite, why `bf`, why split binaries.
-- `docs/cli.md`, `docs/config-generation.md`, `docs/web-ui.md`, `docs/design-system.md`, `docs/db-schema.md`, `docs/architecture.md` — topic-specific design notes.
-- `deploy/sing-box/README.md` — sing-box config layout and reality key handling.
+- `docs/testing.md` — test boundaries and release checks.
+- `docs/architecture.md`, `docs/db-schema.md`, `docs/config-generation.md`, and `docs/web-ui.md` — implementation contracts.
+- `deploy/sing-box/README.md` — pinned sing-box build requirements.

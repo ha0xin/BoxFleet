@@ -1,138 +1,76 @@
 # BoxFleet
 
-BoxFleet is a lightweight multi-node proxy management system designed around
-small edge servers.
+BoxFleet is a lightweight control plane for multiple `sing-box` nodes. The
+central server owns SQLite state, renders configuration, serves the admin UI,
+and receives telemetry. Edge nodes run only `boxfleet-agent`, `sing-box`, and
+systemd.
 
-The intended architecture is:
+The supported proxy path is VLESS-Reality over TCP with
+`xtls-rprx-vision`. Nodes pull versioned configuration and report heartbeats,
+traffic counters, apply results, and network logs.
 
-- A central management server handles users, nodes, proxies, plans, quotas,
-  audit logs, traffic records, and generated configurations.
-- A server-side `bf` CLI manages the central server.
-- Each node runs only `sing-box`, `systemd`, and a small `boxfleet-agent`.
-- Nodes pull signed configuration from the central server, validate it, apply it,
-  reload `sing-box`, and report heartbeats plus traffic counters.
+## Components
 
-## Goals
+- `boxfleet-server`: central API, embedded Web UI, renderer, and SQLite owner.
+- `bf`: local operator CLI that opens the same SQLite database directly.
+- `boxfleet-agent`: node-side pull/apply/report daemon.
+- `web/`: React/Vite admin UI built into `boxfleet-server`.
 
-- Manage many low-memory proxy nodes from one server.
-- Keep node-side memory usage low enough for small VPS instances.
-- Support managed proxy users, quota accounting, and expiration.
-- Generate per-user per-node `sing-box` connection information.
-- Serve multiple complete Mihomo configurations per user with inline proxies,
-  published Clash Party YAML/JavaScript pipelines, and independent revocable
-  subscription links.
-- Avoid running Docker, databases, or web panels on edge nodes.
-
-## Non-goals
-
-- Reimplementing a proxy core.
-- Depending on abandoned panel backends.
-- Exposing node control APIs directly to the public internet.
-
-## Repository Layout
+Important directories:
 
 ```text
-cmd/
-  bf/                Server-side management CLI
-  boxfleet-server/   Central API service for node agents
-  boxfleet-agent/    Lightweight node agent
-internal/
-  server/            Server application code
-  agent/             Agent application code
-  config/            Shared configuration loading
-  model/             Shared domain models
-web/                 Management UI
-docs/                Design notes and operations docs
-deploy/
-  systemd/           Service unit examples
-  sing-box/          Generated config templates and examples
-configs/             Local development config examples
-migrations/          SQLite schema migrations
-refs/                Local upstream/reference repositories
+cmd/          binary entrypoints
+internal/     application packages
+migrations/   append-only SQLite migrations
+queries/      sqlc query sources
+schema/       current full schema snapshot
+web/          admin UI and browser tests
+deploy/       service and sing-box examples
+docs/         architecture and operational contracts
+refs/         reference-only upstream checkouts
 ```
 
-## Development Tooling
-
-Use established project libraries instead of hand-rolling solved
-infrastructure:
-
-```text
-CLI:              github.com/spf13/cobra
-config/env:       github.com/spf13/viper
-IDs:              github.com/google/uuid
-migrations:       github.com/pressly/goose/v3
-SQL generation:   sqlc
-terminal color:   github.com/fatih/color
-CLI tables:       github.com/jedib0t/go-pretty/v6/table
-byte units:       github.com/dustin/go-humanize
-HTTP router:      github.com/go-chi/chi/v5
-logging:          github.com/rs/zerolog
-token hashes:     golang.org/x/crypto/bcrypt
-Web UI:           React + TypeScript + Vite + Tailwind v4 + Cloudflare Kumo + @phosphor-icons/react
-frontend data:    TanStack Query + TanStack Table
-frontend forms:   react-hook-form + zod
-frontend dates:   date-fns + react-day-picker
-```
-
-Refresh generated SQL with the GOPATH binary, not an assumed global `sqlc`:
+## Development
 
 ```bash
+npm ci --prefix web
+npm --prefix web run lint
+npm --prefix web test
+npm --prefix web run build
+go test ./...
+go vet ./...
+npm --prefix web run test:e2e
+```
+
+After changing `queries/*.sql`, migrations, or `schema/schema.sql`:
+
+```bash
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 # once
 $(go env GOPATH)/bin/sqlc generate
 ```
 
-If it is missing:
+Run a local server with authentication disabled only for development:
 
 ```bash
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+go run ./cmd/boxfleet-server --db /tmp/boxfleet.db --allow-insecure-admin
 ```
 
-Do not hand-roll command parsing, UUID generation, migration execution, SQL
-scanning, token hashing, routing, logging, version comparison, byte-unit
-parsing, CLI table rendering, protocol clients, frontend request caching,
-non-trivial frontend tables, form validation, date/range picking, or app
-dropdown primitives.
+Run `bf --help` or `boxfleet-agent --help` for the current command surface.
 
-## Development Checks
+## Releases
 
-Build the Web UI and run the current Go test suite:
+Pushing a `v*` tag publishes Linux amd64 artifacts. Server, agent, and sing-box
+versions are independent, so a server-only release does not advertise a no-op
+node update. See [deployment](docs/deployment.md) for releases and node
+bootstrap, and [azus runbook](docs/azus-runbook.md) for the production host.
 
-```bash
-npm --prefix web run build
-go test ./...
-```
+## Documentation
 
-GitHub Actions builds downloadable Linux amd64 artifacts when the Build
-Artifacts workflow is manually dispatched or a `v*` tag is pushed. Pushing a
-`v*` tag publishes a GitHub Release, which is the default deployment source.
-The release bundle contains versioned Linux amd64 assets:
-
-- `bf-<boxfleet-version>-linux-amd64`
-- `boxfleet-server-<boxfleet-version>-linux-amd64`
-- `boxfleet-agent-<boxfleet-version>-linux-amd64`
-- `sing-box-v1.13.13-linux-amd64` built with BoxFleet's required tags
-
-The management server embeds `/install.sh` for node bootstrap. Nodes fetch that
-script from the server; the script downloads the versioned agent and sing-box
-assets from the matching GitHub Release.
-
-See:
-
-- [docs/deployment.md](docs/deployment.md)
-- [docs/web-ui.md](docs/web-ui.md)
-- [docs/testing.md](docs/testing.md)
-- [deploy/sing-box/README.md](deploy/sing-box/README.md)
-
-## Current Milestone
-
-1. SQLite-backed central server.
-2. Management through `bf` and the embedded admin Web UI.
-3. Single-admin operation.
-4. Proxy generation for VLESS over TCP with Reality TLS and
-   `xtls-rprx-vision`.
-5. Per-user per-node config overrides.
-6. Agent pull/check/apply/reload workflow.
-7. V2Ray API traffic reporting.
-8. Proxy user create/disable/expire.
-9. Per-user node information generation.
-10. Structured network activity, parsed from node log uploads and stored as
-    compact aggregated network events with configurable retention.
+- [Architecture](docs/architecture.md)
+- [Database invariants](docs/db-schema.md)
+- [Configuration rendering](docs/config-generation.md)
+- [Node operations](docs/node-operations.md)
+- [Mihomo subscriptions](docs/mihomo-subscriptions.md)
+- [Web UI](docs/web-ui.md)
+- [Testing](docs/testing.md)
+- [Performance targets](docs/performance.md)

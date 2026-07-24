@@ -3,193 +3,92 @@
 BoxFleet uses a central-control, node-pull model.
 
 ```text
-BoxFleet Management Server
-  - API for node agents
-  - embedded Web UI for the admin operator
-  - SQLite-backed state
-  - operated by bf CLI
-  - users
-  - nodes
-  - proxies
-  - plans and quotas
-  - config versions
-  - generated user node information
-  - traffic accounting
-        |
-        | HTTPS with node token or mTLS
-        v
-BoxFleet Agent
-  - fetch config version
-  - write candidate config
-  - run sing-box check
-  - atomically apply config
-  - reload sing-box
-  - report apply status, heartbeat, traffic, and logs
-        |
-        v
-sing-box
+bf CLI ───────────────┐
+                     ▼
+admin UI ──HTTP──▶ boxfleet-server ──▶ SQLite
+                         ▲
+                         │ outbound HTTPS
+                         │
+                  boxfleet-agent ──▶ sing-box
 ```
 
-## Server Responsibilities
+## Trust boundaries
 
-- Store users, nodes, plans, traffic records, and audit logs.
-- Use SQLite as the MVP database.
-- Optionally run with Docker on the central server.
-- Expose the central API used by node agents.
-- Provide a server-side CLI for administration.
-- Serve the embedded React admin UI and `/api/admin/*` endpoints.
-- Generate `sing-box` configs per node.
-- Sign or version generated configs.
-- Disable expired or over-quota users.
-- Generate per-user per-node connection information for clients.
-- Receive node heartbeats and traffic reports.
-- Receive node apply results and network log uploads.
-- Parse known `sing-box` access log shapes into compact structured network
-  events for CLI and admin UI queries.
-- Keep system service logs separate from proxy network events if system log
-  storage is re-enabled later.
+`boxfleet-server` owns users, nodes, proxies, access grants, configuration
+versions, subscriptions, operations, and telemetry. The admin API requires one
+operator token. `bf` is a local database tool and must not be converted into an
+HTTP client.
 
-The server-side CLI and API service can share packages, but they must not be
-linked into the node agent binary.
+Each agent authenticates with a node-scoped bearer token. The server derives
+node identity from that token and ignores identity fields supplied in request
+bodies. Nodes make outbound connections only; no public node-management API is
+required.
 
-## Engineering Stack
-
-The management side uses mature infrastructure libraries instead of custom
-implementations:
-
-- Cobra for the `bf` command tree.
-- Viper for config and environment binding.
-- Goose for SQLite migrations.
-- sqlc for generated, type-safe query methods.
-- google/uuid for IDs.
-- go-pretty/table for CLI table rendering.
-- go-humanize for byte unit parsing and formatting.
-- chi for HTTP routing.
-- zerolog for structured logging.
-- bcrypt for token hashes.
-- React, TypeScript, Vite, Tailwind v4, Cloudflare Kumo, and
-  @phosphor-icons/react for the embedded Web UI.
-- TanStack Query for frontend request state and cache invalidation.
-- TanStack Table for filterable/paginated admin data tables.
-- react-hook-form and zod for frontend form state and validation.
-- date-fns and react-day-picker for frontend time formatting and date/range
-  picking.
-- cavaliergopher/grab for streaming/resumable binary downloads and SHA256
-  verification.
-- google/renameio for durable atomic files and symlink switches.
-- sethvargo/go-retry for context-aware retry/backoff with jitter.
-- golang.org/x/mod/semver for release/version validation.
-
-The Web UI is built from `web/` and emitted into ignored generated files under
-`internal/server/webui/assets/generated`, where it is embedded into
-`boxfleet-server`.
-The first UI surface covers overview, node add/edit, proxy add/edit as a
-first-class resource, config preview/publish, users, shareable user node
-information, traffic, network events, and system logs.
-
-Network Events is the reference frontend workflow for server-side
-pagination/filtering: the backend accepts `limit`, `offset`, `node`, `user`,
-`start`, and `end`, while the browser UI converts local date/time range inputs
-to RFC3339 UTC query parameters and keeps those filters in the URL. Structured
-network events are retained for `network_event_retention_days`, defaulting to 90
-days.
-
-## Agent Responsibilities
-
-- Authenticate to the server as one node.
-- Poll for desired config version.
-- Validate config with `sing-box check`.
-- Apply config with rollback on failure.
-- Reload or restart `sing-box`.
-- Honour the `X-BoxFleet-Node-State: disabled` response header by stopping
-  `sing-box` while the daemon keeps polling and heartbeating (see "Node
-  lifecycle"). The stop decision reads actual `ActiveState`, not a persisted
-  marker, so a reboot-restarted unit is re-stopped.
-- Read `sing-box` V2Ray API counters and report traffic deltas.
-- Treat the first V2Ray counter read after a fresh state as baseline, then
-  report only positive deltas.
-- Report node health, version, memory, interface counters, and raw recent log
-  deltas. Protocol-specific log parsing belongs on the server side.
-- Long-poll for durable typed operations, renew an opaque lease, persist an
-  exact progress outbox, and resume the same operation after process restarts.
-- Install server-selected agent/sing-box assets as versioned binaries using
-  streaming downloads. Keep disabled nodes disabled, preserve traffic before a
-  sing-box restart, and automatically restore failed candidates.
-- Avoid public management surfaces by default. A future node maintenance port
-  should bind to localhost or a private interface such as Tailscale, not the
-  public internet.
-
-## Node Lifecycle
-
-Node status flows through four states:
-
-- **pending** — created by the bootstrap/enroll flow. Excluded from rendering
-  and publishing until the agent checks in. The first authenticated heartbeat
-  (`RecordHeartbeat`) promotes it to `active`.
-- **active** — the agent has authenticated and reported in; the node is rendered
-  and eligible for publishing.
-- **disabled** — administratively off. Two distinct paths land here:
-  - **Pause** (`PATCH /nodes/{node}` status, or `bf node disable`): the token
-    stays valid. `GET /api/node/config` returns `X-BoxFleet-Node-State: disabled`
-    plus a valid no-inbound config; the agent stops `sing-box` but its daemon
-    keeps polling, so the node stays visible and can be re-enabled. Token
-    verification no longer filters on node status — a paused node still
-    authenticates; the kill switch is token revocation, not the status.
-  - **Decommission** (`DELETE /nodes/{node}`, or `bf node delete`): also revokes
-    the node's tokens, cutting the daemon off entirely. The record is retained.
-    The UI distinguishes the two via `has_active_token` and does not offer Enable
-    for a decommissioned node.
-- **degraded** — reserved for operational degradation; still rendered/served.
-
-## Node Constraints
-
-Nodes should not run:
-
-- Docker
-- A database
-- A web panel
-- Prometheus or Grafana
-
-Nodes should only need:
-
-- `sing-box`
-- `boxfleet-agent`
-- `systemd`
-
-Docker on nodes is optional. The preferred node deployment is still a small
-native agent binary plus a native `sing-box` service.
-
-The node agent should expose only local maintenance commands such as `run`,
-`check`, `once`, and `version`. User, quota, generated node information, and
-config management belong to the server-side `bf` CLI.
-
-## Config Model
-
-Config generation is per node and must support per-user per-node overrides.
+## Data flow
 
 ```text
-global user defaults
-  -> node defaults
-  -> proxy listener and protocol settings
-  -> user-node assignment
-  -> per-proxy user access
-  -> generated sing-box config
+queries/*.sql ──sqlc──▶ internal/server/store/sqlc
+                              │
+                              ▼
+                       internal/server/db
+                         │           │
+                         ▼           ▼
+                 internal/server/api  internal/server/render
 ```
 
-This is required for relay nodes, custom routing, user-specific block rules, and
-node-specific user availability.
+Only `internal/server/db` may use sqlc-generated types. API, renderer, CLI, and
+tests consume its domain types. Shared agent/server wire payloads live in
+`internal/model`.
 
-## Database Choice
+The Web UI is compiled into `internal/server/webui/assets/generated` and
+embedded in the server. Admin requests use TanStack Query; writes invalidate the
+admin query root so inventory and publish status converge from server state.
 
-SQLite is the MVP database.
+## Configuration lifecycle
 
-Use:
+The renderer produces deterministic, complete sing-box JSON from active
+database rows. Publishing stores an immutable config version and makes it the
+node target. The agent pulls that target, runs `sing-box check`, atomically
+installs it, restarts sing-box, and reports the result. It never edits live JSON
+with string replacement.
 
-- WAL mode.
-- `synchronous=NORMAL`.
-- Busy timeout.
-- Explicit schema migrations.
-- Batched agent uploads.
+The agent reads cumulative V2Ray API counters. A fresh state establishes a
+baseline; counter regression starts a new epoch. This avoids losing traffic
+when a report fails or sing-box restarts.
 
-PostgreSQL can be added later if BoxFleet gains multi-admin usage, heavy
-dashboard queries, or a large number of high-frequency node reporters.
+## Node lifecycle
+
+- `pending`: enrolled but not yet authenticated; excluded from render/publish.
+- `active`: promoted by the first authenticated heartbeat.
+- `disabled`: administratively paused or decommissioned.
+- `degraded`: active but unhealthy.
+
+Pause and decommission are deliberately different:
+
+- Pause keeps the token valid. The config endpoint returns a disabled header and
+  a valid no-inbound config; the daemon keeps polling while sing-box stays off.
+- Decommission also revokes tokens, cutting off the daemon. The retained row may
+  later be re-enrolled.
+
+Token verification checks revocation, not node status.
+
+## Durable node operations
+
+Agents long-poll for typed, allow-listed operations stored in SQLite. Claims use
+leases; progress events are sequenced and idempotent; local checkpoints survive
+agent restarts. Update payloads may reference only assets from the formal
+release catalog. See [node operations](node-operations.md).
+
+Server, agent, and sing-box versions are independent. A server release advertises
+the pinned component targets from its build, so unchanged node components do not
+appear outdated.
+
+## Constraints
+
+- Nodes run no database, Docker daemon, panel, or monitoring stack.
+- SQLite uses WAL, a busy timeout, explicit migrations, and bounded queries.
+- The supported renderer protocol is VLESS-Reality with
+  `xtls-rprx-vision`; adding a protocol requires server rendering, client output,
+  validation, and tests together.
+- Multi-admin authentication, quota enforcement, and rate limiting are not
+  implemented.

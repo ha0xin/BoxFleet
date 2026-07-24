@@ -1,97 +1,30 @@
-# sing-box Deployment Notes
+# sing-box Build
 
-This directory is reserved for generated configuration templates and examples.
+BoxFleet pins sing-box in `.github/workflows/artifacts.yml` and publishes a
+Linux amd64 binary with the node release. `SING_BOX_REVISION` changes only after
+the new upstream version passes config, traffic, update, and rollback tests.
 
-BoxFleet should generate complete node configs instead of editing live configs
-with string replacement.
+The required build tag is `with_v2ray_api`; without it the agent cannot read
+per-user traffic counters. The workflow also enables the networking features
+listed in `SING_BOX_TAGS`. `with_naive_outbound` is intentionally omitted
+because the supported VLESS-Reality path does not need it and it introduces
+additional linker requirements.
 
-## V2Ray API Requirement
+Verify a candidate with:
 
-BoxFleet's MVP traffic backend uses the `sing-box` V2Ray API. The official
-`sing-box` documentation says this API is not included by default; builds must
-include the `with_v2ray_api` tag.
+```bash
+sing-box version | grep with_v2ray_api
+sing-box check -c <generated-config.json>
+```
 
-GitHub Releases publish a compatible `sing-box-v1.13.13-linux-amd64` binary
-built from pinned upstream tag `v1.13.13`. The management server embeds
-`/install.sh`; nodes download that script from the server, and the script
-downloads the versioned `sing-box` asset from GitHub Releases.
-
-The current local build tags are:
+Generated configs expose V2Ray stats only on `127.0.0.1:18082` and enumerate
+every rendered access `auth_name`. Counter naming is:
 
 ```text
-with_gvisor
-with_quic
-with_dhcp
-with_wireguard
-with_utls
-with_acme
-with_clash_api
-badlinkname
-tfogo_checklinkname0
-with_v2ray_api
+user>>>AUTH_NAME>>>traffic>>>uplink
+user>>>AUTH_NAME>>>traffic>>>downlink
 ```
 
-`with_naive_outbound` is intentionally omitted for the MVP. It pulled in cronet
-linking requirements during local testing, and BoxFleet does not need NaiveProxy
-outbound for the current VLESS Reality path.
-
-The linker flags should come from the upstream repository:
-
-```bash
-cat refs/sing-box/release/LDFLAGS
-```
-
-The current local build command is equivalent to:
-
-```bash
-cd refs/sing-box
-TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,badlinkname,tfogo_checklinkname0,with_v2ray_api"
-LDFLAGS="$(cat release/LDFLAGS)"
-go build -trimpath -tags "$TAGS" -ldflags "$LDFLAGS" -o ../../dist/deploy/sing-box ./cmd/sing-box
-```
-
-Verify the resulting binary with:
-
-```bash
-dist/deploy/sing-box version | grep with_v2ray_api
-```
-
-## Minimal V2Ray API Check Config
-
-The smoke test validates only that the binary accepts V2Ray API config:
-
-```json
-{
-  "log": {
-    "level": "info"
-  },
-  "outbounds": [
-    {
-      "type": "direct",
-      "tag": "direct"
-    }
-  ],
-  "route": {
-    "final": "direct"
-  },
-  "experimental": {
-    "v2ray_api": {
-      "listen": "127.0.0.1:18082",
-      "stats": {
-        "enabled": true,
-        "users": []
-      }
-    }
-  }
-}
-```
-
-Run:
-
-```bash
-sing-box check -c minimal-v2ray-api.json
-```
-
-Real generated configs must include user names in
-`experimental.v2ray_api.stats.users` so the agent can map V2Ray counters back
-to `proxy_accesses.auth_name`.
+The agent maps these counters back to access rows. Config details belong in
+[configuration rendering](../../docs/config-generation.md); release and install
+steps belong in [deployment](../../docs/deployment.md).

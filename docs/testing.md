@@ -1,118 +1,9 @@
-# Testing Strategy
+# Testing
 
-BoxFleet should move from manual smoke tests to repeatable tests before the
-agent and config renderer become complex.
-
-## Current State
-
-Current automated coverage is mostly compilation:
+The release gate is:
 
 ```bash
-npm --prefix web run build
-go test ./...
-```
-
-Remote smoke checks are manual for now. GitHub Actions builds downloadable
-Linux amd64 artifacts for server, CLI, agent, and `sing-box`; use those
-artifacts for node/server deployment tests.
-
-## Test Layers
-
-### Unit Tests
-
-Start with deterministic helper packages:
-
-- `internal/units`: byte parsing and formatting.
-- `internal/id`: ID prefix and UUID format.
-- `internal/secret`: generated key length and encoding format.
-
-Random generators should be tested by shape and constraints, not exact values.
-
-### SQLite Integration Tests
-
-Use `t.TempDir()` and a temporary database file.
-
-Cover:
-
-- migration status after `Migrate`
-- proxy user create/list/show/update
-- node create/list/show/update
-- user-node binding create/list/update
-- proxy create/list/show/update
-- proxy access issue/show
-- listener conflict validation, including protocol-derived transport
-- unique constraints
-- foreign-key constraints
-- not-found errors
-- operation idempotency conflicts, single-active constraints, lease expiry, and
-  exact terminal-event replay
-- update-campaign canary/batch release, failure pause, retry lineage, and later
-  batch containment
-
-These tests should exercise the `internal/server/db` facade, not the generated
-`sqlc` package directly. The generated package is tested indirectly by the
-facade behavior.
-
-### CLI Integration Tests
-
-Invoke `internal/cli/bf.NewRootCommand()` directly with temp database paths and
-buffered stdout/stderr.
-
-Cover:
-
-- `bf --db <tmp> db init`
-- `bf --db <tmp> user create/list/show`
-- `bf --db <tmp> node create/list/show`
-- `bf --db <tmp> bind user/list`
-- `bf --db <tmp> proxy create/list/show`
-- `bf --db <tmp> access issue/show`
-
-The CLI currently uses package-level Viper state. If tests become flaky, refactor
-the CLI into an app struct that owns config state per command instance.
-
-### Config Renderer Golden Tests
-
-Add and keep golden tests around `bf config render --node` and
-`bf config render-client`.
-
-The input should be a fixed SQLite fixture. The output should be deterministic
-JSON.
-
-Rules:
-
-- Access generation happens before render, not during render.
-- Golden tests use fixed access fixtures.
-- Tests compare normalized JSON structures, not raw whitespace.
-- Important generated fields should also get explicit assertions.
-
-### Agent Tests
-
-Agent unit tests should not require a real `sing-box` process.
-
-Use fakes for:
-
-- server API
-- V2Ray API client
-- filesystem writes
-- command runner for `sing-box check`
-- service reloader
-
-Managed update tests additionally use `httptest.Server` and temporary install
-directories to prove Range resume, direct-to-file download, checksum failure
-cleanup, versioned switching, disabled-node stop semantics, sing-box health
-rollback, and the three-start agent guard. Never invoke a real `systemctl` from
-these tests.
-
-Real remote `sing-box` checks belong in the deployment smoke flow, not unit or
-integration tests.
-
-## Web UI Checks
-
-The embedded admin frontend should pass:
-
-```bash
-$(go env GOPATH)/bin/sqlc generate
-npm --prefix web ci
+npm ci --prefix web
 npm --prefix web run lint
 npm --prefix web test
 npm --prefix web run build
@@ -121,60 +12,54 @@ go vet ./...
 npm --prefix web run test:e2e
 ```
 
-`go test ./...` includes a smoke test that `/admin` serves the embedded index.
-Manual UI smoke for the current MVP:
+Run sqlc generation first when schema or queries changed. Generated Web assets
+must exist before Go tests because the server embeds them.
 
-- Open `/admin`.
-- Confirm the sidebar has Overview, Nodes, Proxies, Users, Traffic, Network
-  Events, System Logs, and Settings.
-- Open Proxies.
-- Click Create, select a node, create a VLESS Reality proxy without a
-  transport field.
-- Confirm the created proxy appears in the list with read-only transport.
-- Edit the proxy and confirm Node, Name, and Protocol are fixed while
-  listen/port/enabled/multiplier/SNI remain editable; saving an edit must keep
-  the existing Reality keys (only the SNI changes).
-- Open Users, edit a user (display name / status / quota / expiry), and use
-  Manage access to issue and revoke a proxy grant.
-- Open Nodes, edit a node (public host / API URL), pause/resume it, and confirm a
-  decommissioned node offers re-enroll rather than Enable. Proxy editing should
-  not live under the Node modal.
-- Make any change that alters the rendered config and confirm the top publish bar
-  lights up; Review & apply, and watch it converge to green.
-- Open Network Events.
-- Confirm Node, User, and Page Size are Kumo selects, not native browser
-  selects.
-- Pick a date range, set start/end local times, apply filters, and confirm the
-  table updates with server-side pagination.
-- Confirm Previous/Next updates `offset` without losing the applied filters.
+## Test boundaries
 
-The Network Events page intentionally exercises the current frontend stack:
-TanStack Query, TanStack Table, react-hook-form, zod, react-day-picker, and
-date-fns. When changing that page, keep those libraries in use instead of
-returning to ad hoc local state, hand-written table loops, or native date/select
-controls.
+- `internal/server/db`: SQLite facade behavior, constraints, query plans,
+  pagination, retention and operation concurrency. Use `t.TempDir()` databases;
+  do not test sqlc-generated methods directly.
+- `internal/server/api`: handler contracts, authentication, structured errors,
+  pagination and fixed update-catalog assets.
+- `internal/server/render`: fixed database fixtures and normalized golden JSON.
+  Rendering must be deterministic and must not generate credentials.
+- `internal/agent`: fake the command runner, service manager, filesystem-facing
+  boundaries and HTTP servers. Unit tests must never invoke real `sing-box`,
+  `systemctl`, or `journalctl`.
+- `internal/cli/bf`: invoke `NewRootCommand` with buffered I/O and a temporary
+  database.
+- `web/src/**/*.test.*`: API parsing, query serialization, hooks and mutation
+  ordering under Vitest.
+- `web/e2e`: real server plus Vite, covering resource lifecycle, Mihomo workflow,
+  mobile navigation, overflow and browser console regressions.
 
-`npm --prefix web run build` may warn if the JS bundle exceeds Vite's default
-chunk warning threshold. Treat that as a code-splitting/manualChunks follow-up,
-not a reason to remove established libraries.
+Random secrets are asserted by shape and constraints, not exact values.
+Renderer output is compared structurally, not by whitespace.
 
-Browser-level automated tests live under `web/e2e/` and use Playwright. The
-current lifecycle test starts a local `boxfleet-server` on `127.0.0.1:18081`,
-starts the Vite dev server on `127.0.0.1:4173`, and drives the admin UI through
-node/user/proxy creation, access grant/revoke, and soft-delete visibility.
+## Browser tests
 
-Performance releases also follow [`performance.md`](performance.md). CI query
-plan tests protect bounded traffic, heartbeat, and Network Events reads; the
-documented P95 targets are verified against a production-shaped database on the
-release host because absolute timings are hardware-dependent.
-
-The Playwright config discovers Chrome on macOS, Linux, and Windows, falling
-back to Playwright's bundled Chromium. Override it if needed, or select multiple
-browser engines:
+Playwright uses configurable ports:
 
 ```bash
-npm --prefix web run test:e2e:all
+BOXFLEET_E2E_SERVER_PORT=18082 npm --prefix web run test:e2e
+BOXFLEET_E2E_BROWSERS=chromium,firefox,webkit npm --prefix web run test:e2e
 ```
 
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` remains available when a specific Chrome
-binary is required; set it with the environment-variable syntax for your shell.
+The config discovers Chrome on macOS, Linux, and Windows and falls back to
+bundled Chromium. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` may select a specific
+binary.
+
+Tests must assert behavior or geometry, not merely take screenshots. Keep the
+Network Events page-size URL regression, mobile drawer reachability, bounded
+table scrolling, and known console-error checks covered.
+
+## Deployment and performance
+
+Real-node service and sing-box checks belong to the deployment smoke flow, not
+the regular suite. Follow [deployment](deployment.md) and the
+[azus runbook](azus-runbook.md).
+
+Performance-sensitive releases also follow [performance.md](performance.md).
+Query-plan tests protect bounded access paths, while absolute P95 measurements
+run against a production-shaped database on the release host.

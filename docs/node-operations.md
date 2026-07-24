@@ -160,9 +160,10 @@ fixed `boxfleet-update.json` release catalog.
 ## Release Catalog
 
 Formal tag builds publish `boxfleet-update.json` beside the binaries. It fixes
-the release, platform, component version, basename, byte length, and SHA256.
-The server rejects development versions and catalogs that do not exactly match
-its compiled BoxFleet and pinned sing-box versions.
+the server release plus each platform's independent agent/sing-box version,
+basename, byte length, and SHA256. The server rejects development releases and
+catalogs that do not match its compiled server release and pinned component
+targets.
 
 Catalog signing/TUF is intentionally deferred for this single-operator
 deployment. SHA256 protects transfer and local installation integrity; it does

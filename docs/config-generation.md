@@ -1,250 +1,83 @@
-# Config Generation
+# Configuration Rendering
 
-BoxFleet treats the SQLite database as source of truth and renders complete
-`sing-box` configs per node.
+SQLite is the source of truth. `internal/server/render` produces deterministic,
+complete sing-box JSON; identical relevant state must yield identical bytes and
+hashes.
 
-Generated configs should be deterministic: the same database state should render
-the same JSON and hash.
+## Eligibility
 
-## Inputs
+Normal node configs include only:
 
-For one node, the renderer reads:
+- an `active` node;
+- enabled VLESS-Reality proxies;
+- active, unexpired users;
+- enabled user-node bindings and proxy accesses.
 
-- `nodes`
-- `proxies`
-- `proxy_users`
-- `user_node_bindings`
-- `proxy_accesses`
-- `node_outbounds`
-- `route_profiles`
+A disabled node receives `RenderDisabledConfig`: a valid base config with no
+inbounds plus `X-BoxFleet-Node-State: disabled`. New agents stop sing-box from
+the header; legacy agents stop serving after applying the empty config.
 
-Only active rows are rendered:
+## Base shape
 
-- `nodes.status = active`
-- `proxies.enabled = 1`
-- `proxy_users.status = active`
-- `user_node_bindings.enabled = 1`
-- `proxy_accesses.enabled = 1`
+Every config contains timestamped logging, `direct` and `block` outbounds, a
+route whose final outbound is `direct`, and the local V2Ray API at
+`127.0.0.1:18082`. User-defined outbound tags may not collide with built-ins.
 
-### Disabled nodes
+## VLESS-Reality
 
-A disabled node does not get its normal render. `GET /api/node/config` returns
-`render.RenderDisabledConfig()` — the base config below with **no inbounds** —
-together with the `X-BoxFleet-Node-State: disabled` header. New agents act on the
-header and stop `sing-box`; older agents that ignore it still stop serving because
-applying a no-inbound config takes down all listeners. A node with no proxy
-accesses renders the same empty shape.
-
-## Base Config
-
-Every generated config should include:
+Each proxy becomes one VLESS inbound. Listener and Reality settings come from
+the proxy row. Each eligible access contributes:
 
 ```json
 {
-  "log": {
-    "level": "info",
-    "timestamp": true
-  },
-  "inbounds": [],
-  "outbounds": [
-    {"type": "direct", "tag": "direct"},
-    {"type": "block", "tag": "block"}
-  ],
-  "route": {
-    "rules": [],
-    "final": "direct"
-  }
+  "name": "<proxy>@<user>",
+  "uuid": "...",
+  "flow": "xtls-rprx-vision"
 }
 ```
 
-Node-defined outbounds are appended after the built-ins. If a node defines a tag
-that collides with a built-in tag, config generation should fail.
+The server config includes the Reality private key, server name, handshake
+target, and one normalized short ID. Client output uses the corresponding
+public key. Short IDs are lowercase even-length hexadecimal strings of at most
+eight characters.
 
-## Proxy Users
+The renderer currently rejects every other protocol. Protocol expansion must
+add validation, server rendering, client/Mihomo output, and golden tests in the
+same change.
 
-For each `proxies` row, collect access rows where:
+## Hosts and client names
 
-```text
-proxy_accesses.proxy_id = proxies.id
-user_node_bindings.node_id = proxies.node_id
-user_node_bindings.proxy_user_id = proxy_accesses.proxy_user_id
-proxy_users.status = active
-user_node_bindings.enabled = 1
-```
+`nodes.hosts_json` is ordered. Every selected host produces a client profile.
+The primary untagged host uses `<proxy>`; tagged hosts use
+`<proxy>-<host-tag>`. Host tags are case-insensitively unique. Legacy untagged
+supplemental hosts remain readable, but edits require tags. Duplicate final
+profile names are rejected.
 
-The rendered `users[]` entries use `proxy_accesses.auth_name`.
+## Routing and statistics
 
-### VLESS Reality
+Bindings without a route profile use `direct`. Profile rules are scoped to the
+binding's rendered auth names and grouped where possible.
 
-Protocol/listener settings come from `proxies.settings_json`.
-
-Rendered shape:
-
-```json
-{
-  "type": "vless",
-  "tag": "vless-443",
-  "listen": "::",
-  "listen_port": 443,
-  "users": [
-    {
-      "name": "vless-443@alice",
-      "uuid": "...",
-      "flow": "xtls-rprx-vision"
-    }
-  ],
-  "tls": {
-    "enabled": true,
-    "server_name": "example.com",
-    "reality": {
-      "enabled": true,
-      "handshake": {
-        "server": "example.com",
-        "server_port": 443
-      },
-      "private_key": "...",
-      "short_id": "01234567"
-    }
-  }
-}
-```
-
-The public Reality key is not rendered into the server config, but it is needed
-for `bf user node-info`.
-
-BoxFleet stores one Reality `short_id` per proxy. The value is a hexadecimal
-string with 0 to 8 digits. `sing-box` server-side options can technically accept
-a list, but the MVP intentionally keeps one value so server and client node
-information stay symmetric.
-
-Use an even-length value such as `01234567`; this matches the current
-`sing-box` hex decoder behavior used during `sing-box check`.
-
-The value can be changed independently of the Reality key pair. It is trimmed
-and normalized to lowercase before storage; changing it affects the next
-rendered node config and the dynamic Mihomo provider response.
-
-## Mihomo Profile Names
-
-The proxy's canonical name is the base profile name. For a node's primary host
-without a tag, the name is simply `<proxy>`. A tagged host uses
-`<proxy>-<host-tag>`; legacy supplemental hosts without tags fall back to
-`<proxy>-<raw-host>`.
-
-Additional hosts require a tag whenever a node is edited, including hosts that
-are not currently selected. Tags are unique within a node, case-insensitively.
-Legacy rows without tags remain readable. Rendering rejects duplicate final
-Mihomo names rather than emitting an ambiguous provider document.
-
-### Shadowsocks 2022
-
-This is a planned renderer shape. The current tested render/apply path is VLESS
-Reality.
-
-Rendered shape:
-
-```json
-{
-  "type": "shadowsocks",
-  "tag": "ss-8388",
-  "listen": "::",
-  "listen_port": 8388,
-  "method": "2022-blake3-aes-128-gcm",
-  "password": "...",
-  "users": [
-    {
-      "name": "ss-8388@alice",
-      "password": "..."
-    }
-  ]
-}
-```
-
-For 2022 methods, the server password and user passwords must match the key
-length required by the selected method.
-
-### Hysteria2
-
-This is a planned renderer shape. The current tested render/apply path is VLESS
-Reality.
-
-Rendered shape:
-
-```json
-{
-  "type": "hysteria2",
-  "tag": "hy2-8443",
-  "listen": "::",
-  "listen_port": 8443,
-  "up_mbps": 100,
-  "down_mbps": 100,
-  "users": [
-    {
-      "name": "hy2-8443@alice",
-      "password": "..."
-    }
-  ],
-  "tls": {}
-}
-```
-
-TLS is required. The first implementation can support certificate paths before
-adding ACME or other certificate providers.
-
-## Routing
-
-Route rules are generated from `user_node_bindings.route_profile_id`.
-
-Current MVP behavior:
-
-- If a binding has no route profile, route its auth users to `direct`.
-- If a binding has a route profile, render its rules with `auth_user` set to the
-  user's rendered auth names on that node.
-- `route.final` is currently `direct`.
-
-The renderer should group users by equivalent route profile so generated rules
-stay compact.
-
-## V2Ray API
-
-The config must include V2Ray API stats for all rendered auth names:
-
-```json
-{
-  "experimental": {
-    "v2ray_api": {
-      "listen": "127.0.0.1:18082",
-      "stats": {
-        "enabled": true,
-        "users": [
-          "vless-443@alice",
-          "ss-8388@alice"
-        ]
-      }
-    }
-  }
-}
-```
-
-The agent maps returned stat names back through `proxy_accesses.auth_name`.
-
-Expected stat name shape:
+Every auth name is also listed in `experimental.v2ray_api.stats.users`. sing-box
+then exposes counters named:
 
 ```text
 user>>>AUTH_NAME>>>traffic>>>uplink
 user>>>AUTH_NAME>>>traffic>>>downlink
 ```
 
-## Validation
+The agent maps these names back to proxy accesses.
 
-Before publishing a config version, the server should validate:
+## Publish and validation
 
-- Proxy names are globally unique.
-- Built-in outbound tags are not overwritten.
-- Proxy listener conflicts are valid for the network layer.
-- Every route profile references an existing outbound tag.
-- Every enabled proxy has valid settings for its protocol.
-- Every rendered V2Ray API user maps to exactly one access row.
+Publishing renders the node, stores an immutable config version and hash, and
+sets it as the target. The node remains unchanged until its agent pulls and
+applies that target.
 
-The node agent still runs `sing-box check` before applying the config. Server
-validation is an early guard; node validation is authoritative.
+Server validation rejects invalid protocol settings, listener conflicts,
+duplicate names, bad outbound references, and ambiguous auth mappings. The
+agent's final `sing-box check` remains authoritative for the installed binary.
+
+Renderer tests use fixed SQLite fixtures and compare normalized JSON. Never add
+random credentials during rendering; credentials are generated when access is
+created.
