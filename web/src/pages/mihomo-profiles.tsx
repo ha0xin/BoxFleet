@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import QRCode from "qrcode";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -437,6 +438,26 @@ function NewConfigurationWorkbench({ request, users, templates }: {
   );
 }
 
+function SubscriptionQrCode({ value }: { value: string }) {
+  const [dataUrl, setDataUrl] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    setDataUrl("");
+    QRCode.toDataURL(value, { margin: 2, width: 224 })
+      .then((url) => {
+        if (!cancelled) setDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+  if (!dataUrl) return null;
+  return <img src={dataUrl} alt="Subscription link QR code" className="size-56 rounded-md" />;
+}
+
 function SubscriptionLinkDialog({ request, profile, onClose }: {
   request: AdminRequest;
   profile: MihomoProfile;
@@ -455,7 +476,7 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
   const error = subscriptionQuery.error ?? generate.error ?? rotate.error ?? revoke.error;
   return (
     <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Subscription link</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">{profile.name} · proxies from {profile.proxy_user_name}</Dialog.Description>
         {error ? <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} /> : null}
@@ -488,6 +509,9 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
                   .then(() => { setCopyError(""); setCopied(true); })
                   .catch((copyFailure: unknown) => setCopyError(copyFailure instanceof Error ? copyFailure.message : "Unable to copy."));
               }}>{copied ? "Copied" : "Copy"}</Button>
+            </div>
+            <div className="flex flex-col items-center gap-2 rounded-lg border border-kumo-line bg-kumo-canvas p-4">
+              <SubscriptionQrCode value={subscription.url} />
             </div>
             <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
               <div><dt className="font-medium text-kumo-default">Created</dt><dd>{formatDateTime(subscription.created_at)}</dd></div>

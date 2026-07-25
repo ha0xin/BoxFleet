@@ -104,7 +104,7 @@ export function nodeHealth(node: AdminNode): {
 }
 
 export function formatNodeVersion(node: AdminNode): string {
-  const current = node.current_version || node.sing_box_version || "n/a";
+  const current = node.current_version || "n/a";
   const target = node.target_version || current;
   return current === target ? current : `${current} -> ${target}`;
 }
