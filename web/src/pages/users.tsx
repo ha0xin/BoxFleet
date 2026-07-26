@@ -1,6 +1,9 @@
 import type { CSSProperties } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import {
   ArrowsClockwiseIcon,
   CheckCircleIcon,
@@ -13,13 +16,14 @@ import {
   TrashIcon,
   UserIcon
 } from "@phosphor-icons/react";
-import { Badge, Banner, Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
+import { Badge, Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
 
-import type { AdminUser, TrafficRow } from "../types";
+import type { AdminUser, AdminUserEffectiveStatus, AdminUsersResponse, TrafficVolume } from "../types";
 import { formatBytes } from "../utils";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { AdminApiError, useAdminApi } from "@/admin/api";
-import { adminKeys } from "@/admin/query";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
@@ -29,58 +33,86 @@ import { StatusBadge } from "@/components/status-badge";
 import type { StatusTone } from "@/components/status-badge";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 
-type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded" | "deleted";
-
-const FILTER_LABELS: Record<UserFilter, string> = {
-  all: "All",
+/**
+ * Status vocabulary of the paged endpoint. These are the *derived* statuses the
+ * server filters and sorts on (`effective_status`), not the stored column: a
+ * user whose quota ran out is `quota_exceeded` here long before anything writes
+ * that word to `proxy_users.status`.
+ */
+const STATUS_LABELS: Record<AdminUserEffectiveStatus, string> = {
   active: "Active",
   disabled: "Disabled",
   expired: "Expired",
   quota_exceeded: "Over quota",
   deleted: "Deleted"
 };
-type UserSort = "name" | "status" | "traffic" | "quota" | "proxy_count" | "expire_at";
-type SortDirection = "asc" | "desc";
 
-type UserTraffic = {
-  upload: number;
-  download: number;
-  rawUpload: number;
-  rawDownload: number;
+const STATUS_TONES: Record<AdminUserEffectiveStatus, StatusTone> = {
+  active: "success",
+  disabled: "neutral",
+  expired: "warning",
+  quota_exceeded: "warning",
+  deleted: "error"
 };
 
-type UserRow = {
-  user: AdminUser;
-  traffic: UserTraffic;
-  status: ReturnType<typeof userStatus>;
-  total: number;
+const STATUS_FILTERS = ["all", "active", "disabled", "expired", "quota_exceeded", "deleted"] as const;
+
+const FILTER_LABELS: Record<(typeof STATUS_FILTERS)[number], string> = { all: "All", ...STATUS_LABELS };
+
+const filterSchema = z.object({
+  search: z.string(),
+  status: z.enum(STATUS_FILTERS),
+  // Only the keys the server whitelists; anything else it would silently sort
+  // by name, which would leave the header arrow pointing at a lie.
+  sort: z.enum(["name", "status", "traffic", "quota", "proxy_count", "expire_at"]),
+  direction: z.enum(["asc", "desc"])
+});
+
+export type UserFilterValues = z.infer<typeof filterSchema>;
+
+type UserSort = UserFilterValues["sort"];
+
+const defaultFilters: UserFilterValues = { search: "", status: "all", sort: "name", direction: "asc" };
+
+// Module scope keeps `filters` referentially stable across renders, which is
+// what lets it be spread straight into a query key.
+const urlFilters: UseUrlFiltersOptions<UserFilterValues> = {
+  schema: filterSchema,
+  defaults: defaultFilters,
+  perPage: 10
 };
 
-const emptyTraffic: UserTraffic = { upload: 0, download: 0, rawUpload: 0, rawDownload: 0 };
-
-function trafficByUser(rows: TrafficRow[]): Map<string, UserTraffic> {
-  const totals = new Map<string, UserTraffic>();
-  for (const row of rows) {
-    const current = totals.get(row.user_name) ?? { ...emptyTraffic };
-    if (row.direction.includes("up")) {
-      current.upload += row.billable_bytes;
-      current.rawUpload += row.raw_bytes;
-    } else {
-      current.download += row.billable_bytes;
-      current.rawDownload += row.raw_bytes;
-    }
-    totals.set(row.user_name, current);
-  }
-  return totals;
+/**
+ * Request path for one page of users.
+ *
+ * "Deleted" sits in the same menu as the other statuses but is a different axis
+ * on the wire: `status` narrows the derived status *within* the live inventory,
+ * while `deleted=true` swaps the inventory itself to the soft-deleted rows.
+ * Sending both would ask for deleted users that are not deleted — always empty.
+ */
+export function usersRequestPath(filters: UserFilterValues, perPage: number, offset: number): string {
+  return "/api/admin/users" + queryString({
+    limit: perPage,
+    offset,
+    search: filters.search.trim(),
+    status: filters.status === "all" || filters.status === "deleted" ? undefined : filters.status,
+    deleted: filters.status === "deleted" ? "true" : undefined,
+    sort: filters.sort,
+    direction: filters.direction
+  });
 }
 
-function isExpired(user: AdminUser): boolean {
-  if (!user.expire_at) return false;
-  const time = new Date(user.expire_at).getTime();
-  return Number.isFinite(time) && time <= Date.now();
+/** Billable bytes are what a quota is measured against. */
+export function billableBytes(traffic: TrafficVolume): number {
+  return traffic.uplink_billable_bytes + traffic.downlink_billable_bytes;
 }
 
-function formatExpiry(value: string): string {
+/** Raw bytes are what crossed the wire, before any per-proxy multiplier. */
+export function rawBytes(traffic: TrafficVolume): number {
+  return traffic.uplink_raw_bytes + traffic.downlink_raw_bytes;
+}
+
+export function formatExpiry(value: string): string {
   if (!value) return "never";
   const time = new Date(value).getTime();
   if (!Number.isFinite(time)) return value;
@@ -97,43 +129,15 @@ function formatExpiry(value: string): string {
   return `${prefix}${days}d${suffix}`;
 }
 
-function userStatus(user: AdminUser, total: number): {
-  key: Exclude<UserFilter, "all">;
-  label: string;
-  tone: StatusTone;
-} {
-  if (user.deleted_at) {
-    return { key: "deleted", label: "Deleted", tone: "error" };
-  }
-  if (user.status === "disabled") {
-    return { key: "disabled", label: "Disabled", tone: "neutral" };
-  }
-  if (user.status === "quota_exceeded" || (user.global_quota_bytes > 0 && total >= user.global_quota_bytes)) {
-    return { key: "quota_exceeded", label: "Over quota", tone: "warning" };
-  }
-  if (user.status === "expired" || isExpired(user)) {
-    return { key: "expired", label: "Expired", tone: "warning" };
-  }
-  return { key: "active", label: "Active", tone: "success" };
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed.";
 }
 
-function compareText(left: string | number | undefined, right: string | number | undefined, direction: SortDirection) {
-  return String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true }) * (direction === "desc" ? -1 : 1);
-}
-
-function formatSupplementaryError(error: unknown): string {
-  if (!(error instanceof Error)) return "Traffic request failed.";
-  return error instanceof AdminApiError
-    ? `Traffic request failed (${error.status}): ${error.detail}`
-    : error.message;
-}
-
-function QuotaMeter({ user, traffic }: { user: AdminUser; traffic: UserTraffic }) {
-  const total = traffic.upload + traffic.download;
-  const quota = user.global_quota_bytes;
+function QuotaMeter({ quota, traffic }: { quota: number; traffic: TrafficVolume }) {
+  const total = billableBytes(traffic);
   const max = quota > 0 ? quota : Math.max(total, 1);
   const value = quota > 0 ? Math.min(total, quota) : total;
-  const uploadShare = total > 0 ? Math.round((traffic.upload / total) * 100) : 0;
+  const uploadShare = total > 0 ? Math.round((traffic.uplink_billable_bytes / total) * 100) : 0;
   const style = {
     "--meter-split": `${uploadShare}%`
   } as CSSProperties;
@@ -152,47 +156,26 @@ function QuotaMeter({ user, traffic }: { user: AdminUser; traffic: UserTraffic }
       <div className="mt-1 flex items-center gap-3 text-xs text-kumo-subtle">
         <span className="inline-flex items-center gap-1">
           <span className="size-2 rounded-full bg-kumo-info" />
-          {formatBytes(traffic.upload)} up
+          {formatBytes(traffic.uplink_billable_bytes)} up
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="size-2 rounded-full bg-kumo-success" />
-          {formatBytes(traffic.download)} down
+          {formatBytes(traffic.downlink_billable_bytes)} down
         </span>
       </div>
     </div>
   );
 }
 
-function sortRows(rows: UserRow[], sort: UserSort, direction: SortDirection): UserRow[] {
-  return [...rows].sort((a, b) => {
-    switch (sort) {
-      case "status":
-        return compareText(a.status.label, b.status.label, direction) || compareText(a.user.name, b.user.name, "asc");
-      case "traffic":
-        return compareText(a.total, b.total, direction) || compareText(a.user.name, b.user.name, "asc");
-      case "quota":
-        return compareText(a.user.global_quota_bytes, b.user.global_quota_bytes, direction) || compareText(a.user.name, b.user.name, "asc");
-      case "proxy_count":
-        return compareText(a.user.proxy_count, b.user.proxy_count, direction) || compareText(a.user.name, b.user.name, "asc");
-      case "expire_at":
-        return compareText(a.user.expire_at, b.user.expire_at, direction) || compareText(a.user.name, b.user.name, "asc");
-      default:
-        return compareText(a.user.name, b.user.name, direction);
-    }
-  });
-}
-
 export function UsersPage() {
   const { request } = useAdminApi();
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-  const [filter, setFilter] = useState<UserFilter>("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSortValue] = useState<UserSort>("name");
-  const [direction, setDirection] = useState<SortDirection>("asc");
+  const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(urlFilters);
   const [dialog, setDialog] = useState<UserDialogState>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+
+  // react-hook-form is the draft layer for the search box only; `values` re-syncs
+  // it whenever the committed filters change, including on Back/Forward.
+  const form = useForm<UserFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminUser>(request, (req, user) =>
     req(`/api/admin/users/${encodeURIComponent(user.name)}`, {
@@ -204,73 +187,42 @@ export function UsersPage() {
     req(`/api/admin/users/${encodeURIComponent(user.name)}/restore`, { method: "POST" })
   );
 
+  // One request per page carries the rows, the derived status and the traffic
+  // totals. The page used to pair the full user list with the fleet-wide
+  // /api/admin/traffic/users inventory and join them by name in the client;
+  // under server-side paging that join is unfixable — the server has to filter
+  // and sort by traffic before it knows which ten rows to send, so the numbers
+  // must come from the same query. The 15s cadence is the tighter of the two
+  // the page used to run, and it is now a page of rows instead of two full
+  // inventories.
   const usersQuery = useQuery({
-    queryKey: adminKeys.users(filter === "deleted"),
-    queryFn: () => request<AdminUser[]>(filter === "deleted" ? "/api/admin/users?deleted=true" : "/api/admin/users"),
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true
-  });
-  const trafficQuery = useQuery({
-    queryKey: adminKeys.trafficUsers,
-    queryFn: () => request<TrafficRow[]>("/api/admin/traffic/users"),
+    queryKey: adminKeys.usersPage(perPage, offset, filters.search, filters.status, filters.sort, filters.direction),
+    queryFn: ({ signal }) => request<AdminUsersResponse>(usersRequestPath(filters, perPage, offset), { signal }),
+    placeholderData: (previous) => previous,
     refetchInterval: 15_000,
     refetchOnWindowFocus: true
   });
 
+  const rows = usersQuery.data?.users ?? [];
+  const total = usersQuery.data?.total ?? 0;
+
   function setSort(column: UserSort) {
-    setPage(1);
-    if (sort === column) {
-      setDirection((value) => (value === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortValue(column);
-    setDirection(column === "traffic" ? "desc" : "asc");
-  }
-
-  function setFilterValue(value: UserFilter) {
-    setFilter(value);
-    setPage(1);
-  }
-
-  function setPageSize(value: number) {
-    setPerPage(value);
-    setPage(1);
-  }
-
-  const rows = useMemo(() => {
-    const totals = trafficByUser(trafficQuery.data ?? []);
-    return (usersQuery.data ?? []).map((user) => {
-      const traffic = totals.get(user.name) ?? emptyTraffic;
-      const total = traffic.upload + traffic.download;
-      return { user, traffic, total, status: userStatus(user, total) };
-    });
-  }, [trafficQuery.data, usersQuery.data]);
-
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return sortRows(
-      rows.filter((row) => {
-        if (filter !== "all" && row.status.key !== filter) return false;
-        if (!needle) return true;
-        return [row.user.name, row.user.display_name, row.user.status, row.status.label]
-          .some((value) => value.toLowerCase().includes(needle));
-      }),
-      sort,
-      direction
+    setFilters((current) =>
+      current.sort === column
+        ? { direction: current.direction === "asc" ? "desc" : "asc" }
+        : { sort: column, direction: column === "traffic" ? "desc" : "asc" }
     );
-  }, [direction, filter, rows, search, sort]);
+  }
 
-  const offset = (page - 1) * perPage;
-  const visibleRows = filtered.slice(offset, offset + perPage);
-  const loading = usersQuery.isLoading;
-  const error = usersQuery.error;
-  const trafficError = trafficQuery.error ? formatSupplementaryError(trafficQuery.error) : "";
-  const total = filtered.length;
-
+  // The hook never sees a row count, so the upper clamp lives here — in an
+  // effect, because a setSearchParams during render is a navigation. It waits
+  // for a response: while the first request is in flight `total` is 0, and
+  // clamping on that would rewrite a deep-linked `?page=3` to page 1.
+  const loaded = usersQuery.data !== undefined;
   const lastPage = Math.max(1, Math.ceil(total / perPage));
-  // Render-phase adjustment (react.dev "you might not need an effect"):
-  // clamp when the row count shrinks below the current page.
-  if (page > lastPage) setPage(lastPage);
+  useEffect(() => {
+    if (loaded && page > lastPage) setPage(lastPage, "replace");
+  }, [lastPage, loaded, page, setPage]);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
@@ -296,18 +248,13 @@ export function UsersPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
                 className="flex min-w-0 flex-1 gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setSearch(searchInput.trim());
-                  setPage(1);
-                }}
+                onSubmit={form.handleSubmit((values) => setFilters({ search: values.search.trim() }))}
               >
                 <Input
                   placeholder="Search by user, display name, or status"
                   aria-label="Search users"
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
                   className="min-w-0 flex-1"
+                  {...form.register("search")}
                 />
                 <Button type="submit" variant="secondary">
                   Search
@@ -318,7 +265,9 @@ export function UsersPage() {
                   render={
                     <Button variant="secondary" icon={FunnelIcon}>
                       Filter
-                      {filter !== "all" ? <Badge variant="secondary">{FILTER_LABELS[filter]}</Badge> : null}
+                      {filters.status !== "all" ? (
+                        <Badge variant="secondary">{FILTER_LABELS[filters.status]}</Badge>
+                      ) : null}
                     </Button>
                   }
                 />
@@ -326,134 +275,110 @@ export function UsersPage() {
                   <DropdownMenu.Group>
                     <DropdownMenu.Label>Status</DropdownMenu.Label>
                     <DropdownMenu.RadioGroup
-                      value={filter}
-                      onValueChange={(value) => setFilterValue(value as UserFilter)}
+                      value={filters.status}
+                      onValueChange={(value) => setFilters({ status: value as UserFilterValues["status"] })}
                     >
-                      <DropdownMenu.RadioItem value="all">
-                        All
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
-                      <DropdownMenu.RadioItem value="active">
-                        Active
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
-                      <DropdownMenu.RadioItem value="disabled">
-                        Disabled
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
-                      <DropdownMenu.RadioItem value="expired">
-                        Expired
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
-                      <DropdownMenu.RadioItem value="quota_exceeded">
-                        Over quota
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
-                      <DropdownMenu.RadioItem value="deleted">
-                        Deleted
-                        <DropdownMenu.RadioItemIndicator />
-                      </DropdownMenu.RadioItem>
+                      {STATUS_FILTERS.map((value) => (
+                        <DropdownMenu.RadioItem key={value} value={value}>
+                          {FILTER_LABELS[value]}
+                          <DropdownMenu.RadioItemIndicator />
+                        </DropdownMenu.RadioItem>
+                      ))}
                     </DropdownMenu.RadioGroup>
                   </DropdownMenu.Group>
                 </DropdownMenu.Content>
               </DropdownMenu>
             </div>
 
-            {trafficError ? (
-              <Banner variant="error" title="Traffic data unavailable" description={trafficError} />
-            ) : null}
-
             <TableCard>
               <Table className="min-w-[1215px]">
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="User" column="name" sort={sort} direction={direction} setSort={setSort} sticky="left" />
-                    <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Traffic" column="traffic" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Quota" column="quota" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Access" column="proxy_count" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Expires" column="expire_at" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="User" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Status" column="status" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Traffic" column="traffic" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Quota" column="quota" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Access" column="proxy_count" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Expires" column="expire_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
                     </Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {error ? (
-                    <TableError colSpan={7}>{error instanceof Error ? error.message : "Request failed."}</TableError>
-                  ) : loading ? (
+                  {usersQuery.error ? (
+                    <TableError colSpan={7}>{errorMessage(usersQuery.error)}</TableError>
+                  ) : usersQuery.isLoading ? (
                     <TableLoading colSpan={7} />
-                  ) : visibleRows.length > 0 ? (
-                    visibleRows.map((row) => (
-                      <Table.Row key={row.user.id}>
+                  ) : rows.length > 0 ? (
+                    rows.map((row) => (
+                      <Table.Row key={row.id}>
                         <Table.Cell sticky="left">
                           <div className="flex min-w-52 items-center gap-2">
                             <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
                             <div className="min-w-0">
-                              <div className="truncate text-base font-medium text-kumo-default" title={row.user.name}>
-                                {row.user.name}
+                              <div className="truncate text-base font-medium text-kumo-default" title={row.name}>
+                                {row.name}
                               </div>
-                              {row.user.display_name ? (
-                                <div className="truncate text-sm text-kumo-subtle">{row.user.display_name}</div>
+                              {row.display_name ? (
+                                <div className="truncate text-sm text-kumo-subtle">{row.display_name}</div>
                               ) : null}
                             </div>
                           </div>
                         </Table.Cell>
                         <Table.Cell>
-                          <StatusBadge tone={row.status.tone}>{row.status.label}</StatusBadge>
+                          <StatusBadge tone={STATUS_TONES[row.effective_status]}>
+                            {STATUS_LABELS[row.effective_status]}
+                          </StatusBadge>
                         </Table.Cell>
                         <Table.Cell>
                           <div className="whitespace-nowrap">
-                            <div className="text-kumo-default">{formatBytes(row.total)}</div>
-                            <div className="text-xs text-kumo-subtle">
-                              raw {formatBytes(row.traffic.rawUpload + row.traffic.rawDownload)}
-                            </div>
+                            <div className="text-kumo-default">{formatBytes(billableBytes(row.traffic))}</div>
+                            <div className="text-xs text-kumo-subtle">raw {formatBytes(rawBytes(row.traffic))}</div>
                           </div>
                         </Table.Cell>
                         <Table.Cell>
-                          <QuotaMeter user={row.user} traffic={row.traffic} />
+                          <QuotaMeter quota={row.global_quota_bytes} traffic={row.traffic} />
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{row.user.proxy_count}</span>
+                          <span className="whitespace-nowrap text-kumo-subtle">{row.proxy_count}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">
-                            {formatExpiry(row.user.expire_at)}
-                          </span>
+                          <span className="whitespace-nowrap text-kumo-subtle">{formatExpiry(row.expire_at)}</span>
                         </Table.Cell>
                         <Table.Cell className="text-right">
-                          <RowActionsMenu label={`Actions for ${row.user.name}`}>
-                            {row.user.deleted_at ? (
+                          <RowActionsMenu label={`Actions for ${row.name}`}>
+                            {row.deleted_at ? (
                               <DropdownMenu.Item
                                 icon={ArrowsClockwiseIcon}
                                 disabled={restore.isPending}
-                                onClick={() => restore.mutate(row.user)}
+                                onClick={() => restore.mutate(row)}
                               >
                                 Restore
                               </DropdownMenu.Item>
                             ) : (
                               <>
-                                <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
+                                <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row })}>
                                   Edit
                                 </DropdownMenu.Item>
-                                <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
+                                <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row })}>
                                   Manage access
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Item
                                   icon={IdentificationCardIcon}
-                                  onClick={() => setDialog({ mode: "connection", user: row.user })}
+                                  onClick={() => setDialog({ mode: "connection", user: row })}
                                 >
                                   Connection info
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Item
-                                  icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                  icon={row.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
                                   disabled={toggleStatus.isPending}
-                                  onClick={() => toggleStatus.mutate(row.user)}
+                                  onClick={() => toggleStatus.mutate(row)}
                                 >
-                                  {row.user.status === "disabled" ? "Enable" : "Disable"}
+                                  {row.status === "disabled" ? "Enable" : "Disable"}
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Separator />
-                                <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row.user)}>
+                                <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row)}>
                                   Delete
                                 </DropdownMenu.Item>
                               </>
@@ -469,7 +394,7 @@ export function UsersPage() {
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
           </section>
         </div>
       </main>

@@ -218,6 +218,39 @@ export type AdminUser = {
   deleted_at: string;
 };
 
+// The status the server derives, filters, and sorts on. It differs from
+// AdminUser["status"]: quota exhaustion and expiry are states the stored column
+// only learns about later, so the derived value is what a row must badge.
+export type AdminUserEffectiveStatus = "active" | "disabled" | "expired" | "quota_exceeded" | "deleted";
+
+// One row of the paged inventory: every AdminUser field, plus the derived status
+// and the traffic totals the server resolved in the same query. Traffic arrives
+// with the page precisely so a paged table never needs the full
+// /api/admin/traffic/users inventory alongside it.
+export type AdminUserRow = AdminUser & {
+  effective_status: AdminUserEffectiveStatus;
+  traffic: TrafficVolume;
+};
+
+export type AdminUsersResponse = {
+  users: AdminUserRow[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+// Sort keys the server whitelists. Anything else falls back to name order.
+export type AdminUserSort =
+  | "name"
+  | "display_name"
+  | "status"
+  | "traffic"
+  | "quota"
+  | "proxy_count"
+  | "expire_at"
+  | "created_at"
+  | "updated_at";
+
 export type AdminProxyCredential = {
   id: string;
   user_name: string;
@@ -508,10 +541,28 @@ export type Overview = {
   };
 };
 
+// `note` predates pagination and is always "" today; it stays so the overview's
+// system_log_note and this payload keep the same vocabulary.
 export type SystemLogsResponse = {
   logs: SystemLog[];
+  // Every service that has ever reported, not just the ones on this page. Feed
+  // the service filter from here; a page of rows cannot enumerate the options,
+  // and options must not move when the filter is applied. Node options come
+  // from /api/admin/nodes for the same reason.
+  services: string[];
+  total: number;
+  limit: number;
+  offset: number;
   note: string;
 };
+
+// Level is bucketed server-side the way the page badges it: journald levels are
+// free text, so "error" also matches "err" and "LEVEL_FATAL", and "info" is the
+// residual bucket. An omitted filter means "all"; there is no "all" sentinel,
+// because a node may legitimately be named that.
+export type SystemLogLevelFilter = "error" | "warn" | "info" | "debug";
+
+export type SystemLogSort = "observed_at" | "node" | "service" | "level" | "message" | "ingested_at";
 
 export type Page =
   | "overview"

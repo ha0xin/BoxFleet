@@ -1,5 +1,8 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import {
   ArrowsClockwiseIcon,
   ArrowRightIcon,
@@ -19,6 +22,7 @@ import { formatRelativeTime, nodeHealth } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString } from "@/admin/query";
+import { useUrlFilters } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
@@ -27,16 +31,52 @@ import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog 
 import type { NodeDialogState } from "./node-dialogs";
 import { NodeUpdateDialog, phaseLabel, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
 
-type NodeFilter = "all" | "active" | "disabled" | "degraded" | "deleted";
-type NodeSort = "name" | "status" | "public_host" | "last_seen_at" | "sing_box_version";
-type SortDirection = "asc" | "desc";
+/**
+ * Search, status facet, sort and pagination all live in the query string, so a
+ * node view is linkable and survives a refresh — the same contract Network
+ * Events established, via the shared `useUrlFilters` hook.
+ *
+ * `sort` and `direction` sit alongside the filters because the server sorts:
+ * they are request inputs like any other, not view-local state.
+ */
+const filterSchema = z.object({
+  search: z.string(),
+  status: z.enum(["all", "active", "disabled", "degraded", "deleted"]),
+  sort: z.enum(["name", "status", "public_host", "last_seen_at", "sing_box_version"]),
+  direction: z.enum(["asc", "desc"])
+});
+
+type NodeFilterValues = z.infer<typeof filterSchema>;
+type NodeSort = NodeFilterValues["sort"];
+
+const defaultFilters: NodeFilterValues = { search: "", status: "all", sort: "name", direction: "asc" };
+
+// Module scope on purpose: `useUrlFilters` reads these every render, and inlining
+// them would re-parse the URL each time and break `filters`' referential stability.
+const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage: 10 };
+
 type UpdateDialogState =
   | { mode: "node"; node: AdminNode; components?: Array<"agent" | "sing_box"> }
   | { mode: "all"; campaign?: NodeUpdateCampaignDetail }
   | null;
 
-function nodeStatusFilter(filter: NodeFilter): string | undefined {
-  return filter === "all" || filter === "deleted" ? undefined : filter;
+/**
+ * Request parameters for the paged `/api/admin/nodes` endpoint.
+ *
+ * The one non-obvious mapping is "deleted": the server reads soft-deleted rows
+ * through its own `deleted` parameter, and no node ever has `status=deleted`, so
+ * that facet must clear `status` instead of forwarding it. Exported for tests.
+ */
+export function nodeQueryParams(filters: NodeFilterValues, perPage: number, offset: number) {
+  return {
+    limit: perPage,
+    offset,
+    search: filters.search,
+    status: filters.status === "all" || filters.status === "deleted" ? undefined : filters.status,
+    deleted: filters.status === "deleted" ? "true" : undefined,
+    sort: filters.sort,
+    direction: filters.direction
+  };
 }
 
 function nodeTimestamp(node: AdminNode): string {
@@ -85,7 +125,7 @@ function ConfigVersion({ node }: { node: AdminNode }) {
 
 // Single source of truth for a node's update eligibility: the Update cell and
 // the kebab menu items both read this, so they can never disagree.
-function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
+export function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
   label: string;
   available: boolean;
   canUpdateAgent: boolean;
@@ -119,15 +159,14 @@ function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
 
 export function NodesPage() {
   const { request } = useAdminApi();
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-  const [filter, setFilter] = useState<NodeFilter>("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSortValue] = useState<NodeSort>("name");
-  const [direction, setDirection] = useState<SortDirection>("asc");
+  const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(nodeUrlFilters);
   const [dialog, setDialog] = useState<NodeDialogState>(null);
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState>(null);
+
+  // react-hook-form stays the draft layer for the search box: the URL only takes
+  // the committed value, and `values: filters` re-syncs the input when the URL
+  // moves underneath it (Back/Forward, or opening a shared link).
+  const form = useForm<NodeFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
     req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
@@ -139,53 +178,33 @@ export function NodesPage() {
     req(`/api/admin/nodes/${encodeURIComponent(node.name)}/restore`, { method: "POST" })
   );
 
+  // The updater form reads the committed filters rather than this render's
+  // closure, and `setFilters` returns to page 1 for free.
   function setSort(column: NodeSort) {
-    setPage(1);
-    if (sort === column) {
-      setDirection((value) => (value === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortValue(column);
-    setDirection(column === "last_seen_at" ? "desc" : "asc");
+    setFilters((current) =>
+      current.sort === column
+        ? { direction: current.direction === "asc" ? "desc" : "asc" }
+        : { sort: column, direction: column === "last_seen_at" ? "desc" : "asc" }
+    );
   }
 
-  function setFilterValue(value: NodeFilter) {
-    setFilter(value);
-    setPage(1);
-  }
-
-  function setPageSize(value: number) {
-    setPerPage(value);
-    setPage(1);
-  }
-
-  const offset = (page - 1) * perPage;
-  const path =
-    "/api/admin/nodes" +
-    queryString({
-      limit: perPage,
-      offset,
-      search,
-      status: nodeStatusFilter(filter),
-      deleted: filter === "deleted" ? "true" : undefined,
-      sort,
-      direction
-    });
+  const path = "/api/admin/nodes" + queryString(nodeQueryParams(filters, perPage, offset));
   const nodesQuery = useQuery({
-    queryKey: adminKeys.nodesPage(perPage, offset, search, filter, sort, direction),
-    queryFn: () => request<AdminNodesResponse>(path),
+    queryKey: adminKeys.nodesPage(perPage, offset, filters.search, filters.status, filters.sort, filters.direction),
+    queryFn: ({ signal }) => request<AdminNodesResponse>(path, { signal }),
     placeholderData: (previous) => previous,
     refetchInterval: (query) =>
       query.state.data?.nodes.some((node) => node.active_operation) ? 2000 : 15000
   });
   const releaseQuery = useQuery({
     queryKey: adminKeys.release,
-    queryFn: () => request<AdminRelease>("/api/admin/release"),
+    queryFn: ({ signal }) => request<AdminRelease>("/api/admin/release", { signal }),
     staleTime: 5 * 60 * 1000
   });
   const campaignQuery = useQuery({
     queryKey: adminKeys.nodeUpdateCampaign("current"),
-    queryFn: async () => (await request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current")) ?? null,
+    queryFn: async ({ signal }) =>
+      (await request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current", { signal })) ?? null,
     refetchInterval: (query) => (query.state.data ? 2000 : 15000)
   });
   const pageData = nodesQuery.data;
@@ -195,10 +214,14 @@ export function NodesPage() {
   const release = releaseQuery.data;
   const campaign = campaignQuery.data ?? undefined;
 
-  // Render-phase adjustment (react.dev "you might not need an effect"):
-  // clamp when the row count shrinks below the current page.
+  // The hook never sees a row count, so the upper clamp lives here — and in an
+  // effect, not the render body, because writing the URL is a navigation. It
+  // waits for a real response: a fresh `?page=3` link must not be rewritten to
+  // page 1 by the `total = 0` of a request that has not landed yet.
   const lastPage = Math.max(1, Math.ceil(total / perPage));
-  if (page > lastPage) setPage(lastPage);
+  useEffect(() => {
+    if (pageData && page > lastPage) setPage(lastPage, "replace");
+  }, [lastPage, page, pageData, setPage]);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
@@ -250,18 +273,13 @@ export function NodesPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
                 className="flex min-w-0 flex-1 gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setSearch(searchInput.trim());
-                  setPage(1);
-                }}
+                onSubmit={form.handleSubmit((values) => setFilters({ search: values.search.trim() }))}
               >
                 <Input
                   placeholder="Search by node name, host, or status"
                   aria-label="Search nodes"
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
                   className="min-w-0 flex-1"
+                  {...form.register("search")}
                 />
                 <Button type="submit" variant="secondary">
                   Search
@@ -279,8 +297,8 @@ export function NodesPage() {
                   <DropdownMenu.Group>
                     <DropdownMenu.Label>Status</DropdownMenu.Label>
                     <DropdownMenu.RadioGroup
-                      value={filter}
-                      onValueChange={(value) => setFilterValue(value as NodeFilter)}
+                      value={filters.status}
+                      onValueChange={(value) => setFilters({ status: value as NodeFilterValues["status"] })}
                     >
                       <DropdownMenu.RadioItem value="all">
                         All
@@ -312,13 +330,13 @@ export function NodesPage() {
               <Table className="min-w-[1280px]">
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} sticky="left" />
-                    <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Node" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Status" column="status" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Public host" column="public_host" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Agent</Table.Head>
-                    <SortHead label="sing-box" column="sing_box_version" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="sing-box" column="sing_box_version" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Config</Table.Head>
-                    <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Last seen" column="last_seen_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Update</Table.Head>
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
@@ -454,7 +472,7 @@ export function NodesPage() {
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
           </section>
         </div>
       </main>

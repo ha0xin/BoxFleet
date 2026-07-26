@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import {
   ArrowsClockwiseIcon,
   CheckCircleIcon,
@@ -18,6 +21,7 @@ import { formatRelativeTime } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString } from "@/admin/query";
+import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
@@ -25,42 +29,82 @@ import { ProxyFormDialog } from "./proxy-dialogs";
 import type { ProxyDialogState } from "./proxy-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 
-type ProxyFilter = "all" | "enabled" | "disabled" | "deleted";
-type ProxySort = "node_name" | "name" | "protocol" | "listen_port" | "enabled" | "traffic_multiplier" | "updated_at";
-type SortDirection = "asc" | "desc";
+/**
+ * The inventory has always been paged server-side (`ListProxiesPage`); what it
+ * lacked was a linkable address for the view. Filters, sort and pagination now
+ * live in the query string via `useUrlFilters`, so a refresh, a Back press or a
+ * pasted link all reproduce the same rows.
+ */
+const filterSchema = z.object({
+  search: z.string(),
+  status: z.enum(["all", "enabled", "disabled", "deleted"]),
+  sort: z.enum(["node_name", "name", "protocol", "listen_port", "enabled", "traffic_multiplier", "updated_at"]),
+  direction: z.enum(["asc", "desc"])
+});
 
-const FILTER_LABELS: Record<Exclude<ProxyFilter, "all">, string> = {
+type ProxyFilterValues = z.infer<typeof filterSchema>;
+type ProxyStatus = ProxyFilterValues["status"];
+type ProxySort = ProxyFilterValues["sort"];
+
+const defaultFilters: ProxyFilterValues = {
+  search: "",
+  status: "all",
+  sort: "node_name",
+  direction: "asc"
+};
+
+// Module scope: the hook re-parses on every render, and a fresh options object
+// would break the referential stability of the returned `filters`.
+const urlFilters: UseUrlFiltersOptions<ProxyFilterValues> = {
+  schema: filterSchema,
+  defaults: defaultFilters,
+  perPage: 10
+};
+
+const FILTER_LABELS: Record<Exclude<ProxyStatus, "all">, string> = {
   enabled: "Enabled",
   disabled: "Disabled",
   deleted: "Deleted"
 };
 
-function proxyEnabledFilter(filter: ProxyFilter): string | undefined {
-  if (filter === "enabled") return "true";
-  if (filter === "disabled") return "false";
-  return undefined;
+/** Columns that read best newest-first when first selected. */
+const DESCENDING_FIRST: ReadonlySet<ProxySort> = new Set<ProxySort>(["updated_at"]);
+
+/**
+ * The one radio group covers two independent server filters: `enabled` narrows
+ * live rows, `deleted=true` swaps the base set to soft-deleted ones. Keeping the
+ * mapping in a pure function keeps that split testable.
+ */
+export function proxyPageParams(filters: ProxyFilterValues, limit: number, offset: number) {
+  return {
+    limit,
+    offset,
+    search: filters.search,
+    enabled: filters.status === "enabled" ? "true" : filters.status === "disabled" ? "false" : undefined,
+    deleted: filters.status === "deleted" ? "true" : undefined,
+    sort: filters.sort,
+    direction: filters.direction
+  };
 }
 
-function endpoint(proxy: AdminProxy): string {
+export function endpoint(proxy: AdminProxy): string {
   const listen = proxy.listen === "::" || proxy.listen === "0.0.0.0" ? "*" : proxy.listen;
   return `${listen}:${proxy.listen_port}`;
 }
 
-function multiplier(value: number): string {
+export function multiplier(value: number): string {
   return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}x`;
 }
 
 export function ProxiesPage() {
   const { request } = useAdminApi();
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-  const [filter, setFilter] = useState<ProxyFilter>("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSortValue] = useState<ProxySort>("node_name");
-  const [direction, setDirection] = useState<SortDirection>("asc");
+  const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(urlFilters);
   const [dialog, setDialog] = useState<ProxyDialogState>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminProxy | null>(null);
+
+  // react-hook-form owns the uncommitted search text; `values` re-syncs the box
+  // when the URL changes underneath it (Back/Forward, or a pasted link).
+  const form = useForm<ProxyFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleEnabled = useAdminMutation<AdminProxy>(request, (req, proxy) =>
     req(`/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}`, {
@@ -75,51 +119,36 @@ export function ProxiesPage() {
     )
   );
 
+  // The updater form reads the committed filters rather than this render's
+  // closure, and the hook resets to page 1 for free.
   function setSort(column: ProxySort) {
-    setPage(1);
-    if (sort === column) {
-      setDirection((value) => (value === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortValue(column);
-    setDirection(column === "updated_at" ? "desc" : "asc");
+    setFilters((current) =>
+      current.sort === column
+        ? { direction: current.direction === "asc" ? "desc" : "asc" }
+        : { sort: column, direction: DESCENDING_FIRST.has(column) ? "desc" : "asc" }
+    );
   }
 
-  function setFilterValue(value: ProxyFilter) {
-    setFilter(value);
-    setPage(1);
-  }
-
-  function setPageSize(value: number) {
-    setPerPage(value);
-    setPage(1);
-  }
-
-  const offset = (page - 1) * perPage;
-  const path =
-    "/api/admin/proxies" +
-    queryString({
-      limit: perPage,
-      offset,
-      search,
-      enabled: proxyEnabledFilter(filter),
-      deleted: filter === "deleted" ? "true" : undefined,
-      sort,
-      direction
-    });
+  const path = "/api/admin/proxies" + queryString(proxyPageParams(filters, perPage, offset));
   const proxiesQuery = useQuery({
-    queryKey: adminKeys.proxiesPage(perPage, offset, search, filter, sort, direction),
-    queryFn: () => request<AdminProxiesResponse>(path),
+    queryKey: adminKeys.proxiesPage(perPage, offset, filters.search, filters.status, filters.sort, filters.direction),
+    queryFn: ({ signal }) => request<AdminProxiesResponse>(path, { signal }),
     placeholderData: (previous) => previous
   });
-  const pageData = proxiesQuery.data;
-  const proxies = pageData?.proxies ?? [];
-  const total = pageData?.total ?? 0;
+  const proxies = proxiesQuery.data?.proxies ?? [];
+  const total = proxiesQuery.data?.total ?? 0;
 
-  const lastPage = Math.max(1, Math.ceil(total / perPage));
-  // Render-phase adjustment (react.dev "you might not need an effect"):
-  // clamp when the row count shrinks below the current page.
-  if (page > lastPage) setPage(lastPage);
+  // The hook never sees a row count, so the upper clamp lives here. Two details
+  // matter: it must run in an effect (writing search params during render is a
+  // navigation), and it must wait for a real total — clamping against the
+  // pre-fetch `total ?? 0` would rewrite `?page=3` to page 1 on every cold load
+  // of a deep link, before the server ever said the page was out of range.
+  const loadedTotal = proxiesQuery.data?.total;
+  useEffect(() => {
+    if (loadedTotal === undefined) return;
+    const lastPage = Math.max(1, Math.ceil(loadedTotal / perPage));
+    if (page > lastPage) setPage(lastPage, "replace");
+  }, [loadedTotal, page, perPage, setPage]);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
@@ -145,18 +174,13 @@ export function ProxiesPage() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
                 className="flex min-w-0 flex-1 gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setSearch(searchInput.trim());
-                  setPage(1);
-                }}
+                onSubmit={form.handleSubmit((values) => setFilters({ search: values.search.trim() }))}
               >
                 <Input
                   placeholder="Search by proxy, node, protocol, or port"
                   aria-label="Search proxies"
-                  value={searchInput}
-                  onChange={(event) => setSearchInput(event.target.value)}
                   className="min-w-0 flex-1"
+                  {...form.register("search")}
                 />
                 <Button type="submit" variant="secondary">
                   Search
@@ -167,7 +191,9 @@ export function ProxiesPage() {
                   render={
                     <Button variant="secondary" icon={FunnelIcon}>
                       Filter
-                      {filter !== "all" ? <Badge variant="secondary">{FILTER_LABELS[filter]}</Badge> : null}
+                      {filters.status !== "all" ? (
+                        <Badge variant="secondary">{FILTER_LABELS[filters.status]}</Badge>
+                      ) : null}
                     </Button>
                   }
                 />
@@ -175,8 +201,8 @@ export function ProxiesPage() {
                   <DropdownMenu.Group>
                     <DropdownMenu.Label>Status</DropdownMenu.Label>
                     <DropdownMenu.RadioGroup
-                      value={filter}
-                      onValueChange={(value) => setFilterValue(value as ProxyFilter)}
+                      value={filters.status}
+                      onValueChange={(value) => setFilters({ status: value as ProxyStatus })}
                     >
                       <DropdownMenu.RadioItem value="all">
                         All
@@ -204,14 +230,14 @@ export function ProxiesPage() {
               <Table className="min-w-[1280px]">
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="Proxy" column="name" sort={sort} direction={direction} setSort={setSort} sticky="left" />
-                    <SortHead label="Node" column="node_name" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Status" column="enabled" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Protocol" column="protocol" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Listen" column="listen_port" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Proxy" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Node" column="node_name" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Status" column="enabled" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Protocol" column="protocol" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Listen" column="listen_port" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Transport</Table.Head>
-                    <SortHead label="Multiplier" column="traffic_multiplier" sort={sort} direction={direction} setSort={setSort} />
-                    <SortHead label="Updated" column="updated_at" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Multiplier" column="traffic_multiplier" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Updated" column="updated_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
                     </Table.Head>
@@ -304,7 +330,7 @@ export function ProxiesPage() {
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
           </section>
         </div>
       </main>
