@@ -20,7 +20,7 @@ Only `internal/server/db` may import sqlc-generated types.
   keys enabled, and a small connection pool.
 - The Go binary uses its bundled SQLite amalgamation; no host SQLite library is
   required.
-- User, node, proxy, and access deletion is soft. Default queries exclude
+- User, node, ProxyCredential, and PathAccess deletion is soft. Default queries exclude
   `deleted_at`; admin deleted views may restore rows.
 - Canonical node/proxy renames retain aliases so old references resolve without
   changing stable IDs or credentials.
@@ -30,9 +30,12 @@ Only `internal/server/db` may import sqlc-generated types.
 ## Core relationships
 
 ```text
-nodes ──< proxies ──< proxy_accesses >── proxy_users
-  │                                      │
-  └────────────< user_node_bindings >────┘
+nodes ──< proxies ──< proxy_accesses (ProxyCredential) >── proxy_users
+  │         │                                               │
+  │         └──< endpoints >── node hosts                   │
+  │                    │                                    │
+  │                    └──< paths ──< path_accesses >────────┘
+  └────────────────< user_node_bindings >───────────────────┘
 
 nodes ──< config_versions
 nodes ──1 node_config_status
@@ -44,9 +47,28 @@ nodes ──< node_operations ──< node_operation_events
 decommissioned node both have status `disabled`; active token presence
 distinguishes them.
 
-Proxy names are globally unique. The only rendered protocol is
-`vless_reality`; transport is derived as TCP. Access credentials and stable
-`auth_name` values belong to `proxy_accesses`.
+Proxy names are globally unique. Server inbounds support `vless_reality` and
+`shadowsocks_2022`. Technical credentials and stable `auth_name` values remain
+stored in the compatibility-named `proxy_accesses` table, but the domain model
+calls them `ProxyCredential`. They do not authorize publication.
+
+An `Endpoint` is one Proxy plus one durable Host ID. A `Path` points to an
+Endpoint and may point recursively to a dialer Path; depth is capped at three
+and cycles are rejected. `PathAccess` is the product-level user authorization.
+Dependency Paths are emitted only when required by a granted selectable Path.
+`proxy_publication_settings.direct_enabled` is the explicit compatibility
+switch that materializes managed direct Paths for each selected Host; disabling
+it preserves those rows but removes them from resolution. Deselecting a Host
+also disables its managed Path. Managed Paths cannot be edited or deleted via
+the general Path API; synchronization owns them.
+
+Granting a Path ensures credentials for every Proxy in its dialer chain.
+Revoking a Path recalculates the user's remaining chains and disables each
+ProxyCredential that is no longer referenced. A shared dialer credential stays
+enabled until its final referencing Path is revoked.
+
+Deleting a custom Path removes its Endpoint when no other Path references it
+and reconciles credentials for users whose grant was removed by the cascade.
 
 ## Billing and traffic
 

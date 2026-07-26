@@ -101,7 +101,7 @@ func TestRenameProxyAliasesGloballyAndPreservesAccessIdentity(t *testing.T) {
 	if _, err := store.BindUserToNode(ctx, "alice", "edge-a"); err != nil {
 		t.Fatal(err)
 	}
-	access, err := store.IssueVLESSRealityAccess(ctx, IssueAccessParams{
+	access, err := store.IssueVLESSRealityCredential(ctx, IssueCredentialParams{
 		UserName: "alice", NodeName: "edge-a", ProxyName: original.Name,
 	})
 	if err != nil {
@@ -122,7 +122,7 @@ func TestRenameProxyAliasesGloballyAndPreservesAccessIdentity(t *testing.T) {
 	if byAliases.ID != original.ID || byAliases.Name != "home" {
 		t.Fatalf("old proxy alias resolved to %#v", byAliases)
 	}
-	accessAfter, err := store.GetProxyAccess(ctx, "alice", "edge-a", "home")
+	accessAfter, err := store.GetProxyCredential(ctx, "alice", "edge-a", "home")
 	if err != nil {
 		t.Fatal(err)
 	}

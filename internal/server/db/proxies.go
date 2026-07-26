@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,13 @@ import (
 	"github.com/haoxin/boxfleet/internal/id"
 	store "github.com/haoxin/boxfleet/internal/server/store/sqlc"
 )
+
+const DefaultShadowsocks2022Method = "2022-blake3-aes-128-gcm"
+
+type Shadowsocks2022Settings struct {
+	Method         string `json:"method"`
+	ServerPassword string `json:"server_password"`
+}
 
 const (
 	ProtocolVLESSReality    = "vless_reality"
@@ -56,6 +65,7 @@ type CreateProxyParams struct {
 	InboundRulesJSON  string
 	OutboundRulesJSON string
 	RouteRulesJSON    string
+	DirectPublish     *bool
 }
 
 type UpdateProxyParams struct {
@@ -141,7 +151,29 @@ func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy,
 	}); err != nil {
 		return Proxy{}, err
 	}
-	return db.GetProxy(ctx, node.Name, proxy.Name)
+	created, err := db.GetProxy(ctx, node.Name, proxy.Name)
+	if err != nil {
+		return Proxy{}, err
+	}
+	directPublish := true
+	if params.DirectPublish != nil {
+		directPublish = *params.DirectPublish
+	}
+	if _, err := db.SetProxyDirectPublication(ctx, created.ID, directPublish); err != nil {
+		return Proxy{}, err
+	}
+	return created, nil
+}
+
+func (db *DB) GetProxyByID(ctx context.Context, proxyID string) (Proxy, error) {
+	row, err := db.q.GetProxyByID(ctx, strings.TrimSpace(proxyID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Proxy{}, fmt.Errorf("proxy id %q not found", proxyID)
+		}
+		return Proxy{}, err
+	}
+	return proxyFromDetail(row), nil
 }
 
 func (db *DB) UpdateProxy(ctx context.Context, params UpdateProxyParams) (Proxy, error) {
@@ -355,7 +387,7 @@ func compatibleSharedListener(existing, next Proxy) bool {
 
 func proxySupportsMultiUser(protocol string) bool {
 	switch protocol {
-	case ProtocolVLESSReality, ProtocolHysteria2:
+	case ProtocolVLESSReality, ProtocolShadowsocks2022, ProtocolHysteria2:
 		return true
 	default:
 		return false
@@ -660,8 +692,14 @@ func normalizeProxyParams(params CreateProxyParams) (Proxy, error) {
 	if err != nil {
 		return Proxy{}, err
 	}
-	if protocol == ProtocolVLESSReality {
+	switch protocol {
+	case ProtocolVLESSReality:
 		settingsJSON, err = normalizeVLESSRealitySettingsJSON(settingsJSON)
+		if err != nil {
+			return Proxy{}, err
+		}
+	case ProtocolShadowsocks2022:
+		settingsJSON, err = normalizeShadowsocks2022SettingsJSON(settingsJSON)
 		if err != nil {
 			return Proxy{}, err
 		}
@@ -702,6 +740,65 @@ func validJSONOrDefault(raw, fallback, field string) (string, error) {
 		return "", fmt.Errorf("%s must be valid JSON", field)
 	}
 	return raw, nil
+}
+
+func normalizeShadowsocks2022SettingsJSON(raw string) (string, error) {
+	var settings Shadowsocks2022Settings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return "", fmt.Errorf("parse Shadowsocks 2022 settings: %w", err)
+	}
+	settings.Method = strings.TrimSpace(settings.Method)
+	if settings.Method == "" {
+		settings.Method = DefaultShadowsocks2022Method
+	}
+	keyLength, err := shadowsocks2022KeyLength(settings.Method)
+	if err != nil {
+		return "", err
+	}
+	settings.ServerPassword = strings.TrimSpace(settings.ServerPassword)
+	if settings.ServerPassword == "" {
+		settings.ServerPassword, err = generateShadowsocks2022Key(keyLength)
+		if err != nil {
+			return "", err
+		}
+	} else if err := validateShadowsocks2022Key(settings.ServerPassword, keyLength); err != nil {
+		return "", fmt.Errorf("invalid Shadowsocks 2022 server_password: %w", err)
+	}
+	normalized, err := json.Marshal(settings)
+	if err != nil {
+		return "", err
+	}
+	return string(normalized), nil
+}
+
+func shadowsocks2022KeyLength(method string) (int, error) {
+	switch method {
+	case "2022-blake3-aes-128-gcm":
+		return 16, nil
+	case "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305":
+		return 32, nil
+	default:
+		return 0, fmt.Errorf("unsupported Shadowsocks 2022 method %q", method)
+	}
+}
+
+func generateShadowsocks2022Key(length int) (string, error) {
+	key := make([]byte, length)
+	if _, err := rand.Read(key); err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(key), nil
+}
+
+func validateShadowsocks2022Key(value string, length int) error {
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return errors.New("must be standard Base64")
+	}
+	if len(decoded) != length {
+		return fmt.Errorf("must decode to %d bytes", length)
+	}
+	return nil
 }
 
 func validProxyProtocol(protocol string) bool {

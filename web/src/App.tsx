@@ -18,6 +18,7 @@ const loadMihomoProfilesPage = () => import("./pages/mihomo-profiles");
 const loadNodesPage = () => import("./pages/nodes");
 const loadOverviewPage = () => import("./pages/overview");
 const loadProxiesPage = () => import("./pages/proxies");
+const loadPathsPage = () => import("./pages/paths");
 const loadSettingsPage = () => import("./pages/settings");
 const loadSystemLogsPage = () => import("./pages/system-logs");
 const loadUsersPage = () => import("./pages/users");
@@ -26,6 +27,7 @@ const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
   "/": loadOverviewPage,
   "/nodes": loadNodesPage,
   "/proxies": loadProxiesPage,
+  "/paths": loadPathsPage,
   "/users": loadUsersPage,
   "/mihomo-profiles": loadMihomoProfilesPage,
   "/network-events": loadNetworkEventsPage,
@@ -45,6 +47,7 @@ const MihomoConfigurationPage = lazy(() =>
 const NodesPage = lazy(() => loadNodesPage().then((module) => ({ default: module.NodesPage })));
 const OverviewPage = lazy(() => loadOverviewPage().then((module) => ({ default: module.OverviewPage })));
 const ProxiesPage = lazy(() => loadProxiesPage().then((module) => ({ default: module.ProxiesPage })));
+const PathsPage = lazy(() => loadPathsPage().then((module) => ({ default: module.PathsPage })));
 const SettingsPage = lazy(() => loadSettingsPage().then((module) => ({ default: module.SettingsPage })));
 const SystemLogsPage = lazy(() =>
   loadSystemLogsPage().then((module) => ({ default: module.SystemLogsPage }))
@@ -154,6 +157,7 @@ function AdminApp({
               <Route path="/" element={<OverviewRoute authVersion={authVersion} />} />
               <Route path="/nodes" element={<NodesPage />} />
               <Route path="/proxies" element={<ProxiesPage />} />
+              <Route path="/paths" element={<PathsPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/mihomo-profiles" element={<MihomoProfilesPage />} />
               <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage />} />

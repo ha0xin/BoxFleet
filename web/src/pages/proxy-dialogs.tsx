@@ -18,10 +18,12 @@ export type ProxyDialogState =
 const proxyFormSchema = z.object({
   node_name: z.string().min(1, "Select a node"),
   name: z.string().min(1, "Name is required"),
+  protocol: z.enum(["vless_reality", "shadowsocks_2022"]),
   // Inputs registered with { valueAsNumber: true }, so these are already numbers
   // (empty → NaN, which fails the min check).
   listen_port: z.number({ error: "Required" }).int().min(1, "1-65535").max(65535, "1-65535"),
   server_name: z.string(),
+  ss_method: z.enum(["2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm"]),
   short_id: z
     .string()
     .trim()
@@ -30,6 +32,7 @@ const proxyFormSchema = z.object({
     }),
   // Backend rewrites 0 → 1.0, so reject 0 here to avoid a silent mismatch.
   traffic_multiplier: z.number({ error: "Required" }).gt(0, "Must be greater than 0"),
+  direct_publish: z.boolean(),
   enabled: z.boolean()
 });
 
@@ -42,6 +45,16 @@ function parseServerName(settingsJSON: string): string {
   } catch {
     return "";
   }
+}
+
+function parseSSMethod(settingsJSON: string): ProxyFormValues["ss_method"] {
+  try {
+    const parsed = JSON.parse(settingsJSON) as { method?: string };
+    if (parsed.method === "2022-blake3-aes-256-gcm") return parsed.method;
+  } catch {
+    // Fall back to the default method.
+  }
+  return "2022-blake3-aes-128-gcm";
 }
 
 function parseShortID(proxy: AdminProxy): string {
@@ -82,20 +95,26 @@ function defaults(state: Exclude<ProxyDialogState, null>): ProxyFormValues {
     return {
       node_name: p.node_name,
       name: p.name,
+      protocol: p.protocol as ProxyFormValues["protocol"],
       listen_port: p.listen_port,
       server_name: parseServerName(p.settings_json),
+      ss_method: parseSSMethod(p.settings_json),
       short_id: parseShortID(p),
       traffic_multiplier: p.traffic_multiplier,
+      direct_publish: true,
       enabled: p.enabled
     };
   }
   return {
     node_name: "",
     name: "",
+    protocol: "vless_reality",
     listen_port: 443,
     server_name: "",
+    ss_method: "2022-blake3-aes-128-gcm",
     short_id: "",
     traffic_multiplier: 1,
+    direct_publish: true,
     enabled: true
   };
 }
@@ -143,15 +162,19 @@ export function ProxyFormDialog({
     (req, values) => {
       const sni = values.server_name.trim();
       if (!isEdit) {
-        // Server generates Reality keys; only seed the SNI when given.
-        const settings_json = sni ? JSON.stringify({ server_name: sni }) : undefined;
+        // Server generates Reality and Shadowsocks keys.
+        const settings_json = values.protocol === "vless_reality"
+          ? (sni ? JSON.stringify({ server_name: sni }) : undefined)
+          : JSON.stringify({ method: values.ss_method });
         return req(`/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies`, {
           method: "POST",
           body: JSON.stringify({
             name: values.name.trim(),
+            protocol: values.protocol,
             short_id: values.short_id.trim().toLowerCase(),
             listen_port: values.listen_port,
             traffic_multiplier: values.traffic_multiplier,
+            direct_publish: values.direct_publish,
             enabled: values.enabled,
             settings_json
           })
@@ -159,7 +182,12 @@ export function ProxyFormDialog({
       }
       // Merge the edited SNI into the existing settings so the server keeps the
       // current Reality key pair / short_id instead of regenerating them.
-      const settings_json = mergeServerName(state.proxy.settings_json, sni);
+      const settings_json = values.protocol === "vless_reality"
+        ? mergeServerName(state.proxy.settings_json, sni)
+        : JSON.stringify({
+            ...(JSON.parse(state.proxy.settings_json || "{}") as Record<string, unknown>),
+            method: values.ss_method
+          });
       return req(
         `/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies/${encodeURIComponent(state.proxy.name)}`,
         {
@@ -179,6 +207,8 @@ export function ProxyFormDialog({
   );
 
   const enabled = form.watch("enabled");
+  const directPublish = form.watch("direct_publish");
+  const protocol = form.watch("protocol");
   const errors = form.formState.errors;
 
   return (
@@ -188,8 +218,7 @@ export function ProxyFormDialog({
           {isEdit ? `Edit ${state.proxy.name}` : "Create proxy"}
         </Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          VLESS-Reality inbound. Reality keys are generated server-side. Name and Reality changes require
-          publishing the node configuration.
+          Create a VLESS-Reality or Shadowsocks 2022 inbound. Secret keys are generated server-side.
         </Dialog.Description>
 
         {mutation.isError ? (
@@ -219,6 +248,17 @@ export function ProxyFormDialog({
             {...form.register("name")}
           />
 
+          <Select
+            label="Protocol"
+            value={protocol}
+            disabled={isEdit}
+            onValueChange={(value) => form.setValue("protocol", value as ProxyFormValues["protocol"])}
+            items={[
+              { value: "vless_reality", label: "VLESS-Reality" },
+              { value: "shadowsocks_2022", label: "Shadowsocks 2022" }
+            ]}
+          />
+
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Listen port"
@@ -237,14 +277,26 @@ export function ProxyFormDialog({
             />
           </div>
 
-          <Input
-            label="Reality SNI"
-            placeholder="www.amazon.com"
-            labelTooltip="Server name presented in the Reality handshake. Defaults to www.amazon.com."
-            {...form.register("server_name")}
-          />
+          {protocol === "vless_reality" ? (
+            <Input
+              label="Reality SNI"
+              placeholder="www.amazon.com"
+              labelTooltip="Server name presented in the Reality handshake. Defaults to www.amazon.com."
+              {...form.register("server_name")}
+            />
+          ) : (
+            <Select
+              label="Shadowsocks 2022 method"
+              value={form.watch("ss_method")}
+              onValueChange={(value) => form.setValue("ss_method", value as ProxyFormValues["ss_method"])}
+              items={[
+                { value: "2022-blake3-aes-128-gcm", label: "2022 BLAKE3 AES-128-GCM" },
+                { value: "2022-blake3-aes-256-gcm", label: "2022 BLAKE3 AES-256-GCM" }
+              ]}
+            />
+          )}
 
-          {isEdit ? (
+          {isEdit && protocol === "vless_reality" ? (
             <Input
               label="Reality short ID"
               placeholder="01234567 (optional)"
@@ -252,6 +304,20 @@ export function ProxyFormDialog({
               error={errors.short_id?.message}
               {...form.register("short_id")}
             />
+          ) : null}
+
+          {!isEdit ? (
+            <div>
+              <Switch
+                label="Publish direct Paths"
+                controlFirst={false}
+                checked={directPublish}
+                onCheckedChange={(value) => form.setValue("direct_publish", Boolean(value))}
+              />
+              <p className="mt-1 text-xs text-kumo-subtle">
+                Creates one managed direct Path per selected Host. Disable this when the Proxy should only be used through custom chains.
+              </p>
+            </div>
           ) : null}
 
           <Switch

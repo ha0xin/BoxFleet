@@ -61,6 +61,27 @@ rules: ["MATCH,A"]
 			code: "group_cycle",
 		},
 		{
+			name: "unknown dialer proxy",
+			yaml: `
+proxies:
+  - {name: leaf, type: vless, dialer-proxy: MISSING}
+proxy-groups: []
+rules: ["MATCH,DIRECT"]
+`,
+			code: "unknown_dialer_reference",
+		},
+		{
+			name: "dialer proxy cycle",
+			yaml: `
+proxies:
+  - {name: A, type: vless, dialer-proxy: B}
+  - {name: B, type: vless, dialer-proxy: A}
+proxy-groups: []
+rules: ["MATCH,DIRECT"]
+`,
+			code: "dialer_cycle",
+		},
+		{
 			name: "missing terminal match",
 			yaml: `
 proxies: []

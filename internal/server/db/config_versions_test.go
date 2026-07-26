@@ -286,7 +286,7 @@ func seedTrafficFixture(t *testing.T, ctx context.Context, store *DB) {
 	if _, err := store.BindUserToNode(ctx, "alice", "azus"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.IssueVLESSRealityAccess(ctx, IssueAccessParams{
+	if _, err := store.IssueVLESSRealityCredential(ctx, IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",

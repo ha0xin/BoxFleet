@@ -13,9 +13,8 @@ import {
 import { Banner, Button, Checkbox, Dialog, Input, Loader, Select } from "@cloudflare/kumo";
 
 import type {
-  AdminProxiesResponse,
-  AdminProxy,
-  AdminProxyAccess,
+  AdminPath,
+  AdminPathAccess,
   AdminSubscription,
   AdminUser,
   UserConnectionInfo
@@ -157,8 +156,8 @@ export function UserFormDialog({
         </Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           {isEdit
-            ? "Disabling a user removes its accesses from the rendered config on the next publish."
-            : "Quota and expiry are optional. Issue proxy access after the user is created."}
+            ? "Disabling a user removes its Paths from the rendered config on the next publish."
+            : "Quota and expiry are optional. Grant Paths after the user is created."}
         </Dialog.Description>
 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
@@ -226,34 +225,35 @@ export function UserFormDialog({
 function AccessRow({
   request,
   user,
-  access
+  access,
+  path
 }: {
   request: AdminRequest;
   user: AdminUser;
-  access: AdminProxyAccess;
+  access: AdminPathAccess;
+  path?: AdminPath;
 }) {
   const revoke = useAdminMutation<void, unknown>(request, (req) =>
-    req(
-      `/api/admin/users/${encodeURIComponent(user.name)}/proxies/${encodeURIComponent(access.node_name)}/${encodeURIComponent(access.proxy_name)}`,
-      { method: "DELETE" }
-    )
+    req(`/api/admin/users/${encodeURIComponent(user.name)}/paths/${encodeURIComponent(access.path_id)}`, {
+      method: "DELETE"
+    })
   );
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-2 last:border-b-0">
       <div className="min-w-0">
         <div className="truncate text-sm font-medium text-kumo-default">
-          {access.node_name} / {access.proxy_name}
+          {path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id}
         </div>
         <div className="truncate text-xs text-kumo-subtle">
-          {access.protocol} · {access.listen_port}
+          {path ? `${path.proxy_name} @ ${path.host_tag || path.host}` : "Path"}
         </div>
       </div>
       <Button
         variant="ghost"
         size="sm"
         shape="square"
-        aria-label={`Revoke ${access.proxy_name}`}
+        aria-label={`Revoke ${path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id}`}
         loading={revoke.isPending}
         onClick={() => revoke.mutate()}
       >
@@ -277,44 +277,44 @@ export function ManageAccessDialog({
 
   const accessQuery = useQuery({
     queryKey: adminKeys.userAccess(user.name),
-    queryFn: () => request<AdminProxyAccess[]>(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`)
+    queryFn: () => request<AdminPathAccess[]>(`/api/admin/users/${encodeURIComponent(user.name)}/paths`)
   });
-  const proxiesQuery = useQuery({
-    queryKey: adminKeys.proxies,
-    queryFn: () => request<AdminProxiesResponse>("/api/admin/proxies?limit=500")
+  const pathsQuery = useQuery({
+    queryKey: adminKeys.paths,
+    queryFn: () => request<AdminPath[]>("/api/admin/paths")
   });
 
   const accesses = useMemo(() => accessQuery.data ?? [], [accessQuery.data]);
   const existing = useMemo(
-    () => new Set(accesses.map((a) => `${a.node_name}\u0000${a.proxy_name}`)),
+    () => new Set(accesses.map((a) => a.path_id)),
     [accesses]
   );
-  const available = useMemo<AdminProxy[]>(
+  const available = useMemo<AdminPath[]>(
     () =>
-      (proxiesQuery.data?.proxies ?? []).filter(
-        (p) => p.enabled && !existing.has(`${p.node_name}\u0000${p.name}`)
+      (pathsQuery.data ?? []).filter(
+        (p) => p.enabled && p.visibility === "selectable" && !existing.has(p.id)
       ),
-    [proxiesQuery.data, existing]
+    [pathsQuery.data, existing]
   );
   const selected = useMemo(
-    () => available.filter((proxy) => selectedIDs.includes(proxy.id)),
+    () => available.filter((path) => selectedIDs.includes(path.id)),
     [available, selectedIDs]
   );
-  const issue = useAdminMutation<AdminProxy[], { succeeded: AdminProxy[]; failed: AdminProxy[] }>(
+  const issue = useAdminMutation<AdminPath[], { succeeded: AdminPath[]; failed: AdminPath[] }>(
     request,
-    async (req, proxies) => {
+    async (req, paths) => {
       const results = await Promise.allSettled(
-        proxies.map((proxy) =>
-          req(`/api/admin/users/${encodeURIComponent(user.name)}/proxies`, {
+        paths.map((path) =>
+          req(`/api/admin/users/${encodeURIComponent(user.name)}/paths`, {
             method: "POST",
-            body: JSON.stringify({ node_name: proxy.node_name, proxy_name: proxy.name })
+            body: JSON.stringify({ path_id: path.id })
           })
         )
       );
-      const succeeded: AdminProxy[] = [];
-      const failed: AdminProxy[] = [];
+      const succeeded: AdminPath[] = [];
+      const failed: AdminPath[] = [];
       results.forEach((result, index) => {
-        (result.status === "fulfilled" ? succeeded : failed).push(proxies[index]);
+        (result.status === "fulfilled" ? succeeded : failed).push(paths[index]);
       });
       return { succeeded, failed };
     },
@@ -322,7 +322,7 @@ export function ManageAccessDialog({
       onSuccess: ({ succeeded, failed }) => {
         setSelectedIDs(failed.map((proxy) => proxy.id));
         if (failed.length > 0) {
-          const labels = failed.map((proxy) => `${proxy.node_name} / ${proxy.name}`).join(", ");
+          const labels = failed.map((path) => path.display_name || `${path.proxy_name} · ${path.name}`).join(", ");
           setIssueError(
             `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
           );
@@ -331,14 +331,14 @@ export function ManageAccessDialog({
     }
   );
 
-  const loading = accessQuery.isLoading || proxiesQuery.isLoading;
+  const loading = accessQuery.isLoading || pathsQuery.isLoading;
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
       <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Manage access</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Issue or revoke proxy access for <span className="font-medium text-kumo-default">{user.name}</span>.
+          Grant or revoke selectable Paths for <span className="font-medium text-kumo-default">{user.name}</span>.
           Changes alter the rendered config on the next publish.
         </Dialog.Description>
 
@@ -347,8 +347,8 @@ export function ManageAccessDialog({
         <section>
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
-              <h3 className="font-semibold text-kumo-default">Grant proxies</h3>
-              <p className="text-sm text-kumo-subtle">Select one or more proxies to grant.</p>
+              <h3 className="font-semibold text-kumo-default">Grant Paths</h3>
+              <p className="text-sm text-kumo-subtle">Credentials for every hop are created automatically.</p>
             </div>
             {available.length > 0 ? (
               <Checkbox
@@ -357,7 +357,7 @@ export function ManageAccessDialog({
                 indeterminate={selectedIDs.length > 0 && selectedIDs.length < available.length}
                 disabled={issue.isPending}
                 onCheckedChange={(checked) =>
-                  setSelectedIDs(checked ? available.map((proxy) => proxy.id) : [])
+                  setSelectedIDs(checked ? available.map((path) => path.id) : [])
                 }
               />
             ) : null}
@@ -369,28 +369,28 @@ export function ManageAccessDialog({
             </div>
           ) : available.length > 0 ? (
             <div className="max-h-56 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
-              {available.map((proxy) => (
+              {available.map((path) => (
                 <div
-                  key={proxy.id}
+                  key={path.id}
                   className="border-b border-kumo-line px-3 py-2 last:border-b-0"
                 >
                   <Checkbox
-                    checked={selectedIDs.includes(proxy.id)}
+                    checked={selectedIDs.includes(path.id)}
                     disabled={issue.isPending}
                     onCheckedChange={(checked) =>
                       setSelectedIDs((current) =>
                         checked
-                          ? [...current, proxy.id]
-                          : current.filter((id) => id !== proxy.id)
+                          ? [...current, path.id]
+                          : current.filter((id) => id !== path.id)
                       )
                     }
                     label={
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-kumo-default">
-                          {proxy.node_name} / {proxy.name}
+                          {path.display_name || `${path.proxy_name} · ${path.name}`}
                         </div>
                         <div className="truncate text-xs text-kumo-subtle">
-                          {proxy.protocol} · {proxy.listen_port}
+                          {path.proxy_name} @ {path.host_tag || path.host}{path.dialer_path_id ? " · chained" : ""}
                         </div>
                       </div>
                     }
@@ -400,7 +400,7 @@ export function ManageAccessDialog({
             </div>
           ) : (
             <div className="flex min-h-20 items-center justify-center text-sm text-kumo-subtle">
-              All available proxies have already been granted.
+              All selectable Paths have already been granted.
             </div>
           )}
 
@@ -428,7 +428,7 @@ export function ManageAccessDialog({
               </div>
             ) : accesses.length > 0 ? (
               accesses.map((access) => (
-                <AccessRow key={access.id} request={request} user={user} access={access} />
+                <AccessRow key={access.id} request={request} user={user} access={access} path={pathsQuery.data?.find((path) => path.id === access.path_id)} />
               ))
             ) : (
               <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">

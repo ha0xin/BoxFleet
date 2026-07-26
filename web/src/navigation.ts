@@ -2,6 +2,7 @@ import {
   BroadcastIcon,
   BracketsCurlyIcon,
   FileTextIcon,
+  FlowArrowIcon,
   GaugeIcon,
   GearSixIcon,
   HardDrivesIcon,
@@ -19,6 +20,7 @@ export const pages: NavItem[] = [
   { id: "overview", label: "Overview", icon: PulseIcon, path: "/" },
   { id: "nodes", label: "Nodes", icon: HardDrivesIcon, path: "/nodes" },
   { id: "proxies", label: "Proxies", icon: PathIcon, path: "/proxies" },
+  { id: "paths", label: "Paths", icon: FlowArrowIcon, path: "/paths" },
   { id: "users", label: "Users", icon: UsersIcon, path: "/users" },
   { id: "mihomo-profiles", label: "Mihomo Profiles", icon: BracketsCurlyIcon, path: "/mihomo-profiles" },
   { id: "traffic", label: "Traffic", icon: GaugeIcon, path: "/traffic" },
@@ -33,7 +35,7 @@ const byId = (id: Page): NavItem => pages.find((page) => page.id === id)!;
 // Settings is rendered separately at the bottom under a divider.
 export const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   { items: [byId("overview")] },
-  { label: "Operate", items: [byId("nodes"), byId("proxies")] },
+  { label: "Operate", items: [byId("nodes"), byId("proxies"), byId("paths")] },
   { label: "Manage", items: [byId("users"), byId("mihomo-profiles"), byId("traffic")] },
   { label: "Observe", items: [byId("network-events"), byId("system-logs")] }
 ];

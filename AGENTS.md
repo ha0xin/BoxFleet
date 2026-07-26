@@ -9,7 +9,10 @@ not edit both paths separately.
 
 A central server (`bfs`, the BoxFleet server) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + `systemd` + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators use the admin Web UI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
 
-Current target protocol is VLESS-Reality with `xtls-rprx-vision`; renderer rejects other protocols.
+Current target protocols are VLESS-Reality with `xtls-rprx-vision` and
+Shadowsocks 2022. Client publication is modeled as Endpoint (Proxy + Host) and
+Path (optionally chained through a Mihomo `dialer-proxy` Path); technical
+`ProxyCredential` rows are distinct from product-level `PathAccess` grants.
 
 ## Common commands
 
@@ -81,7 +84,7 @@ Node lifecycle and disable semantics: a node is `pending` after bootstrap and be
 
 ### Renderer and sing-box
 
-`internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. Only VLESS-Reality is rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client-side `NodeInfo` generation.
+`internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. VLESS-Reality and Shadowsocks 2022 are rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client and Mihomo output.
 
 Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the client). Counter naming is `user>>><name>>>>traffic>>>{uplink,downlink}` — defined upstream in `refs/sing-box/experimental/v2rayapi/stats.go`. Per-connection metadata (source IP, host, etc.) is **not** exposed by v2ray API; current code scrapes journalctl log text from sing-box (`internal/server/db/log_events.go`) and is fragile by design — sing-box log format changes will break it.
 

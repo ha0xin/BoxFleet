@@ -30,7 +30,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Manage access" }).click();
   await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "edge-ui / vless-ui" }).check();
+  await page.getByRole("checkbox", { name: /vless-ui/ }).check();
   await page.getByRole("button", { name: "Grant access (1)" }).click();
   await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
   await page.getByRole("button", { name: "Revoke vless-ui" }).click();

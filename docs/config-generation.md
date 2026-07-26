@@ -9,9 +9,9 @@ hashes.
 Normal node configs include only:
 
 - an `active` node;
-- enabled VLESS-Reality proxies;
+- enabled VLESS-Reality or Shadowsocks 2022 proxies;
 - active, unexpired users;
-- enabled user-node bindings and proxy accesses.
+- enabled user-node bindings and ProxyCredentials.
 
 A disabled node receives `RenderDisabledConfig`: a valid base config with no
 inbounds plus `X-BoxFleet-Node-State: disabled`. New agents stop sing-box from
@@ -41,9 +41,12 @@ target, and one normalized short ID. Client output uses the corresponding
 public key. Short IDs are lowercase even-length hexadecimal strings of at most
 eight characters.
 
-The renderer currently rejects every other protocol. Protocol expansion must
-add validation, server rendering, client/Mihomo output, and golden tests in the
-same change.
+## Shadowsocks 2022
+
+Each Shadowsocks 2022 Proxy owns a generated server key and each
+ProxyCredential owns a generated per-user key of the cipher's required length.
+The sing-box inbound renders the server key in `password` and per-user keys in
+`users`. Mihomo receives the standard `server-key:user-key` combined password.
 
 ## Hosts and client names
 
@@ -66,7 +69,7 @@ user>>>AUTH_NAME>>>traffic>>>uplink
 user>>>AUTH_NAME>>>traffic>>>downlink
 ```
 
-The agent maps these names back to proxy accesses.
+The agent maps these names back to ProxyCredentials.
 
 ## Publish and validation
 
@@ -79,5 +82,5 @@ duplicate names, bad outbound references, and ambiguous auth mappings. The
 agent's final `sing-box check` remains authoritative for the installed binary.
 
 Renderer tests use fixed SQLite fixtures and compare normalized JSON. Never add
-random credentials during rendering; credentials are generated when access is
-created.
+random credentials during rendering; credentials are generated when a Path is
+granted (or by the legacy Proxy grant compatibility API).

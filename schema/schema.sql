@@ -161,6 +161,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name);
 CREATE INDEX IF NOT EXISTS idx_proxies_node_listener
   ON proxies(node_id, listen, listen_port, transport, protocol);
 
+CREATE TABLE IF NOT EXISTS proxy_publication_settings (
+  proxy_id TEXT PRIMARY KEY REFERENCES proxies(id) ON DELETE CASCADE,
+  direct_enabled INTEGER NOT NULL DEFAULT 1 CHECK (direct_enabled IN (0, 1)),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS endpoints (
+  id TEXT PRIMARY KEY,
+  proxy_id TEXT NOT NULL REFERENCES proxies(id) ON DELETE CASCADE,
+  host_id TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (proxy_id, host_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_endpoints_proxy_id ON endpoints(proxy_id);
+CREATE INDEX IF NOT EXISTS idx_endpoints_host_id ON endpoints(host_id);
+
+CREATE TABLE IF NOT EXISTS paths (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
+  endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE RESTRICT,
+  dialer_path_id TEXT REFERENCES paths(id) ON DELETE RESTRICT,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  visibility TEXT NOT NULL DEFAULT 'selectable'
+    CHECK (visibility IN ('selectable', 'dependency')),
+  managed INTEGER NOT NULL DEFAULT 0 CHECK (managed IN (0, 1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  CHECK (dialer_path_id IS NULL OR dialer_path_id <> id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_paths_endpoint_id ON paths(endpoint_id);
+CREATE INDEX IF NOT EXISTS idx_paths_dialer_path_id ON paths(dialer_path_id);
+
+CREATE TABLE IF NOT EXISTS path_accesses (
+  id TEXT PRIMARY KEY,
+  path_id TEXT NOT NULL REFERENCES paths(id) ON DELETE CASCADE,
+  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (path_id, proxy_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_path_accesses_user_id ON path_accesses(proxy_user_id);
+
 CREATE TABLE IF NOT EXISTS proxy_name_aliases (
   alias TEXT PRIMARY KEY,
   proxy_id TEXT NOT NULL REFERENCES proxies(id) ON DELETE CASCADE,

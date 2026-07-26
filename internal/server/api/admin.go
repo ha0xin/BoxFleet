@@ -83,6 +83,7 @@ type adminNode struct {
 }
 
 type adminNodeHost struct {
+	ID       string `json:"id"`
 	Host     string `json:"host"`
 	Tag      string `json:"tag,omitempty"`
 	Selected bool   `json:"selected"`
@@ -108,6 +109,58 @@ type adminProxy struct {
 	UpdatedAt         string  `json:"updated_at"`
 }
 
+type adminPath struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	DisplayName  string `json:"display_name"`
+	EndpointID   string `json:"endpoint_id"`
+	ProxyID      string `json:"proxy_id"`
+	ProxyName    string `json:"proxy_name"`
+	NodeName     string `json:"node_name"`
+	HostID       string `json:"host_id"`
+	Host         string `json:"host"`
+	HostTag      string `json:"host_tag"`
+	DialerPathID string `json:"dialer_path_id"`
+	Enabled      bool   `json:"enabled"`
+	Visibility   string `json:"visibility"`
+	Managed      bool   `json:"managed"`
+	SortOrder    int    `json:"sort_order"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+type adminPathPayload struct {
+	Name         string `json:"name"`
+	DisplayName  string `json:"display_name"`
+	ProxyID      string `json:"proxy_id"`
+	HostID       string `json:"host_id"`
+	DialerPathID string `json:"dialer_path_id"`
+	Enabled      *bool  `json:"enabled"`
+	Visibility   string `json:"visibility"`
+	SortOrder    int    `json:"sort_order"`
+}
+
+type adminPathPatchPayload struct {
+	Name         *string `json:"name"`
+	DisplayName  *string `json:"display_name"`
+	ProxyID      *string `json:"proxy_id"`
+	HostID       *string `json:"host_id"`
+	DialerPathID *string `json:"dialer_path_id"`
+	Enabled      *bool   `json:"enabled"`
+	Visibility   *string `json:"visibility"`
+	SortOrder    *int    `json:"sort_order"`
+}
+
+type adminPathAccess struct {
+	ID          string `json:"id"`
+	PathID      string `json:"path_id"`
+	ProxyUserID string `json:"proxy_user_id"`
+	Enabled     bool   `json:"enabled"`
+	DeletedAt   string `json:"deleted_at"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type adminUser struct {
 	ID               string `json:"id"`
 	Name             string `json:"name"`
@@ -119,7 +172,7 @@ type adminUser struct {
 	DeletedAt        string `json:"deleted_at"`
 }
 
-type adminProxyAccess struct {
+type adminProxyCredential struct {
 	ID                string   `json:"id"`
 	UserName          string   `json:"user_name"`
 	NodeName          string   `json:"node_name"`
@@ -240,6 +293,7 @@ type adminProxyPayload struct {
 	InboundRulesJSON  *string  `json:"inbound_rules_json"`
 	OutboundRulesJSON *string  `json:"outbound_rules_json"`
 	RouteRulesJSON    *string  `json:"route_rules_json"`
+	DirectPublish     *bool    `json:"direct_publish"`
 }
 
 type adminUserPayload struct {
@@ -612,7 +666,7 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 		if payload.Hosts != nil {
 			hosts := make([]db.NodeHost, 0, len(*payload.Hosts))
 			for _, h := range *payload.Hosts {
-				hosts = append(hosts, db.NodeHost{Host: h.Host, Tag: h.Tag, Selected: h.Selected})
+				hosts = append(hosts, db.NodeHost{ID: h.ID, Host: h.Host, Tag: h.Tag, Selected: h.Selected})
 			}
 			params.Hosts = hosts
 		} else if payload.PublicHost != nil {
@@ -787,6 +841,7 @@ func adminCreateProxyHandler(store *db.DB) http.HandlerFunc {
 			InboundRulesJSON:  stringValue(payload.InboundRulesJSON, ""),
 			OutboundRulesJSON: stringValue(payload.OutboundRulesJSON, ""),
 			RouteRulesJSON:    stringValue(payload.RouteRulesJSON, ""),
+			DirectPublish:     payload.DirectPublish,
 		})
 		if err != nil {
 			writeAdminError(w, err)
@@ -849,6 +904,12 @@ func adminUpdateProxyHandler(store *db.DB) http.HandlerFunc {
 		if err != nil {
 			writeAdminError(w, err)
 			return
+		}
+		if payload.DirectPublish != nil {
+			if _, err := store.SetProxyDirectPublication(r.Context(), proxy.ID, *payload.DirectPublish); err != nil {
+				writeAdminError(w, err)
+				return
+			}
 		}
 		writeJSON(w, adminProxyFromDB(proxy))
 	}
@@ -951,7 +1012,7 @@ func adminUpdateUserHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		accesses, err := store.ListProxyAccessesByUser(r.Context(), name)
+		accesses, err := store.ListProxyCredentialsByUser(r.Context(), name)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -994,7 +1055,7 @@ func adminRestoreUserHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		accesses, err := store.ListProxyAccessesByUser(r.Context(), user.Name)
+		accesses, err := store.ListProxyCredentialsByUser(r.Context(), user.Name)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -1013,16 +1074,16 @@ func adminRestoreUserHandler(store *db.DB) http.HandlerFunc {
 
 func adminUserProxiesHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		accesses, err := store.ListProxyAccessesByUser(r.Context(), chi.URLParam(r, "user"))
+		accesses, err := store.ListProxyCredentialsByUser(r.Context(), chi.URLParam(r, "user"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminProxyAccesses(accesses))
+		writeJSON(w, adminProxyCredentials(accesses))
 	}
 }
 
-func adminIssueUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
+func adminIssueUserProxyCredentialHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var payload adminIssueAccessPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1034,22 +1095,221 @@ func adminIssueUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		access, err := store.IssueVLESSRealityAccess(r.Context(), db.IssueAccessParams{
+		params := db.IssueCredentialParams{
 			UserName:  userName,
 			NodeName:  payload.NodeName,
 			ProxyName: payload.ProxyName,
+		}
+		proxy, err := store.GetProxy(r.Context(), payload.NodeName, payload.ProxyName)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		var access db.ProxyCredential
+		switch proxy.Protocol {
+		case db.ProtocolVLESSReality:
+			access, err = store.IssueVLESSRealityAccess(r.Context(), params)
+		case db.ProtocolShadowsocks2022:
+			access, err = store.IssueShadowsocks2022Access(r.Context(), params)
+		default:
+			err = fmt.Errorf("proxy protocol %s does not support credentials", proxy.Protocol)
+		}
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminProxyCredentials([]db.ProxyCredential{access})[0])
+	}
+}
+
+func adminPathsHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		paths, err := store.ListPaths(r.Context())
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		out := make([]adminPath, 0, len(paths))
+		for _, path := range paths {
+			item, err := adminPathFromDB(r.Context(), store, path)
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			out = append(out, item)
+		}
+		writeJSON(w, out)
+	}
+}
+
+func adminCreatePathHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload adminPathPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		endpoint, err := store.EnsureEndpoint(r.Context(), payload.ProxyID, payload.HostID)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		enabled := true
+		if payload.Enabled != nil {
+			enabled = *payload.Enabled
+		}
+		path, err := store.CreatePath(r.Context(), db.CreatePathParams{
+			Name: payload.Name, DisplayName: payload.DisplayName, EndpointID: endpoint.ID,
+			DialerPathID: payload.DialerPathID, Enabled: enabled,
+			Visibility: payload.Visibility, SortOrder: payload.SortOrder,
 		})
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminProxyAccesses([]db.ProxyAccess{access})[0])
+		item, err := adminPathFromDB(r.Context(), store, path)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, item)
 	}
 }
 
-func adminDeleteUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
+func adminUpdatePathHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		access, err := store.SoftDeleteProxyAccess(
+		pathID := chi.URLParam(r, "path")
+		existing, err := store.GetPath(r.Context(), pathID)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		var payload adminPathPatchPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		endpointID := existing.EndpointID
+		if (payload.ProxyID == nil) != (payload.HostID == nil) {
+			writeAdminError(w, fmt.Errorf("proxy_id and host_id must be updated together"))
+			return
+		}
+		if payload.ProxyID != nil {
+			endpoint, err := store.EnsureEndpoint(r.Context(), *payload.ProxyID, *payload.HostID)
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			endpointID = endpoint.ID
+		}
+		path, err := store.UpdatePath(r.Context(), db.UpdatePathParams{
+			ID:           pathID,
+			Name:         stringPointerValue(payload.Name, existing.Name),
+			DisplayName:  stringPointerValue(payload.DisplayName, existing.DisplayName),
+			EndpointID:   endpointID,
+			DialerPathID: stringPointerValue(payload.DialerPathID, existing.DialerPathID.String),
+			Enabled:      boolPointerValue(payload.Enabled, existing.Enabled),
+			Visibility:   stringPointerValue(payload.Visibility, existing.Visibility),
+			Managed:      existing.Managed,
+			SortOrder:    intPointerValue(payload.SortOrder, existing.SortOrder),
+		})
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		item, err := adminPathFromDB(r.Context(), store, path)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, item)
+	}
+}
+
+func adminDeletePathHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := store.DeletePath(r.Context(), chi.URLParam(r, "path")); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func adminUserPathsHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accesses, err := store.ListActivePathAccessesByUser(r.Context(), chi.URLParam(r, "user"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		out := make([]adminPathAccess, 0, len(accesses))
+		for _, access := range accesses {
+			out = append(out, adminPathAccessFromDB(access))
+		}
+		writeJSON(w, out)
+	}
+}
+
+func adminGrantUserPathHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			PathID string `json:"path_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		access, err := store.GrantPathToUser(r.Context(), chi.URLParam(r, "user"), payload.PathID)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminPathAccessFromDB(access))
+	}
+}
+
+func adminRevokeUserPathHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		access, err := store.RevokePathAccess(r.Context(), chi.URLParam(r, "user"), chi.URLParam(r, "path"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, adminPathAccessFromDB(access))
+	}
+}
+
+func adminPathFromDB(ctx context.Context, store *db.DB, path db.Path) (adminPath, error) {
+	endpoint, err := store.GetEndpoint(ctx, path.EndpointID)
+	if err != nil {
+		return adminPath{}, err
+	}
+	proxy, host, err := store.ResolveEndpoint(ctx, endpoint)
+	if err != nil {
+		return adminPath{}, err
+	}
+	return adminPath{
+		ID: path.ID, Name: path.Name, DisplayName: path.DisplayName,
+		EndpointID: endpoint.ID, ProxyID: proxy.ID, ProxyName: proxy.Name,
+		NodeName: proxy.NodeName, HostID: host.ID, Host: host.Host, HostTag: host.Tag,
+		DialerPathID: path.DialerPathID.String, Enabled: path.Enabled,
+		Visibility: path.Visibility, Managed: path.Managed, SortOrder: path.SortOrder,
+		CreatedAt: path.CreatedAt, UpdatedAt: path.UpdatedAt,
+	}, nil
+}
+
+func adminPathAccessFromDB(access db.PathAccess) adminPathAccess {
+	return adminPathAccess{
+		ID: access.ID, PathID: access.PathID, ProxyUserID: access.ProxyUserID,
+		Enabled: access.Enabled, DeletedAt: nullString(access.DeletedAt),
+		CreatedAt: access.CreatedAt, UpdatedAt: access.UpdatedAt,
+	}
+}
+
+func adminDeleteUserProxyCredentialHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		access, err := store.SoftDeleteProxyCredential(
 			r.Context(),
 			chi.URLParam(r, "user"),
 			chi.URLParam(r, "node"),
@@ -1059,7 +1319,7 @@ func adminDeleteUserProxyAccessHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminProxyAccesses([]db.ProxyAccess{access})[0])
+		writeJSON(w, adminProxyCredentials([]db.ProxyCredential{access})[0])
 	}
 }
 
@@ -1416,7 +1676,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 func adminNodeFromNode(node db.Node) adminNode {
 	hosts := make([]adminNodeHost, 0, len(node.Hosts))
 	for _, h := range node.Hosts {
-		hosts = append(hosts, adminNodeHost{Host: h.Host, Tag: h.Tag, Selected: h.Selected})
+		hosts = append(hosts, adminNodeHost{ID: h.ID, Host: h.Host, Tag: h.Tag, Selected: h.Selected})
 	}
 	return adminNode{
 		ID:             node.ID,
@@ -1549,15 +1809,15 @@ func adminProxies(proxies []db.Proxy) []adminProxy {
 	return out
 }
 
-func adminProxyAccesses(accesses []db.ProxyAccess) []adminProxyAccess {
-	out := make([]adminProxyAccess, 0, len(accesses))
+func adminProxyCredentials(accesses []db.ProxyCredential) []adminProxyCredential {
+	out := make([]adminProxyCredential, 0, len(accesses))
 	for _, access := range accesses {
 		var multiplier *float64
 		if access.TrafficMultiplier.Valid {
 			value := access.TrafficMultiplier.Float64
 			multiplier = &value
 		}
-		out = append(out, adminProxyAccess{
+		out = append(out, adminProxyCredential{
 			ID:                access.ID,
 			UserName:          access.ProxyUserName,
 			NodeName:          access.NodeName,
@@ -1708,6 +1968,27 @@ func proxySettingsJSON(payload adminProxyPayload) (string, error) {
 }
 
 func stringValue(value *string, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func stringPointerValue(value *string, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func boolPointerValue(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func intPointerValue(value *int, fallback int) int {
 	if value == nil {
 		return fallback
 	}

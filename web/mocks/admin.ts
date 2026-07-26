@@ -4,8 +4,10 @@ import type {
   AdminNode,
   AdminNodeBootstrap,
   AdminNodesResponse,
+  AdminPath,
+  AdminPathAccess,
   AdminProxy,
-  AdminProxyAccess,
+  AdminProxyCredential,
   AdminProxiesResponse,
   AdminSubscription,
   AdminUser,
@@ -323,7 +325,50 @@ const proxies: AdminProxy[] = [
   makeProxy({ id: "px_singapore_1", node_name: "singapore", name: "sg-reality", listen_port: 443, enabled: false })
 ];
 
-const proxyAccessFor = (userName: string): AdminProxyAccess[] =>
+const paths: AdminPath[] = proxies.flatMap((proxy) => {
+  const node = nodes.find((item) => item.name === proxy.node_name);
+  const hosts = (node?.hosts ?? [{ id: `host_${node?.id ?? proxy.node_name}`, host: node?.public_host ?? "", tag: "", selected: true }]).filter((host) => host.selected);
+  return hosts.map((host, index) => ({
+    id: `path_${proxy.id}_${index}`,
+    name: host.tag || "direct",
+    display_name: host.tag ? `${proxy.name}-${host.tag}` : index > 0 ? `${proxy.name}-${host.host}` : proxy.name,
+    endpoint_id: `ep_${proxy.id}_${index}`,
+    proxy_id: proxy.id,
+    proxy_name: proxy.name,
+    node_name: proxy.node_name,
+    host_id: host.id || `host_${proxy.node_name}_${index}`,
+    host: host.host,
+    host_tag: host.tag,
+    dialer_path_id: "",
+    enabled: proxy.enabled,
+    visibility: "selectable" as const,
+    managed: true,
+    sort_order: index,
+    created_at: proxy.created_at,
+    updated_at: proxy.updated_at
+  }));
+});
+
+const userPathAccess = new Map<string, AdminPathAccess[]>();
+function pathAccessFor(userName: string): AdminPathAccess[] {
+  if (!userPathAccess.has(userName)) {
+    userPathAccess.set(
+      userName,
+      paths.slice(0, userName === "alice" ? 3 : userName === "bob" ? 2 : 1).map((path) => ({
+        id: `pacc_${userName}_${path.id}`,
+        path_id: path.id,
+        proxy_user_id: `user_${userName}`,
+        enabled: true,
+        deleted_at: "",
+        created_at: iso(20 * DAY),
+        updated_at: iso(DAY)
+      }))
+    );
+  }
+  return userPathAccess.get(userName) as AdminPathAccess[];
+}
+
+const proxyAccessFor = (userName: string): AdminProxyCredential[] =>
   proxies
     .filter((p) => p.enabled)
     .slice(0, userName === "alice" ? 3 : userName === "bob" ? 2 : 1)
@@ -347,10 +392,10 @@ const proxyAccessFor = (userName: string): AdminProxyAccess[] =>
 
 // Mutable per-user access store, seeded lazily from proxyAccessFor so the
 // issue/revoke flow is demoable in dev without a real backend.
-const userAccess = new Map<string, AdminProxyAccess[]>();
-function accessFor(userName: string): AdminProxyAccess[] {
+const userAccess = new Map<string, AdminProxyCredential[]>();
+function accessFor(userName: string): AdminProxyCredential[] {
   if (!userAccess.has(userName)) userAccess.set(userName, proxyAccessFor(userName));
-  return userAccess.get(userName) as AdminProxyAccess[];
+  return userAccess.get(userName) as AdminProxyCredential[];
 }
 
 const connectionInfoFor = (userName: string): UserConnectionInfo => {
@@ -1090,6 +1135,98 @@ const routes: Route[] = [
     }
   },
   {
+    method: "GET",
+    pattern: /^\/api\/admin\/paths$/,
+    handler: () => paths
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/paths$/,
+    handler: ({ body }) => {
+      const proxy = proxies.find((item) => item.id === body?.proxy_id);
+      const node = nodes.find((item) => item.name === proxy?.node_name);
+      const host = node?.hosts?.find((item) => item.id === body?.host_id);
+      const path: AdminPath = {
+        id: `path_custom_${paths.length + 1}`,
+        name: String(body?.name ?? "path"),
+        display_name: String(body?.display_name ?? ""),
+        endpoint_id: `ep_custom_${paths.length + 1}`,
+        proxy_id: proxy?.id ?? String(body?.proxy_id ?? ""),
+        proxy_name: proxy?.name ?? "",
+        node_name: proxy?.node_name ?? "",
+        host_id: String(body?.host_id ?? ""),
+        host: host?.host ?? node?.public_host ?? "",
+        host_tag: host?.tag ?? "",
+        dialer_path_id: String(body?.dialer_path_id ?? ""),
+        enabled: body?.enabled !== false,
+        visibility: body?.visibility === "dependency" ? "dependency" : "selectable",
+        managed: false,
+        sort_order: Number(body?.sort_order ?? 0),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      paths.push(path);
+      return path;
+    }
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/admin\/paths\/([^/]+)$/,
+    handler: ({ match, body }) => {
+      const path = paths.find((item) => item.id === decodeURIComponent(match?.[1] ?? ""));
+      if (path) Object.assign(path, body, { updated_at: new Date().toISOString() });
+      return path ?? { ok: true };
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/paths\/([^/]+)$/,
+    handler: ({ match }) => {
+      const index = paths.findIndex((item) => item.id === decodeURIComponent(match?.[1] ?? ""));
+      if (index >= 0) paths.splice(index, 1);
+      return { ok: true };
+    }
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/paths$/,
+    handler: ({ match }) => pathAccessFor(decodeURIComponent(match?.[1] ?? "alice"))
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/paths$/,
+    handler: ({ match, body }) => {
+      const userName = decodeURIComponent(match?.[1] ?? "");
+      const pathID = String(body?.path_id ?? "");
+      const list = pathAccessFor(userName);
+      const existing = list.find((access) => access.path_id === pathID);
+      if (existing) return existing;
+      const access: AdminPathAccess = {
+        id: `pacc_${userName}_${pathID}`,
+        path_id: pathID,
+        proxy_user_id: `user_${userName}`,
+        enabled: true,
+        deleted_at: "",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      list.push(access);
+      return access;
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/paths\/([^/]+)$/,
+    handler: ({ match }) => {
+      const userName = decodeURIComponent(match?.[1] ?? "");
+      const pathID = decodeURIComponent(match?.[2] ?? "");
+      const list = pathAccessFor(userName);
+      const index = list.findIndex((access) => access.path_id === pathID);
+      if (index >= 0) list.splice(index, 1);
+      return { ok: true };
+    }
+  },
+  {
     method: "POST",
     pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/,
     handler: ({ match, body }) => {
@@ -1097,7 +1234,7 @@ const routes: Route[] = [
       const proxy = proxies.find((p) => p.node_name === body?.node_name && p.name === body?.proxy_name);
       const list = accessFor(name);
       if (proxy && !list.some((a) => a.node_name === proxy.node_name && a.proxy_name === proxy.name)) {
-        const access: AdminProxyAccess = {
+        const access: AdminProxyCredential = {
           id: `acc_${name}_${proxy.id}`,
           user_name: name,
           node_name: proxy.node_name,

@@ -311,7 +311,7 @@ func TestAdminSubscriptionLifecycleAndDynamicProvider(t *testing.T) {
 		t.Fatal("provider ETag did not change after proxy edit")
 	}
 
-	if _, err := store.SetProxyAccessEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
+	if _, err := store.SetProxyCredentialEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
@@ -915,7 +915,7 @@ func TestAdminRenamesNodeAndProxyWithoutBreakingAgentIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accessBefore, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	accessBefore, err := store.GetProxyCredential(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -953,7 +953,7 @@ func TestAdminRenamesNodeAndProxyWithoutBreakingAgentIdentity(t *testing.T) {
 	if renamedProxy.NodeName != "edge-primary" || renamedProxy.Name != "home" || renamedProxy.ShortID != "a1b2" {
 		t.Fatalf("renamed proxy = %#v", renamedProxy)
 	}
-	accessAfter, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	accessAfter, err := store.GetProxyCredential(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1264,6 +1264,62 @@ func TestAdminNodeAndProxyPagination(t *testing.T) {
 	}
 }
 
+func TestAdminPathPatchPreservesOmittedFields(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := store.GetNode(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.EnsureEndpoint(ctx, proxy.ID, node.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.CreatePath(ctx, db.CreatePathParams{
+		Name: "dialer", DisplayName: "Before", EndpointID: endpoint.ID,
+		Enabled: true, Visibility: db.PathVisibilityDependency, SortOrder: 17,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+	createReq := adminJSONRequest(t, http.MethodPost, "/api/admin/paths", map[string]any{
+		"name": "api-default", "proxy_id": proxy.ID, "host_id": node.Hosts[0].ID,
+	})
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("path create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created adminPath
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.Enabled || created.Visibility != db.PathVisibilitySelectable {
+		t.Fatalf("omitted create defaults = %#v", created)
+	}
+	req := adminJSONRequest(t, http.MethodPatch, "/api/admin/paths/"+path.ID, map[string]any{
+		"display_name": "After",
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("path patch status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	updated, err := store.GetPath(ctx, path.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "dialer" || updated.DisplayName != "After" || !updated.Enabled || updated.Visibility != db.PathVisibilityDependency || updated.SortOrder != 17 {
+		t.Fatalf("partial patch changed omitted fields: %#v", updated)
+	}
+}
+
 func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
@@ -1280,7 +1336,7 @@ func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete access status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if _, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090"); err == nil {
+	if _, err := store.GetProxyCredential(ctx, "alice", "azus", "vless-39090"); err == nil {
 		t.Fatal("deleted access remained visible")
 	}
 
@@ -1293,7 +1349,7 @@ func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reissue access status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	access, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	access, err := store.GetProxyCredential(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1512,7 +1568,7 @@ func seedAPITestNode(t *testing.T, ctx context.Context, store *db.DB) {
 	if _, err := store.BindUserToNode(ctx, "alice", "azus"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueAccessParams{
+	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",

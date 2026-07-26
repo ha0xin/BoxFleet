@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 // hosts each produce a client connection profile; the first host is the primary
 // and is mirrored into the node's public_host column.
 type NodeHost struct {
+	ID       string `json:"id"`
 	Host     string `json:"host"`
 	Tag      string `json:"tag,omitempty"`
 	Selected bool   `json:"selected"`
@@ -60,6 +62,7 @@ func normalizeNodeHosts(hosts []NodeHost) ([]NodeHost, error) {
 		}
 		seen[host] = true
 		out = append(out, NodeHost{
+			ID:       strings.TrimSpace(h.ID),
 			Host:     host,
 			Tag:      strings.TrimSpace(h.Tag),
 			Selected: h.Selected,
@@ -79,6 +82,49 @@ func normalizeNodeHosts(hosts []NodeHost) ([]NodeHost, error) {
 		out[0].Selected = true
 	}
 	return out, nil
+}
+
+func ensureNodeHostIDs(hosts, existing []NodeHost) ([]NodeHost, error) {
+	existingByHost := make(map[string]string, len(existing))
+	for _, host := range existing {
+		if host.ID != "" {
+			existingByHost[host.Host] = host.ID
+		}
+	}
+	seen := make(map[string]bool, len(hosts))
+	// Preserve exact address matches before using positional compatibility, so
+	// inserting a new primary host cannot steal an existing host's identity.
+	for i := range hosts {
+		if hosts[i].ID == "" {
+			hosts[i].ID = existingByHost[hosts[i].Host]
+		}
+		if hosts[i].ID == "" {
+			continue
+		}
+		if seen[hosts[i].ID] {
+			return nil, fmt.Errorf("node host id %q is duplicated", hosts[i].ID)
+		}
+		seen[hosts[i].ID] = true
+	}
+	for i := range hosts {
+		if hosts[i].ID != "" {
+			continue
+		}
+		// Backward-compatible callers do not send host IDs. Preserve identity by
+		// position when an existing address is edited in place.
+		if i < len(existing) && !seen[existing[i].ID] {
+			hosts[i].ID = existing[i].ID
+		}
+		if hosts[i].ID == "" {
+			var err error
+			hosts[i].ID, err = id.New("host")
+			if err != nil {
+				return nil, err
+			}
+		}
+		seen[hosts[i].ID] = true
+	}
+	return hosts, nil
 }
 
 func validateNodeHostTags(hosts []NodeHost) error {
@@ -118,19 +164,29 @@ func encodeNodeHosts(hosts []NodeHost) (string, error) {
 
 // parseNodeHosts decodes the stored hosts_json, falling back to the legacy
 // single public_host for rows written before multi-host support.
-func parseNodeHosts(raw, fallbackHost string) []NodeHost {
+func parseNodeHosts(raw, fallbackHost, nodeID string) []NodeHost {
 	if trimmed := strings.TrimSpace(raw); trimmed != "" && trimmed != "[]" {
 		var hosts []NodeHost
 		if err := json.Unmarshal([]byte(trimmed), &hosts); err == nil {
 			if normalized, err := normalizeNodeHosts(hosts); err == nil {
+				for i := range normalized {
+					if normalized[i].ID == "" {
+						normalized[i].ID = legacyNodeHostID(nodeID, normalized[i].Host)
+					}
+				}
 				return normalized
 			}
 		}
 	}
 	if fallbackHost = strings.TrimSpace(fallbackHost); fallbackHost != "" {
-		return []NodeHost{{Host: fallbackHost, Selected: true}}
+		return []NodeHost{{ID: legacyNodeHostID(nodeID, fallbackHost), Host: fallbackHost, Selected: true}}
 	}
 	return nil
+}
+
+func legacyNodeHostID(nodeID, host string) string {
+	digest := sha256.Sum256([]byte(nodeID + "\x00" + host))
+	return fmt.Sprintf("host_%x", digest[:16])
 }
 
 type NodeFilter struct {
@@ -173,7 +229,11 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 	}
 	// A node is created with a single primary host; additional hosts are added
 	// later via UpdateNode. Keep hosts_json in sync with public_host from the start.
-	hostsJSON, err := encodeNodeHosts([]NodeHost{{Host: publicHost, Selected: true}})
+	hosts, err := ensureNodeHostIDs([]NodeHost{{Host: publicHost, Selected: true}}, nil)
+	if err != nil {
+		return Node{}, err
+	}
+	hostsJSON, err := encodeNodeHosts(hosts)
 	if err != nil {
 		return Node{}, err
 	}
@@ -187,7 +247,14 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 	if err != nil {
 		return Node{}, err
 	}
-	return db.GetNode(ctx, name)
+	updated, err := db.GetNode(ctx, name)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := db.SyncLegacyDirectPathsForNode(ctx, updated.Name); err != nil {
+		return Node{}, err
+	}
+	return updated, nil
 }
 
 func (db *DB) UpdateNode(ctx context.Context, params UpdateNodeParams) (Node, error) {
@@ -221,6 +288,10 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 	if !validNodeStatus(status) {
 		return Node{}, fmt.Errorf("unsupported node status %q", status)
 	}
+	existingNode, err := db.GetNode(ctx, currentName)
+	if err != nil {
+		return Node{}, err
+	}
 	// Hosts is the source of truth when provided; single-host callers may leave it
 	// nil and set PublicHost instead. A non-nil but empty Hosts is an explicit
 	// "replace with no hosts" — it must NOT fall back to PublicHost, so that an
@@ -236,6 +307,27 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 	}
 	if err := validateNodeHostTags(normalized); err != nil {
 		return Node{}, err
+	}
+	normalized, err = ensureNodeHostIDs(normalized, existingNode.Hosts)
+	if err != nil {
+		return Node{}, err
+	}
+	nextHosts := make(map[string]NodeHost, len(normalized))
+	for _, host := range normalized {
+		nextHosts[host.ID] = host
+	}
+	for _, host := range existingNode.Hosts {
+		_, present := nextHosts[host.ID]
+		if present {
+			continue
+		}
+		count, err := db.q.CountEndpointsByHostID(ctx, host.ID)
+		if err != nil {
+			return Node{}, err
+		}
+		if count > 0 {
+			return Node{}, fmt.Errorf("host %q is used by %d endpoint(s)", host.ID, count)
+		}
 	}
 	hostsJSON, err := encodeNodeHosts(normalized)
 	if err != nil {
@@ -267,7 +359,14 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 	if err != nil {
 		return Node{}, err
 	}
-	return db.GetNode(ctx, name)
+	updated, err := db.GetNode(ctx, name)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := db.SyncLegacyDirectPathsForNode(ctx, updated.Name); err != nil {
+		return Node{}, err
+	}
+	return updated, nil
 }
 
 func renameNodeTx(ctx context.Context, qtx *store.Queries, nodeID, currentName, newName string) error {
@@ -416,7 +515,7 @@ OFFSET ?`
 		); err != nil {
 			return NodePage{}, err
 		}
-		node.Hosts = parseNodeHosts(hostsJSON, node.PublicHost)
+		node.Hosts = parseNodeHosts(hostsJSON, node.PublicHost, node.ID)
 		nodes = append(nodes, node)
 	}
 	if err := rows.Err(); err != nil {
@@ -568,7 +667,7 @@ func mapNode(row store.Node) Node {
 		ID:             row.ID,
 		Name:           row.Name,
 		PublicHost:     row.PublicHost,
-		Hosts:          parseNodeHosts(row.HostsJson, row.PublicHost),
+		Hosts:          parseNodeHosts(row.HostsJson, row.PublicHost, row.ID),
 		APIBaseURL:     row.ApiBaseUrl,
 		Status:         row.Status,
 		SingBoxVersion: row.SingBoxVersion,

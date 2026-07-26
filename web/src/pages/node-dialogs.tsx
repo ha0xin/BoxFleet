@@ -219,7 +219,7 @@ const editSchema = z.object({
   // primary (mirrored to public_host server-side); each "selected" host yields a
   // client profile. Require at least one non-empty host and one selected.
   hosts: z
-    .array(z.object({ host: z.string(), tag: z.string(), selected: z.boolean() }))
+    .array(z.object({ id: z.string().optional(), host: z.string(), tag: z.string(), selected: z.boolean() }))
     .refine((hosts) => hosts.some((h) => h.host.trim() !== ""), {
       message: "At least one host is required"
     })
@@ -275,8 +275,8 @@ type EditValues = z.infer<typeof editSchema>;
 function editDefaults(node: AdminNode): EditValues {
   const hosts =
     node.hosts && node.hosts.length > 0
-      ? node.hosts.map((h) => ({ host: h.host, tag: h.tag ?? "", selected: h.selected }))
-      : [{ host: node.public_host, tag: "", selected: true }];
+      ? node.hosts.map((h) => ({ id: h.id, host: h.host, tag: h.tag ?? "", selected: h.selected }))
+      : [{ id: undefined, host: node.public_host, tag: "", selected: true }];
   return { name: node.name, hosts, api_base_url: node.api_base_url };
 }
 
@@ -302,7 +302,7 @@ export function EditNodeDialog({
     request,
     (req, values) => {
       const hosts = values.hosts
-        .map((h) => ({ host: h.host.trim(), tag: h.tag.trim(), selected: h.selected }))
+        .map((h) => ({ id: h.id, host: h.host.trim(), tag: h.tag.trim(), selected: h.selected }))
         .filter((h) => h.host !== "");
       return req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
         method: "PATCH",

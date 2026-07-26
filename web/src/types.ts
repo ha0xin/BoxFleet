@@ -2,6 +2,7 @@ export type AdminNodeStatus = "pending" | "active" | "disabled" | "degraded";
 export type AdminNodeApplyStatus = "pending" | "applied" | "failed" | "rolled_back";
 
 export type AdminNodeHost = {
+  id: string;
   host: string;
   tag: string;
   selected: boolean;
@@ -176,6 +177,36 @@ export type AdminProxiesResponse = {
   offset: number;
 };
 
+export type AdminPath = {
+  id: string;
+  name: string;
+  display_name: string;
+  endpoint_id: string;
+  proxy_id: string;
+  proxy_name: string;
+  node_name: string;
+  host_id: string;
+  host: string;
+  host_tag: string;
+  dialer_path_id: string;
+  enabled: boolean;
+  visibility: "selectable" | "dependency";
+  managed: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminPathAccess = {
+  id: string;
+  path_id: string;
+  proxy_user_id: string;
+  enabled: boolean;
+  deleted_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AdminUser = {
   id: string;
   name: string;
@@ -187,7 +218,7 @@ export type AdminUser = {
   deleted_at: string;
 };
 
-export type AdminProxyAccess = {
+export type AdminProxyCredential = {
   id: string;
   user_name: string;
   node_name: string;
@@ -358,6 +389,7 @@ export type Page =
   | "overview"
   | "nodes"
   | "proxies"
+  | "paths"
   | "users"
   | "mihomo-profiles"
   | "traffic"

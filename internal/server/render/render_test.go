@@ -184,6 +184,114 @@ func TestRenderMihomoProxyProvider(t *testing.T) {
 	}
 }
 
+func TestRenderShadowsocks2022DialerPath(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range []struct{ name, host string }{{"la-entry", "198.51.100.10"}, {"la-home", "203.0.113.20"}} {
+		if _, err := store.CreateNode(ctx, node.name, node.host, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dialerProxy, err := store.CreateProxy(ctx, db.CreateProxyParams{
+		NodeName: "la-entry", Name: "optimized", Protocol: db.ProtocolVLESSReality,
+		ListenPort: 443, Transport: db.TransportTCP, Enabled: true,
+		SettingsJSON: `{"server_name":"www.amazon.com","reality_private_key":"private-key","reality_public_key":"public-key","short_id":"","handshake_server":"www.amazon.com","handshake_port":443}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitProxy, err := store.CreateProxy(ctx, db.CreateProxyParams{
+		NodeName: "la-home", Name: "residential", Protocol: db.ProtocolShadowsocks2022,
+		ListenPort: 8443, Transport: db.TransportTCPUDP, Enabled: true,
+		SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryNode, _ := store.GetNode(ctx, "la-entry")
+	exitNode, _ := store.GetNode(ctx, "la-home")
+	dialerEndpoint, err := store.EnsureEndpoint(ctx, dialerProxy.ID, entryNode.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitEndpoint, err := store.EnsureEndpoint(ctx, exitProxy.ID, exitNode.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialerPath, err := store.CreatePath(ctx, db.CreatePathParams{
+		Name: "optimized-entry", DisplayName: "LA optimized", EndpointID: dialerEndpoint.ID,
+		Enabled: true, Visibility: db.PathVisibilityDependency,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitPath, err := store.CreatePath(ctx, db.CreatePathParams{
+		Name: "home-exit", DisplayName: "LA residential via optimized", EndpointID: exitEndpoint.ID,
+		DialerPathID: dialerPath.ID, Enabled: true, Visibility: db.PathVisibilitySelectable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GrantPathToUser(ctx, "alice", exitPath.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := RenderMihomoProxyProvider(ctx, store, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var provider struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(raw, &provider); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Proxies) != 2 {
+		t.Fatalf("proxies = %d, want dependency and root:\n%s", len(provider.Proxies), raw)
+	}
+	if provider.Proxies[0]["name"] != "LA optimized" || provider.Proxies[0]["dialer-proxy"] != nil {
+		t.Fatalf("unexpected dialer: %#v", provider.Proxies[0])
+	}
+	exit := provider.Proxies[1]
+	if exit["type"] != "ss" || exit["cipher"] != db.DefaultShadowsocks2022Method || exit["dialer-proxy"] != "LA optimized" {
+		t.Fatalf("unexpected exit: %#v", exit)
+	}
+	if password, _ := exit["password"].(string); strings.Count(password, ":") != 1 {
+		t.Fatalf("unexpected SS-2022 combined password: %q", password)
+	}
+
+	serverRaw, err := RenderNodeConfig(ctx, store, "la-home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var server map[string]any
+	if err := json.Unmarshal(serverRaw, &server); err != nil {
+		t.Fatal(err)
+	}
+	inbound := server["inbounds"].([]any)[0].(map[string]any)
+	if inbound["type"] != "shadowsocks" || inbound["method"] != db.DefaultShadowsocks2022Method {
+		t.Fatalf("unexpected Shadowsocks inbound: %#v", inbound)
+	}
+	if len(inbound["users"].([]any)) != 1 || inbound["password"] == "" {
+		t.Fatalf("missing Shadowsocks multi-user keys: %#v", inbound)
+	}
+	if _, err := store.RevokePathAccess(ctx, "alice", exitPath.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, nodeName := range []string{"la-entry", "la-home"} {
+		raw, err := RenderNodeConfig(ctx, store, nodeName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), `"inbounds"`) {
+			t.Fatalf("revoked Path left credential inbound on %s: %s", nodeName, raw)
+		}
+	}
+}
+
 func TestRenderMihomoProfileUsesInlineProxies(t *testing.T) {
 	ctx := context.Background()
 	store := openRenderTestDB(t)
@@ -320,7 +428,7 @@ func TestRenderMihomoProxyProviderMultiHostAndDisabled(t *testing.T) {
 		t.Fatalf("unexpected names: %q, %q", provider.Proxies[0]["name"], provider.Proxies[1]["name"])
 	}
 
-	if _, err := store.SetProxyAccessEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
+	if _, err := store.SetProxyCredentialEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
 		t.Fatal(err)
 	}
 	raw, err = RenderMihomoProxyProvider(ctx, store, "alice")
@@ -361,6 +469,11 @@ SET hosts_json = '[{"host":"azus.example.net","selected":true},{"host":"203.0.11
 WHERE name = 'azus'`); err != nil {
 		t.Fatal(err)
 	}
+	// Normal node updates perform this synchronization automatically. This test
+	// writes the legacy JSON directly, so invoke the compatibility sync here.
+	if err := store.SyncLegacyDirectPathsForNode(ctx, "azus"); err != nil {
+		t.Fatal(err)
+	}
 
 	info, err := ConnectionInfoForUser(ctx, store, "alice")
 	if err != nil {
@@ -398,7 +511,7 @@ func TestRenderMihomoProxyProviderRejectsDuplicateFinalNames(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueAccessParams{
+	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090-v6",
@@ -492,7 +605,7 @@ func seedVLESSRealityFixture(t *testing.T, ctx context.Context, store *db.DB) {
 	if _, err := store.BindUserToNode(ctx, "alice", "azus"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueAccessParams{
+	if _, err := store.IssueVLESSRealityAccess(ctx, db.IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",

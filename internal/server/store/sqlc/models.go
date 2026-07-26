@@ -30,6 +30,15 @@ type ConfigVersion struct {
 	PublishedAt sql.NullString `json:"published_at"`
 }
 
+type Endpoint struct {
+	ID        string `json:"id"`
+	ProxyID   string `json:"proxy_id"`
+	HostID    string `json:"host_id"`
+	Enabled   int64  `json:"enabled"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type LogEvent struct {
 	ID           string         `json:"id"`
 	NodeID       string         `json:"node_id"`
@@ -238,6 +247,30 @@ type NodeUpdateCampaignMember struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
+type Path struct {
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	DisplayName  string         `json:"display_name"`
+	EndpointID   string         `json:"endpoint_id"`
+	DialerPathID sql.NullString `json:"dialer_path_id"`
+	Enabled      int64          `json:"enabled"`
+	Visibility   string         `json:"visibility"`
+	Managed      int64          `json:"managed"`
+	SortOrder    int64          `json:"sort_order"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
+}
+
+type PathAccess struct {
+	ID          string         `json:"id"`
+	PathID      string         `json:"path_id"`
+	ProxyUserID string         `json:"proxy_user_id"`
+	Enabled     int64          `json:"enabled"`
+	DeletedAt   sql.NullString `json:"deleted_at"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}
+
 type Proxy struct {
 	ID                string         `json:"id"`
 	NodeID            string         `json:"node_id"`
@@ -328,6 +361,12 @@ type ProxyNameAlias struct {
 	Alias     string `json:"alias"`
 	ProxyID   string `json:"proxy_id"`
 	CreatedAt string `json:"created_at"`
+}
+
+type ProxyPublicationSetting struct {
+	ProxyID       string `json:"proxy_id"`
+	DirectEnabled int64  `json:"direct_enabled"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type ProxyUser struct {

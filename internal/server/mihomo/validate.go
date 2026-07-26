@@ -37,6 +37,7 @@ func Validate(raw []byte) []Diagnostic {
 	}
 
 	proxies, ok := profile["proxies"].([]any)
+	proxyDialers := make(map[string]string)
 	if !ok {
 		diagnostics = append(diagnostics, errorDiagnostic("invalid_proxies", "proxies", "proxies must be an array"))
 	} else {
@@ -57,6 +58,15 @@ func Validate(raw []byte) []Diagnostic {
 				continue
 			}
 			known[name] = fmt.Sprintf("proxies[%d]", index)
+			if rawDialer, exists := proxy["dialer-proxy"]; exists {
+				dialer, ok := rawDialer.(string)
+				dialer = strings.TrimSpace(dialer)
+				if !ok || dialer == "" {
+					diagnostics = append(diagnostics, errorDiagnostic("invalid_dialer_reference", fmt.Sprintf("proxies[%d].dialer-proxy", index), "dialer-proxy must be a proxy or proxy-group name"))
+				} else {
+					proxyDialers[name] = dialer
+				}
+			}
 		}
 	}
 
@@ -104,6 +114,14 @@ func Validate(raw []byte) []Diagnostic {
 	for _, group := range findGroupCycles(groupMembers) {
 		diagnostics = append(diagnostics, errorDiagnostic("group_cycle", "proxy-groups", fmt.Sprintf("proxy group cycle includes %q", group)))
 	}
+	for proxy, dialer := range proxyDialers {
+		if _, exists := known[dialer]; !exists {
+			diagnostics = append(diagnostics, errorDiagnostic("unknown_dialer_reference", known[proxy]+".dialer-proxy", fmt.Sprintf("unknown proxy or group %q", dialer)))
+		}
+	}
+	for _, proxy := range findDialerCycles(proxyDialers) {
+		diagnostics = append(diagnostics, errorDiagnostic("dialer_cycle", "proxies", fmt.Sprintf("dialer-proxy cycle includes %q", proxy)))
+	}
 
 	rules, ok := profile["rules"].([]any)
 	if !ok || len(rules) == 0 {
@@ -115,6 +133,36 @@ func Validate(raw []byte) []Diagnostic {
 		}
 	}
 	return diagnostics
+}
+
+func findDialerCycles(dialers map[string]string) []string {
+	state := make(map[string]int, len(dialers))
+	cycles := make(map[string]struct{})
+	var visit func(string)
+	visit = func(proxy string) {
+		switch state[proxy] {
+		case 1:
+			cycles[proxy] = struct{}{}
+			return
+		case 2:
+			return
+		}
+		state[proxy] = 1
+		if next, exists := dialers[proxy]; exists {
+			if _, isProxyDialer := dialers[next]; isProxyDialer {
+				visit(next)
+			}
+		}
+		state[proxy] = 2
+	}
+	for proxy := range dialers {
+		visit(proxy)
+	}
+	out := make([]string, 0, len(cycles))
+	for proxy := range cycles {
+		out = append(out, proxy)
+	}
+	return out
 }
 
 func HasErrors(diagnostics []Diagnostic) bool {

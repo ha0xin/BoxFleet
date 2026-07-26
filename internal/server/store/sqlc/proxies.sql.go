@@ -106,6 +106,41 @@ func (q *Queries) DeleteProxyNameAlias(ctx context.Context, arg DeleteProxyNameA
 	return err
 }
 
+const getProxyByID = `-- name: GetProxyByID :one
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+FROM proxy_details
+WHERE id = ?1
+  AND deleted_at IS NULL
+  AND node_deleted_at IS NULL
+`
+
+func (q *Queries) GetProxyByID(ctx context.Context, id string) (ProxyDetail, error) {
+	row := q.db.QueryRowContext(ctx, getProxyByID, id)
+	var i ProxyDetail
+	err := row.Scan(
+		&i.ID,
+		&i.NodeID,
+		&i.NodeName,
+		&i.NodePublicHost,
+		&i.Name,
+		&i.Protocol,
+		&i.Listen,
+		&i.ListenPort,
+		&i.Transport,
+		&i.Enabled,
+		&i.TrafficMultiplier,
+		&i.SettingsJson,
+		&i.InboundRulesJson,
+		&i.OutboundRulesJson,
+		&i.RouteRulesJson,
+		&i.DeletedAt,
+		&i.NodeDeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getProxyByNodeAndName = `-- name: GetProxyByNodeAndName :one
 SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details

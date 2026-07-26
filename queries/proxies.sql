@@ -70,6 +70,13 @@ WHERE node_id = (
        )
   );
 
+-- name: GetProxyByID :one
+SELECT *
+FROM proxy_details
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND node_deleted_at IS NULL;
+
 -- name: GetProxyByNodeAndNameIncludingDeleted :one
 SELECT *
 FROM proxy_details

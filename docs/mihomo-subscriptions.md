@@ -2,9 +2,15 @@
 
 BoxFleet treats a complete Mihomo configuration as the primary subscription
 format. Each configuration binds one proxy user, while one user may own any
-number of configurations and independent links. The server renders the user's
-active VLESS-Reality accesses as an inline top-level `proxies` array, then runs
+number of configurations and independent links. The server resolves the user's
+active `PathAccess` roots and renders their VLESS-Reality or Shadowsocks 2022
+Paths as an inline top-level `proxies` array, then runs
 the configuration's enabled YAML and JavaScript processors in order.
+
+Dialer dependencies are emitted before their consumers and referenced with
+Mihomo's `dialer-proxy`. A dependency is not independently selectable merely
+because it appears in the generated proxy list. Invalid chains fail closed per
+root Path; they are never silently downgraded to a direct connection.
 
 There is no invisible built-in processor on this path. New configurations start
 with a link to the global `BoxFleet Basic` template, so the fast path is ready

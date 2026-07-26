@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestIssueVLESSRealityAccess(t *testing.T) {
+func TestIssueVLESSRealityCredential(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 
@@ -37,7 +37,7 @@ func TestIssueVLESSRealityAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	access, err := store.IssueVLESSRealityAccess(ctx, IssueAccessParams{
+	access, err := store.IssueVLESSRealityCredential(ctx, IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",
@@ -62,7 +62,7 @@ func TestIssueVLESSRealityAccess(t *testing.T) {
 		t.Fatalf("flow = %q", vless.Flow)
 	}
 
-	duplicate, err := store.IssueVLESSRealityAccess(ctx, IssueAccessParams{
+	duplicate, err := store.IssueVLESSRealityCredential(ctx, IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",
@@ -74,14 +74,14 @@ func TestIssueVLESSRealityAccess(t *testing.T) {
 		t.Fatalf("duplicate issue created new access: %s != %s", duplicate.ID, access.ID)
 	}
 
-	lookup, err := store.GetProxyAccess(ctx, "alice", "azus", "vless-39090")
+	lookup, err := store.GetProxyCredential(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lookup.ID != access.ID {
 		t.Fatalf("lookup id = %q, want %q", lookup.ID, access.ID)
 	}
-	list, err := store.ListProxyAccessesByNode(ctx, "azus")
+	list, err := store.ListProxyCredentialsByNode(ctx, "azus")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,21 +89,21 @@ func TestIssueVLESSRealityAccess(t *testing.T) {
 		t.Fatalf("list accesses = %#v", list)
 	}
 
-	revoked, err := store.RevokeProxyAccess(ctx, "alice", "azus", "vless-39090")
+	revoked, err := store.RevokeProxyCredential(ctx, "alice", "azus", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if revoked.Enabled {
 		t.Fatal("revoked access is still enabled")
 	}
-	list, err = store.ListProxyAccessesByNode(ctx, "azus")
+	list, err = store.ListProxyCredentialsByNode(ctx, "azus")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(list) != 0 {
 		t.Fatalf("revoked access still renders = %#v", list)
 	}
-	reissued, err := store.IssueVLESSRealityAccess(ctx, IssueAccessParams{
+	reissued, err := store.IssueVLESSRealityCredential(ctx, IssueCredentialParams{
 		UserName:  "alice",
 		NodeName:  "azus",
 		ProxyName: "vless-39090",

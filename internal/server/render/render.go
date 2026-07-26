@@ -8,6 +8,7 @@ import (
 
 	"github.com/haoxin/boxfleet/internal/server/db"
 	"github.com/haoxin/boxfleet/internal/server/mihomo"
+	"github.com/haoxin/boxfleet/internal/server/pathresolve"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -48,11 +49,14 @@ type NodeInfoProxy struct {
 	ServerName    string `json:"server_name"`
 	PublicKey     string `json:"public_key"`
 	ShortID       string `json:"short_id"`
+	Cipher        string `json:"cipher,omitempty"`
+	Password      string `json:"password,omitempty"`
+	DialerProxy   string `json:"dialer_proxy,omitempty"`
 	isPrimaryHost bool
 }
 
 type mihomoProxyProvider struct {
-	Proxies []mihomoVLESSProxy `yaml:"proxies"`
+	Proxies []any `yaml:"proxies"`
 }
 
 type mihomoVLESSProxy struct {
@@ -70,6 +74,18 @@ type mihomoVLESSProxy struct {
 	PacketEncoding    string               `yaml:"packet-encoding"`
 	RealityOpts       mihomoRealityOptions `yaml:"reality-opts"`
 	Encryption        string               `yaml:"encryption"`
+	DialerProxy       string               `yaml:"dialer-proxy,omitempty"`
+}
+
+type mihomoShadowsocksProxy struct {
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"`
+	Server      string `yaml:"server"`
+	Port        int    `yaml:"port"`
+	Cipher      string `yaml:"cipher"`
+	Password    string `yaml:"password"`
+	UDP         bool   `yaml:"udp"`
+	DialerProxy string `yaml:"dialer-proxy,omitempty"`
 }
 
 type mihomoRealityOptions struct {
@@ -112,6 +128,22 @@ type vlessInboundUser struct {
 	Name string `json:"name"`
 	UUID string `json:"uuid"`
 	Flow string `json:"flow"`
+}
+
+type shadowsocksInbound struct {
+	Type       string                   `json:"type"`
+	Tag        string                   `json:"tag"`
+	Listen     string                   `json:"listen"`
+	ListenPort int                      `json:"listen_port"`
+	Network    string                   `json:"network,omitempty"`
+	Method     string                   `json:"method"`
+	Password   string                   `json:"password"`
+	Users      []shadowsocksInboundUser `json:"users"`
+}
+
+type shadowsocksInboundUser struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
 }
 
 type inboundTLS struct {
@@ -219,53 +251,67 @@ func RenderDisabledConfig() ([]byte, error) {
 }
 
 func RenderNodeConfig(ctx context.Context, store *db.DB, nodeName string) ([]byte, error) {
-	accesses, err := store.ListProxyAccessesByNode(ctx, nodeName)
+	accesses, err := store.ListProxyCredentialsByNode(ctx, nodeName)
 	if err != nil {
 		return nil, err
 	}
 	if len(accesses) == 0 {
 		return json.MarshalIndent(emptyNodeConfig(), "", "  ")
 	}
-	inboundByName := make(map[string]*vlessInbound)
+	inboundByName := make(map[string]any)
 	var inboundOrder []string
 	var statsUsers []string
 	for _, access := range accesses {
-		if access.Protocol != db.ProtocolVLESSReality {
-			return nil, fmt.Errorf("renderer only supports %s, got %s on %s", db.ProtocolVLESSReality, access.Protocol, access.ProxyName)
-		}
-		settings, userCredential, err := parseVLESSReality(access)
-		if err != nil {
-			return nil, err
-		}
-		inbound := inboundByName[access.ProxyName]
-		if inbound == nil {
-			inbound = &vlessInbound{
-				Type:       "vless",
-				Tag:        access.ProxyName,
-				Listen:     access.Listen,
-				ListenPort: access.ListenPort,
-				TLS: inboundTLS{
-					Enabled:    true,
-					ServerName: settings.ServerName,
-					Reality: inboundReality{
-						Enabled: true,
-						Handshake: realityHandshake{
-							Server:     settings.HandshakeServer,
-							ServerPort: settings.HandshakePort,
-						},
-						PrivateKey: settings.RealityPrivateKey,
-						ShortID:    settings.ShortID,
-					},
-				},
+		switch access.Protocol {
+		case db.ProtocolVLESSReality:
+			settings, userCredential, err := parseVLESSReality(access)
+			if err != nil {
+				return nil, err
 			}
-			inboundByName[access.ProxyName] = inbound
-			inboundOrder = append(inboundOrder, access.ProxyName)
+			inbound, _ := inboundByName[access.ProxyName].(*vlessInbound)
+			if inbound == nil {
+				inbound = &vlessInbound{
+					Type:       "vless",
+					Tag:        access.ProxyName,
+					Listen:     access.Listen,
+					ListenPort: access.ListenPort,
+					TLS: inboundTLS{
+						Enabled:    true,
+						ServerName: settings.ServerName,
+						Reality: inboundReality{
+							Enabled: true,
+							Handshake: realityHandshake{
+								Server:     settings.HandshakeServer,
+								ServerPort: settings.HandshakePort,
+							},
+							PrivateKey: settings.RealityPrivateKey,
+							ShortID:    settings.ShortID,
+						},
+					},
+				}
+				inboundByName[access.ProxyName] = inbound
+				inboundOrder = append(inboundOrder, access.ProxyName)
+			}
+			inbound.Users = append(inbound.Users, vlessInboundUser{Name: access.AuthName, UUID: userCredential.UUID, Flow: userCredential.Flow})
+		case db.ProtocolShadowsocks2022:
+			settings, userCredential, err := parseShadowsocks2022(access)
+			if err != nil {
+				return nil, err
+			}
+			inbound, _ := inboundByName[access.ProxyName].(*shadowsocksInbound)
+			if inbound == nil {
+				inbound = &shadowsocksInbound{
+					Type: "shadowsocks", Tag: access.ProxyName, Listen: access.Listen,
+					ListenPort: access.ListenPort, Network: singBoxNetwork(access.Transport),
+					Method: settings.Method, Password: settings.ServerPassword,
+				}
+				inboundByName[access.ProxyName] = inbound
+				inboundOrder = append(inboundOrder, access.ProxyName)
+			}
+			inbound.Users = append(inbound.Users, shadowsocksInboundUser{Name: access.AuthName, Password: userCredential.Password})
+		default:
+			return nil, fmt.Errorf("renderer does not support protocol %s on %s", access.Protocol, access.ProxyName)
 		}
-		inbound.Users = append(inbound.Users, vlessInboundUser{
-			Name: access.AuthName,
-			UUID: userCredential.UUID,
-			Flow: userCredential.Flow,
-		})
 		statsUsers = append(statsUsers, access.AuthName)
 	}
 	inbounds := make([]any, 0, len(inboundOrder))
@@ -370,7 +416,7 @@ func RenderClientConfig(ctx context.Context, store *db.DB, params ClientConfigPa
 }
 
 func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName string) (NodeInfo, error) {
-	accesses, err := store.ListProxyAccessesByUserNode(ctx, userName, nodeName)
+	accesses, err := store.ListProxyCredentialsByUserNode(ctx, userName, nodeName)
 	if err != nil {
 		return NodeInfo{}, err
 	}
@@ -380,7 +426,7 @@ func NodeInfoForUser(ctx context.Context, store *db.DB, userName, nodeName strin
 	return nodeInfoFromAccesses(ctx, store, userName, nodeName, accesses)
 }
 
-func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName string, accesses []db.ProxyAccess) (NodeInfo, error) {
+func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName string, accesses []db.ProxyCredential) (NodeInfo, error) {
 	// Each selected node host yields its own client profile (a node may publish a
 	// domain plus several IPv4/IPv6 addresses). Fall back to the view's single
 	// public_host if the node row can't be loaded or has no selected host.
@@ -423,49 +469,51 @@ func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName 
 
 // ConnectionInfoForUser returns all currently active, supported client
 // profiles for a user. Disabled users, nodes, bindings, proxies, and accesses
-// are filtered by ListProxyAccessesByUserNode.
+// are filtered by ListProxyCredentialsByUserNode.
 func ConnectionInfoForUser(ctx context.Context, store *db.DB, userName string) (ConnectionInfo, error) {
 	user, err := store.GetProxyUser(ctx, userName)
 	if err != nil {
 		return ConnectionInfo{}, err
 	}
-	allAccesses, err := store.ListProxyAccessesByUser(ctx, userName)
+	resolved, err := pathresolve.ForUser(ctx, store, user.Name)
 	if err != nil {
 		return ConnectionInfo{}, err
 	}
-
 	info := ConnectionInfo{User: user.Name, Nodes: make([]NodeInfo, 0)}
-	seenNodes := make(map[string]struct{})
-	for _, access := range allAccesses {
-		if _, seen := seenNodes[access.NodeName]; seen {
-			continue
+	nodeIndexes := make(map[string]int)
+	for _, path := range resolved.Selectable {
+		proxyInfo := NodeInfoProxy{
+			Name: path.Name, ProxyName: path.Proxy.Name, HostTag: path.Host.Tag,
+			Type: path.Proxy.Protocol, Server: path.Host.Host, ServerPort: path.Proxy.ListenPort,
 		}
-		seenNodes[access.NodeName] = struct{}{}
-
-		activeAccesses, err := store.ListProxyAccessesByUserNode(ctx, userName, access.NodeName)
-		if err != nil {
-			return ConnectionInfo{}, err
+		if path.Dialer != nil {
+			proxyInfo.DialerProxy = path.Dialer.Name
 		}
-		if len(activeAccesses) == 0 {
-			continue
-		}
-		for _, activeAccess := range activeAccesses {
-			if activeAccess.Protocol != db.ProtocolVLESSReality {
-				return ConnectionInfo{}, fmt.Errorf(
-					"connection info renderer only supports %s, got %s on %s/%s",
-					db.ProtocolVLESSReality,
-					activeAccess.Protocol,
-					activeAccess.NodeName,
-					activeAccess.ProxyName,
-				)
+		switch path.Proxy.Protocol {
+		case db.ProtocolVLESSReality:
+			settings, credential, err := parseVLESSReality(path.Credential)
+			if err != nil {
+				return ConnectionInfo{}, err
 			}
+			proxyInfo.UUID, proxyInfo.Flow = credential.UUID, credential.Flow
+			proxyInfo.ServerName, proxyInfo.PublicKey, proxyInfo.ShortID = settings.ServerName, settings.RealityPublicKey, settings.ShortID
+		case db.ProtocolShadowsocks2022:
+			settings, credential, err := parseShadowsocks2022(path.Credential)
+			if err != nil {
+				return ConnectionInfo{}, err
+			}
+			proxyInfo.Cipher = settings.Method
+			proxyInfo.Password = settings.ServerPassword + ":" + credential.Password
+		default:
+			continue
 		}
-
-		nodeInfo, err := nodeInfoFromAccesses(ctx, store, userName, access.NodeName, activeAccesses)
-		if err != nil {
-			return ConnectionInfo{}, err
+		index, ok := nodeIndexes[path.Proxy.NodeName]
+		if !ok {
+			index = len(info.Nodes)
+			nodeIndexes[path.Proxy.NodeName] = index
+			info.Nodes = append(info.Nodes, NodeInfo{User: user.Name, Node: path.Proxy.NodeName})
 		}
-		info.Nodes = append(info.Nodes, nodeInfo)
+		info.Nodes[index].Proxies = append(info.Nodes[index].Proxies, proxyInfo)
 	}
 	allProfiles := make([]NodeInfoProxy, 0)
 	for _, node := range info.Nodes {
@@ -545,42 +593,92 @@ func RenderNodeInfo(ctx context.Context, store *db.DB, userName, nodeName string
 	return json.MarshalIndent(info, "", "  ")
 }
 
-// RenderMihomoProxyProvider renders all currently active VLESS-Reality
-// accesses for a user as a Mihomo proxy-provider document. It intentionally
+// RenderMihomoProxyProvider renders all currently active Paths for a user as a
+// Mihomo proxy-provider document. It intentionally
 // emits only the top-level proxies field, so callers can serve it directly to
 // a Mihomo/Clash proxy-provider.
 func RenderMihomoProxyProvider(ctx context.Context, store *db.DB, userName string) ([]byte, error) {
-	info, err := ConnectionInfoForUser(ctx, store, userName)
+	resolved, err := pathresolve.ForUser(ctx, store, userName)
 	if err != nil {
 		return nil, err
 	}
 
-	provider := mihomoProxyProvider{Proxies: make([]mihomoVLESSProxy, 0)}
-	for _, node := range info.Nodes {
-		for _, proxy := range node.Proxies {
+	provider := mihomoProxyProvider{Proxies: make([]any, 0, len(resolved.Ordered))}
+	for _, path := range resolved.Ordered {
+		switch path.Proxy.Protocol {
+		case db.ProtocolVLESSReality:
+			settings, credential, err := parseVLESSReality(path.Credential)
+			if err != nil {
+				return nil, fmt.Errorf("render path %q: %w", path.Name, err)
+			}
+			dialerName := ""
+			if path.Dialer != nil {
+				dialerName = path.Dialer.Name
+			}
 			provider.Proxies = append(provider.Proxies, mihomoVLESSProxy{
-				Name:              proxy.Name,
+				Name:              path.Name,
 				Type:              "vless",
-				Server:            proxy.Server,
-				Port:              proxy.ServerPort,
-				UUID:              proxy.UUID,
+				Server:            path.Host.Host,
+				Port:              path.Proxy.ListenPort,
+				UUID:              credential.UUID,
 				UDP:               true,
-				Flow:              proxy.Flow,
+				Flow:              credential.Flow,
 				Network:           "tcp",
 				TLS:               true,
-				ServerName:        proxy.ServerName,
+				ServerName:        settings.ServerName,
 				ClientFingerprint: "chrome",
 				PacketEncoding:    "xudp",
 				RealityOpts: mihomoRealityOptions{
-					PublicKey: proxy.PublicKey,
-					ShortID:   proxy.ShortID,
+					PublicKey: settings.RealityPublicKey,
+					ShortID:   settings.ShortID,
 				},
-				Encryption: "",
+				Encryption:  "",
+				DialerProxy: dialerName,
 			})
+		case db.ProtocolShadowsocks2022:
+			settings, credential, err := parseShadowsocks2022(path.Credential)
+			if err != nil {
+				return nil, fmt.Errorf("render path %q: %w", path.Name, err)
+			}
+			dialerName := ""
+			if path.Dialer != nil {
+				dialerName = path.Dialer.Name
+			}
+			provider.Proxies = append(provider.Proxies, mihomoShadowsocksProxy{
+				Name: path.Name, Type: "ss", Server: path.Host.Host, Port: path.Proxy.ListenPort,
+				Cipher: settings.Method, Password: settings.ServerPassword + ":" + credential.Password,
+				UDP: path.Proxy.Transport != db.TransportTCP, DialerProxy: dialerName,
+			})
+		default:
+			return nil, fmt.Errorf("Mihomo path renderer does not support protocol %s on %s", path.Proxy.Protocol, path.Name)
 		}
 	}
 
 	return yaml.Marshal(provider)
+}
+
+func parseShadowsocks2022(access db.ProxyCredential) (db.Shadowsocks2022Settings, db.Shadowsocks2022Credential, error) {
+	var settings db.Shadowsocks2022Settings
+	if err := json.Unmarshal([]byte(access.SettingsJSON), &settings); err != nil {
+		return settings, db.Shadowsocks2022Credential{}, fmt.Errorf("parse settings for %s: %w", access.ProxyName, err)
+	}
+	var credential db.Shadowsocks2022Credential
+	if err := json.Unmarshal([]byte(access.CredentialJSON), &credential); err != nil {
+		return settings, credential, fmt.Errorf("parse credential for %s: %w", access.ProxyName, err)
+	}
+	if settings.Method == "" || settings.ServerPassword == "" || credential.Password == "" {
+		return settings, credential, fmt.Errorf("incomplete Shadowsocks 2022 settings or credential for %s", access.ProxyName)
+	}
+	return settings, credential, nil
+}
+
+func singBoxNetwork(transport string) string {
+	switch transport {
+	case db.TransportTCP, db.TransportUDP:
+		return transport
+	default:
+		return ""
+	}
 }
 
 // RenderMihomoProfile renders a complete Mihomo profile. BoxFleet owns the
@@ -664,7 +762,7 @@ func RenderMihomoConfiguration(
 	return result, nil
 }
 
-func parseVLESSReality(access db.ProxyAccess) (vlessRealitySettings, db.VLESSRealityCredential, error) {
+func parseVLESSReality(access db.ProxyCredential) (vlessRealitySettings, db.VLESSRealityCredential, error) {
 	var settings vlessRealitySettings
 	if err := json.Unmarshal([]byte(access.SettingsJSON), &settings); err != nil {
 		return vlessRealitySettings{}, db.VLESSRealityCredential{}, fmt.Errorf("parse settings for %s: %w", access.ProxyName, err)
