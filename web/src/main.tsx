@@ -21,7 +21,9 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,
-      refetchOnWindowFocus: false,
+      // Returning to the tab refreshes whatever is stale; staleTime above keeps
+      // rapid tab switches from re-firing every query.
+      refetchOnWindowFocus: true,
       retry: false
     }
   }

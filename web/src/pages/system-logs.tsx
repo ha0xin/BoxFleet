@@ -8,7 +8,7 @@ import { Badge, Banner, Button, Collapsible, Combobox, Dialog, Input, Select, Ta
 
 import type { AdminNode, SystemLog, SystemLogLevelFilter, SystemLogSort, SystemLogsResponse } from "../types";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { AppPageHeader } from "@/components/app-page-header";
@@ -157,7 +157,8 @@ export function SystemLogsPage() {
       filters.direction
     ),
     queryFn: ({ signal }) => request<SystemLogsResponse>(path, { signal }),
-    placeholderData: (previous) => previous
+    placeholderData: (previous) => previous,
+    refetchInterval: refreshIntervals.live
   });
   // Node options are the full node list, not the names on this page, for the
   // same reason the server sends the full service list.

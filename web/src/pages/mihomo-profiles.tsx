@@ -23,7 +23,7 @@ import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Sur
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { MihomoCodeEditor } from "@/components/mihomo-code-editor";
 import { useAdminApi, type AdminRequest } from "@/admin/api";
-import { adminKeys } from "@/admin/query";
+import { adminKeys, refreshIntervals } from "@/admin/query";
 import { useSubscription } from "@/admin/use-subscription";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
@@ -87,11 +87,13 @@ export function MihomoProfilesPage() {
 
   const profilesQuery = useQuery({
     queryKey: adminKeys.mihomoProfiles,
-    queryFn: () => request<MihomoProfile[]>("/api/admin/mihomo/profiles")
+    queryFn: () => request<MihomoProfile[]>("/api/admin/mihomo/profiles"),
+    refetchInterval: refreshIntervals.slow
   });
   const templatesQuery = useQuery({
     queryKey: adminKeys.mihomoTemplates,
-    queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates")
+    queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates"),
+    refetchInterval: refreshIntervals.slow
   });
 
   const profiles = profilesQuery.data ?? [];

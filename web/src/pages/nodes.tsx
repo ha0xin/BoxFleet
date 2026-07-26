@@ -21,7 +21,7 @@ import type { AdminNode, AdminNodesResponse, AdminRelease, NodeUpdateCampaignDet
 import { formatRelativeTime, nodeHealth } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
@@ -194,7 +194,7 @@ export function NodesPage() {
     queryFn: ({ signal }) => request<AdminNodesResponse>(path, { signal }),
     placeholderData: (previous) => previous,
     refetchInterval: (query) =>
-      query.state.data?.nodes.some((node) => node.active_operation) ? 2000 : 15000
+      query.state.data?.nodes.some((node) => node.active_operation) ? 2000 : refreshIntervals.live
   });
   const releaseQuery = useQuery({
     queryKey: adminKeys.release,
@@ -205,7 +205,7 @@ export function NodesPage() {
     queryKey: adminKeys.nodeUpdateCampaign("current"),
     queryFn: async ({ signal }) =>
       (await request<NodeUpdateCampaignDetail | undefined>("/api/admin/node-update-campaigns/current", { signal })) ?? null,
-    refetchInterval: (query) => (query.state.data ? 2000 : 15000)
+    refetchInterval: (query) => (query.state.data ? 2000 : refreshIntervals.live)
   });
   const pageData = nodesQuery.data;
   const nodes = pageData?.nodes ?? [];
