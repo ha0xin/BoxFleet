@@ -26,7 +26,17 @@ import { useUrlFilters } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
-import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import {
+  AdminPagination,
+  SortHead,
+  TableCard,
+  TableColgroup,
+  TableEmpty,
+  TableError,
+  TableLoading,
+  tableMinWidth
+} from "@/components/admin-table";
+import type { TableColumnWidth } from "@/components/admin-table";
 import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
 import { NodeUpdateDialog, phaseLabel, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
@@ -54,6 +64,25 @@ const defaultFilters: NodeFilterValues = { search: "", status: "all", sort: "nam
 // Module scope on purpose: `useUrlFilters` reads these every render, and inlining
 // them would re-parse the URL each time and break `filters`' referential stability.
 const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage: 10 };
+
+/**
+ * Column widths, in table order. The px values are each column's measured
+ * max-content need — including the widest state, so an "0.4.1 → 0.5.0" upgrade
+ * arrow still fits without truncating a version number. Node, public host and
+ * update label are the only columns whose content has no ceiling, so they take
+ * the leftover width and truncate.
+ */
+const nodeColumns: TableColumnWidth[] = [
+  { min: 104 }, // Node
+  144, // Status — "Needs attention" is the widest badge and must not truncate
+  { min: 104 }, // Public host
+  112, // Agent
+  112, // sing-box
+  92, // Config
+  108, // Last seen
+  { min: 104 }, // Update
+  52 // Actions
+];
 
 type UpdateDialogState =
   | { mode: "node"; node: AdminNode; components?: Array<"agent" | "sing_box"> }
@@ -87,6 +116,14 @@ function hasCapability(node: AdminNode, capability: string) {
   return node.capabilities?.includes(capability) ?? false;
 }
 
+// The public-host cell truncates, so the tooltip has to carry the same text the
+// cell renders — including the "+N more hosts" suffix.
+function publicHostLabel(node: AdminNode): string {
+  const host = node.public_host || node.api_base_url || "n/a";
+  const extra = node.hosts && node.hosts.length > 1 ? ` +${node.hosts.length - 1}` : "";
+  return `${host}${extra}`;
+}
+
 function nodeIsOffline(node: AdminNode) {
   const value = nodeTimestamp(node);
   if (!value) return true;
@@ -96,13 +133,15 @@ function nodeIsOffline(node: AdminNode) {
 function VersionTarget({ current, target }: { current?: string; target: string }) {
   const displayCurrent = current?.match(/v?\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?/i)?.[0] ?? current;
   if (!current || versionsEqual(current, target)) {
-    return <span className="whitespace-nowrap text-kumo-subtle" title={current}>{displayCurrent || "n/a"}</span>;
+    return <span className="block truncate text-kumo-subtle" title={current}>{displayCurrent || "n/a"}</span>;
   }
+  // `min-w-0` on both the row and its spans: the cell is a fixed-width column,
+  // so the arrow form has to be able to ellipsise rather than spill into Config.
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
-      <span className="text-kumo-subtle" title={current}>{displayCurrent}</span>
-      <ArrowRightIcon className="size-3.5 text-kumo-inactive" />
-      <span className="font-medium text-kumo-default">{target}</span>
+    <span className="flex min-w-0 items-center gap-1.5 text-sm" title={`${current} → ${target}`}>
+      <span className="min-w-0 truncate text-kumo-subtle">{displayCurrent}</span>
+      <ArrowRightIcon className="size-3.5 shrink-0 text-kumo-inactive" />
+      <span className="min-w-0 truncate font-medium text-kumo-default">{target}</span>
     </span>
   );
 }
@@ -112,13 +151,13 @@ function ConfigVersion({ node }: { node: AdminNode }) {
   const current = node.current_version || "n/a";
   const target = node.target_version || current;
   if (current === target) {
-    return <span className="whitespace-nowrap text-kumo-subtle">{current}</span>;
+    return <span className="block truncate text-kumo-subtle">{current}</span>;
   }
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
-      <span className="text-kumo-subtle">{current}</span>
-      <ArrowRightIcon className="size-3.5 text-kumo-inactive" />
-      <span className="font-medium text-kumo-default">{target}</span>
+    <span className="flex min-w-0 items-center gap-1.5 text-sm" title={`${current} → ${target}`}>
+      <span className="min-w-0 truncate text-kumo-subtle">{current}</span>
+      <ArrowRightIcon className="size-3.5 shrink-0 text-kumo-inactive" />
+      <span className="min-w-0 truncate font-medium text-kumo-default">{target}</span>
     </span>
   );
 }
@@ -224,7 +263,10 @@ export function NodesPage() {
   }, [lastPage, page, pageData, setPage]);
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    // `min-w-0`: this div is a grid item, and without it the table's min-width
+    // becomes the page's min-width and the whole page scrolls sideways instead
+    // of the table.
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="Nodes"
         description="Operate edge nodes, config versions, heartbeats, and proxy placement."
@@ -327,7 +369,8 @@ export function NodesPage() {
             </div>
 
             <TableCard>
-              <Table className="min-w-[1280px]">
+              <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
+                <TableColgroup widths={nodeColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
                     <SortHead label="Node" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
@@ -357,7 +400,7 @@ export function NodesPage() {
                       return (
                         <Table.Row key={node.id}>
                           <Table.Cell sticky="left">
-                            <div className="flex min-w-48 items-center gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
                               <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
                               <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
                             </div>
@@ -366,7 +409,10 @@ export function NodesPage() {
                             <StatusBadge tone={health.badgeTone}>{health.label}</StatusBadge>
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="whitespace-nowrap text-kumo-subtle">
+                            <span
+                              className="block truncate text-kumo-subtle"
+                              title={publicHostLabel(node)}
+                            >
                               {node.public_host || node.api_base_url || "n/a"}
                               {node.hosts && node.hosts.length > 1 ? (
                                 <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
@@ -383,13 +429,17 @@ export function NodesPage() {
                             <ConfigVersion node={node} />
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
+                            <span className="block truncate text-kumo-subtle" title={nodeTimestamp(node) || undefined}>
+                              {formatRelativeTime(nodeTimestamp(node))}
+                            </span>
                           </Table.Cell>
                           <Table.Cell>
                             {updateStatus.available ? (
                               <StatusBadge tone="info">Update available</StatusBadge>
                             ) : (
-                              <span className="whitespace-nowrap text-kumo-subtle">{updateStatus.label}</span>
+                              <span className="block truncate text-kumo-subtle" title={updateStatus.label}>
+                                {updateStatus.label}
+                              </span>
                             )}
                           </Table.Cell>
                           <Table.Cell className="text-right">

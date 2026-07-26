@@ -10,7 +10,17 @@ import type { AdminNode, SystemLog, SystemLogLevelFilter, SystemLogSort, SystemL
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
-import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import {
+  AdminPagination,
+  SortHead,
+  TableCard,
+  TableColgroup,
+  TableEmpty,
+  TableError,
+  TableLoading,
+  tableMinWidth
+} from "@/components/admin-table";
+import type { TableColumnWidth } from "@/components/admin-table";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
@@ -69,7 +79,22 @@ const levelItems = {
   debug: "Debug"
 } as const;
 
-const COLUMN_COUNT = 6;
+/**
+ * Column widths, in table order. Timestamps, level badges, node and service
+ * names all have a hard ceiling; the message is the only column that can use
+ * more room, so it is the single flexible one and every surplus pixel lands
+ * there instead of being smeared over the other five.
+ */
+const logColumns: TableColumnWidth[] = [
+  152, // Observed
+  152, // Node
+  140, // Service
+  112, // Level
+  { min: 228 }, // Message
+  152 // Ingested
+];
+
+const COLUMN_COUNT = logColumns.length;
 
 /** Journald levels are free text, so the badge buckets them the way the server does. */
 function normalizeLevel(level: string): Exclude<FilterValues["level"], "all"> {
@@ -206,7 +231,10 @@ export function SystemLogsPage() {
   const isRefreshing = logsQuery.isFetching && !logsQuery.isLoading;
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    // `min-w-0`: this div is a grid item, and without it the table's min-width
+    // becomes the page's min-width and the whole page scrolls sideways instead
+    // of the table.
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="System Logs"
         description="Inspect recent agent, sing-box, and service journal entries reported by nodes."
@@ -324,15 +352,20 @@ export function SystemLogsPage() {
             {note ? <Banner variant="secondary" title={note} /> : null}
 
             <TableCard>
-              <Table className={`min-w-[900px] table-fixed transition-opacity ${isRefreshing ? "opacity-60" : ""}`}>
+              <Table
+                layout="fixed"
+                style={{ minWidth: tableMinWidth(logColumns) }}
+                className={`transition-opacity ${isRefreshing ? "opacity-60" : ""}`}
+              >
+                <TableColgroup widths={logColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="Observed" column="observed_at" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" className="w-40" />
-                    <SortHead label="Node" column="node" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-40" />
-                    <SortHead label="Service" column="service" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-36" />
-                    <SortHead label="Level" column="level" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-28" />
-                    <SortHead label="Message" column="message" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-[35%]" />
-                    <SortHead label="Ingested" column="ingested_at" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-40" />
+                    <SortHead label="Observed" column="observed_at" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Node" column="node" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Service" column="service" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Level" column="level" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Message" column="message" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Ingested" column="ingested_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -346,23 +379,23 @@ export function SystemLogsPage() {
                       const rowKey = `${log.observed_at}|${log.ingested_at}|${log.node}|${log.service}|${log.message.slice(0, 24)}`;
                       return (
                         <Table.Row key={rowKey}>
-                          <Table.Cell sticky="left" className="w-40">
-                            <span className="whitespace-nowrap text-kumo-subtle" title={log.observed_at || undefined}>
+                          <Table.Cell sticky="left">
+                            <span className="block truncate text-kumo-subtle" title={log.observed_at || undefined}>
                               {formatTimestamp(log.observed_at)}
                             </span>
                           </Table.Cell>
-                          <Table.Cell className="w-40">
+                          <Table.Cell>
                             <span className="block truncate text-kumo-default" title={log.node || undefined}>
                               {log.node || "—"}
                             </span>
                           </Table.Cell>
-                          <Table.Cell className="w-36">
-                            <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-kumo-subtle">
+                          <Table.Cell>
+                            <span className="flex min-w-0 items-center gap-1.5 text-kumo-subtle">
                               <TerminalWindowIcon className="size-4 shrink-0" />
                               <span className="truncate">{log.service || "—"}</span>
                             </span>
                           </Table.Cell>
-                          <Table.Cell className="w-28">
+                          <Table.Cell>
                             <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
                           </Table.Cell>
                           <Table.Cell>
@@ -376,8 +409,8 @@ export function SystemLogsPage() {
                               {log.message || "—"}
                             </button>
                           </Table.Cell>
-                          <Table.Cell className="w-40">
-                            <span className="whitespace-nowrap text-kumo-subtle" title={log.ingested_at || undefined}>
+                          <Table.Cell>
+                            <span className="block truncate text-kumo-subtle" title={log.ingested_at || undefined}>
                               {formatTimestamp(log.ingested_at)}
                             </span>
                           </Table.Cell>

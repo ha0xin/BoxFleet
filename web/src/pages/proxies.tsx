@@ -24,7 +24,17 @@ import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge } from "@/components/status-badge";
-import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import {
+  AdminPagination,
+  SortHead,
+  TableCard,
+  TableColgroup,
+  TableEmpty,
+  TableError,
+  TableLoading,
+  tableMinWidth
+} from "@/components/admin-table";
+import type { TableColumnWidth } from "@/components/admin-table";
 import { ProxyFormDialog } from "./proxy-dialogs";
 import type { ProxyDialogState } from "./proxy-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
@@ -41,6 +51,24 @@ const filterSchema = z.object({
   sort: z.enum(["node_name", "name", "protocol", "listen_port", "enabled", "traffic_multiplier", "updated_at"]),
   direction: z.enum(["asc", "desc"])
 });
+
+/**
+ * Column widths, in table order. Everything with a bounded vocabulary — the
+ * status badge, the protocol and transport names, the multiplier, the relative
+ * timestamp, the kebab — is pinned to its measured max-content width. Only the
+ * three columns built from operator-chosen strings flex.
+ */
+const proxyColumns: TableColumnWidth[] = [
+  { min: 116 }, // Proxy
+  { min: 116 }, // Node
+  104, // Status
+  112, // Protocol
+  { min: 116 }, // Listen
+  104, // Transport
+  108, // Multiplier
+  108, // Updated
+  52 // Actions
+];
 
 type ProxyFilterValues = z.infer<typeof filterSchema>;
 type ProxyStatus = ProxyFilterValues["status"];
@@ -153,7 +181,10 @@ export function ProxiesPage() {
   }, [loadedTotal, page, perPage, setPage]);
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    // `min-w-0`: this div is a grid item, and without it the table's min-width
+    // becomes the page's min-width and the whole page scrolls sideways instead
+    // of the table.
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="Proxies"
         description="Review VLESS-Reality and Shadowsocks 2022 inbounds, ports, and node placement."
@@ -229,7 +260,8 @@ export function ProxiesPage() {
             </div>
 
             <TableCard>
-              <Table className="min-w-[1280px]">
+              <Table layout="fixed" style={{ minWidth: tableMinWidth(proxyColumns) }}>
+                <TableColgroup widths={proxyColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
                     <SortHead label="Proxy" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
@@ -256,13 +288,13 @@ export function ProxiesPage() {
                     proxies.map((proxy) => (
                       <Table.Row key={proxy.id}>
                         <Table.Cell sticky="left">
-                          <div className="flex min-w-48 items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <PathIcon className="size-4 shrink-0 text-kumo-subtle" />
                             <span className="truncate text-base font-medium text-kumo-default" title={proxy.name}>{proxy.name}</span>
                           </div>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{proxy.node_name}</span>
+                          <span className="block truncate text-kumo-subtle" title={proxy.node_name}>{proxy.node_name}</span>
                         </Table.Cell>
                         <Table.Cell>
                           <StatusBadge tone={proxy.deleted_at ? "error" : proxy.enabled ? "success" : "neutral"}>
@@ -270,19 +302,21 @@ export function ProxiesPage() {
                           </StatusBadge>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{proxy.protocol}</span>
+                          <span className="block truncate text-kumo-subtle" title={proxy.protocol}>{proxy.protocol}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{endpoint(proxy)}</span>
+                          <span className="block truncate text-kumo-subtle" title={endpoint(proxy)}>{endpoint(proxy)}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{proxy.transport}</span>
+                          <span className="block truncate text-kumo-subtle" title={proxy.transport}>{proxy.transport}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{multiplier(proxy.traffic_multiplier)}</span>
+                          <span className="block truncate text-kumo-subtle">{multiplier(proxy.traffic_multiplier)}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(proxy.updated_at)}</span>
+                          <span className="block truncate text-kumo-subtle" title={proxy.updated_at || undefined}>
+                            {formatRelativeTime(proxy.updated_at)}
+                          </span>
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           <DropdownMenu>

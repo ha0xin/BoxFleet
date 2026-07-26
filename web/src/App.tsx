@@ -167,7 +167,13 @@ function AdminApp({
             {/* Keyed by pathname so route changes replay the entrance animation;
                 search-param (filter) changes deliberately do not. Grid makes the
                 page stretch to the scroll container like it did unwrapped. */}
-            <div key={location.pathname} className="grid min-h-full animate-page-enter">
+            {/* grid-cols-[minmax(0,1fr)] gives the route a zero minimum. Without
+                it the grid item defaults to min-width:auto, so a wide table's
+                min-width escapes its own overflow-x container and scrolls the
+                page sideways instead — which also unpins every sticky column,
+                because the element actually scrolling is then not the one
+                sticky positions resolve against. */}
+            <div key={location.pathname} className="grid min-h-full grid-cols-[minmax(0,1fr)] animate-page-enter">
               <Routes>
                 <Route path="/" element={<OverviewRoute authVersion={authVersion} />} />
                 <Route path="/nodes" element={<NodesPage />} />
