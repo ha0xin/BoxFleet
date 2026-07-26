@@ -1,6 +1,6 @@
 # ADR 0001 — Network event telemetry source
 
-- Status: accepted
+- Status: accepted; amended 2026-07-26 (see "Amendment")
 - Date: 2026-07-26
 - Applies to: `internal/server/db/log_events.go`, `internal/v2raystats`,
   `internal/agent`, `internal/server/render`
@@ -95,6 +95,8 @@ Node memory pressure is a hard constraint (see AGENTS.md). Turning on
 - A **stop-the-world `runtime.ReadMemStats()` on every `/connections` call**
   (`manager.go:150-151`). The WebSocket path re-snapshots on a ticker whose
   default interval is 1000 ms, so that is a STW pause per second per node.
+  This cost is specific to the Clash *HTTP* path; see the Amendment — it does
+  not apply to the 1.14 push-based gRPC stream.
 - Up to 1000 retained `metadataCopy := *metadata` values (`manager.go:76`), each
   a full `adapter.InboundContext` including a `DNSResponse *dns.Msg` pointer —
   DNS allocations pinned long after the connection dies.
@@ -114,27 +116,17 @@ ConnectionEvents)`, and its `Connection` message carries **`string user = 10`**
 `metadata.Metadata.User` in `buildConnectionProto`
 (`daemon/started_service.go:1016`). The stream emits NEW / UPDATE / CLOSED
 events with per-connection deltas *and* totals, and it replays closed
-connections on subscribe (`buildInitialConnectionState`), so it does not have
-the `Snapshot()` loss problem.
+connections on subscribe (`buildInitialConnectionState`), so it avoids the
+`Snapshot()` live-only blind spot. It has smaller loss modes of its own — see
+the Amendment; the resulting per-host byte view is a best-effort estimate, not
+a ledger.
 
-Two preconditions must both hold before this is actionable, and only one of them
-is "1.14 goes stable":
+**Trigger, restated after the amendment below:** the `v1.14.0` **stable** tag is
+published *and* a build of it at BoxFleet's `SING_BOX_TAGS` passes the four
+off-fleet checks listed in the Amendment. Both conditions — "the beta looks
+quiet" is not one of them.
 
-1. **1.14.0 stable ships** and `SING_BOX_REVISION` is bumped past it.
-2. **The service is reachable from a headless node.** In v1.14.0-alpha.24 the
-   `daemon` gRPC service is served only by `experimental/libbox`'s command
-   server (unix socket or `127.0.0.1:<port>`), which is built for the mobile and
-   desktop GUI clients. Nothing in `cmd/sing-box` serves it, so `sing-box run`
-   on a BoxFleet node exposes no such endpoint today. Re-check this before
-   planning the migration.
-
-Note also that connection tracking itself lives in the Clash API server
-(`experimental/clashapi/server.go:253` is the only `NewTCPTracker` call site),
-so the gRPC path still requires `with_clash_api` **and** a configured
-`experimental.clash_api` block — the memory costs above do not disappear, they
-only become better justified once the data is attributable.
-
-When both preconditions hold, the migration is a producer swap into the existing
+When the trigger fires, the migration is a producer swap into the existing
 `model.LogEventInput` shape: delete `parseSingBoxLogEvent` and its three regexes
 and the `connectionSources` correlation map, and leave every aggregation, index,
 retention rule and UI intact. It also fixes the ingest drop described below,
@@ -161,6 +153,103 @@ log line.
   `invalid_connection` and `outbound_connect`, but neither carries an
   `auth_name`, so `RecordLogEvents` drops both. The admin action filter's other
   values are aspirational, and grouping a series by action returns one bucket.
-- **Bytes can never be attributed to a destination host.** `traffic_usage_deltas`
-  has no host column and `log_events` has no byte columns. The service audit view
-  is a connections-per-service view and must never be labelled traffic or bytes.
+- **Bytes cannot be attributed to a destination host on the current sources.**
+  `traffic_usage_deltas` has no host column and `log_events` has no byte columns.
+  The service audit view is a connections-per-service view and must never be
+  labelled traffic or bytes. This is a property of the two sources in use, not a
+  permanent law — the Amendment records what changes under 1.14, and what does
+  not.
+
+## Amendment (2026-07-26)
+
+Re-investigated against `v1.14.0-beta.2` fetched from upstream, after the
+original was written against a `refs/sing-box` checkout 28 prereleases stale.
+**The decision is unchanged. Three statements above were wrong.**
+
+### Corrections
+
+1. **Precondition "the service is unreachable from a headless node" is resolved
+   in 1.14.** It was true for v1.13.x and v1.14.0-alpha.24, where the only
+   `RegisterStartedServiceServer` call site is
+   `experimental/libbox/command_server.go:156`, a gomobile binding `cmd/sing-box`
+   never imports. 1.14 adds `service/api` — a normal config-declarable service
+   (`option.APIServiceOptions`) that attaches to the running instance via
+   `daemon.NewAttachedService` and serves the same gRPC over a listen address.
+   It is registered unconditionally in `include/registry.go:146` (no build tag,
+   no `_stub.go`). Adopting it is a **renderer change only**: no systemd change,
+   no supervision change, no rebuild.
+2. **`experimental.clash_api` is *not* required.** The tracker moved from
+   `experimental/clashapi/trafficontrol` to `common/trafficcontrol`, and
+   `box.go:245` creates the manager under `needClashAPI || needAPIService`. The
+   api service alone enables connection tracking.
+3. **The per-poll stop-the-world `runtime.ReadMemStats` does not apply** to the
+   push-based gRPC path; it is absent from `common/trafficcontrol/manager.go`.
+   The *retention* cost stands: a 1000-entry closed-connection ring plus roughly
+   1 KB per live connection.
+
+### New risk the original missed
+
+`service.api` is a **full control plane on the same endpoint as the telemetry
+stream** — `StopService`, `ReloadService`, `CloseAllConnections`,
+`SelectOutbound`, `TriggerDebugCrash` — and `authenticate()` begins with
+`if secret == "" { return nil }`, so **an empty secret disables auth entirely**.
+Any adoption is loopback-bind plus a mandatory strong per-node secret, generated
+and stored server-side like node tokens.
+
+### What the switch would and would not buy
+
+Verified: `Connection` carries `user` (10), `destination` (7), `domain` (8),
+`createdAt`/`closedAt` (12/13) and `uplinkTotal`/`downlinkTotal` (16/17) on one
+message, all populated from a single `TrackerMetadata` in `buildConnectionProto`.
+Bytes-per-(user, host) becomes expressible, and connection *duration* — of which
+there is zero data today, since the scraper never observes a close — becomes
+available.
+
+Three structural loss modes keep it an estimate rather than a ledger:
+`observable.Subscriber.Emit` drops silently on a full 256-slot buffer with no
+error and no counter; the closed-connection ring evicts at 1000; and connection
+UUIDs and in-flight totals reset when sing-box restarts. **Per-user billing must
+stay on the V2Ray counters.**
+
+Two gotchas for whoever implements it:
+
+- **`domain` would be empty on BoxFleet's rendered config.** `buildConnectionProto`
+  has no fallback to `Destination.Fqdn` and BoxFleet renders no sniff action, so
+  the host arrives in `destination` (field 7), not `domain` (field 8).
+- **Fields 14/15 (`uplink`/`downlink`) are never populated server-side.** Build
+  nothing on them.
+
+### Release status
+
+Latest stable is **v1.13.14** (2026-06-25). Latest tag is **v1.14.0-beta.2**
+(2026-07-25); the beta line is days old on top of large features landed in
+alpha.48-50. Config-compat risk for BoxFleet is genuinely low — 1.14's breaking
+surface is DNS, ACME and rule-sets, and BoxFleet emits no `dns` block — but the
+payoff is unreachable by pinning alone: it also needs a renderer `services`
+block, per-node secrets, a node-side aggregator, an ingest path and schema work.
+Carrying beta risk across remote edge nodes buys nothing until that lands.
+
+### Off-fleet checks required before the pin moves past 1.13
+
+Build the candidate at BoxFleet's `SING_BOX_TAGS` on a throwaway host and assert:
+
+1. `with_v2ray_api` and `with_clash_api` still appear in `sing-box version` —
+   `go build -tags` silently ignores unknown tags, so a rename is a silent
+   feature loss (CI already greps for this; replicate it against the candidate).
+2. `sing-box check -c` passes against the renderer's golden configs.
+3. Real traffic replayed through
+   `go test ./internal/server/db -run TestParseSingBoxLogEventGoldenFixtures`.
+   This is the highest-probability breakage and the one no gate catches — the
+   agent's health check asserts systemd `ActiveState` only, so a sing-box that
+   starts cleanly but changed its log wording sends the audit view silently to
+   zero. A golden diff here is a real regression: investigate, do not regenerate.
+4. `user>>>NAME>>>traffic>>>{uplink,downlink}` still increments.
+
+### The swap seam
+
+`model.LogEventInput` (`internal/model/node_payloads.go`) is already the
+producer-agnostic ingest contract; `parseSingBoxLogEvent` is merely one producer
+feeding it. A gRPC collector is a *second* producer emitting the same struct.
+Aggregation, indexes, retention and the entire UI are source-agnostic and survive
+a swap intact. No further abstraction layer is needed or should be built
+speculatively.
