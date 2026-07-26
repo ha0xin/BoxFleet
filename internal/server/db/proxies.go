@@ -122,32 +122,34 @@ func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy,
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := db.validateProxyListener(ctx, node.Name, proxy, ""); err != nil {
-		return Proxy{}, err
-	}
-	if _, err := db.q.GetProxyIDByNameOrAlias(ctx, proxy.Name); err == nil {
-		return Proxy{}, fmt.Errorf("proxy name %q is already in use", proxy.Name)
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return Proxy{}, err
-	}
 	proxyID, err := id.New("prx")
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := db.q.CreateProxy(ctx, store.CreateProxyParams{
-		ID:                proxyID,
-		NodeID:            node.ID,
-		Name:              proxy.Name,
-		Protocol:          proxy.Protocol,
-		Listen:            proxy.Listen,
-		ListenPort:        int64(proxy.ListenPort),
-		Transport:         proxy.Transport,
-		Enabled:           boolToInt64(proxy.Enabled),
-		TrafficMultiplier: proxy.TrafficMultiplier,
-		SettingsJson:      proxy.SettingsJSON,
-		InboundRulesJson:  proxy.InboundRulesJSON,
-		OutboundRulesJson: proxy.OutboundRulesJSON,
-		RouteRulesJson:    proxy.RouteRulesJSON,
+	if err := db.withTx(ctx, func(qtx *store.Queries) error {
+		if err := validateProxyListenerTx(ctx, qtx, node.Name, proxy, ""); err != nil {
+			return err
+		}
+		if _, err := qtx.GetProxyIDByNameOrAlias(ctx, proxy.Name); err == nil {
+			return fmt.Errorf("proxy name %q is already in use", proxy.Name)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return qtx.CreateProxy(ctx, store.CreateProxyParams{
+			ID:                proxyID,
+			NodeID:            node.ID,
+			Name:              proxy.Name,
+			Protocol:          proxy.Protocol,
+			Listen:            proxy.Listen,
+			ListenPort:        int64(proxy.ListenPort),
+			Transport:         proxy.Transport,
+			Enabled:           boolToInt64(proxy.Enabled),
+			TrafficMultiplier: proxy.TrafficMultiplier,
+			SettingsJson:      proxy.SettingsJSON,
+			InboundRulesJson:  proxy.InboundRulesJSON,
+			OutboundRulesJson: proxy.OutboundRulesJSON,
+			RouteRulesJson:    proxy.RouteRulesJSON,
+		})
 	}); err != nil {
 		return Proxy{}, err
 	}
@@ -230,9 +232,6 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := db.validateProxyListener(ctx, node.Name, proxy, existing.ID); err != nil {
-		return Proxy{}, err
-	}
 	err = db.withTx(ctx, func(qtx *store.Queries) error {
 		current, err := qtx.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
 			NodeName: node.Name,
@@ -246,6 +245,9 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 		}
 		if current.ID != existing.ID {
 			return fmt.Errorf("proxy %q changed while it was being updated", currentName)
+		}
+		if err := validateProxyListenerTx(ctx, qtx, node.Name, proxy, existing.ID); err != nil {
+			return err
 		}
 		if err := renameProxyTx(ctx, qtx, existing.ID, existing.Name, proxy.Name); err != nil {
 			return err
@@ -355,11 +357,22 @@ func (db *DB) RenameProxy(ctx context.Context, nodeName, oldName, newName string
 	return proxy, nil
 }
 
-func (db *DB) validateProxyListener(ctx context.Context, nodeName string, next Proxy, ignoreID string) error {
-	proxies, err := db.ListProxies(ctx, nodeName)
+// validateProxyListenerTx rejects a proxy that would share a listener with
+// another live proxy on the same node. It reads through the caller's
+// transaction so the check and the write that depends on it cannot interleave.
+func validateProxyListenerTx(ctx context.Context, qtx *store.Queries, nodeName string, next Proxy, ignoreID string) error {
+	rows, err := qtx.ListProxiesByNodeName(ctx, nodeName)
 	if err != nil {
 		return err
 	}
+	proxies := make([]Proxy, 0, len(rows))
+	for _, row := range rows {
+		proxies = append(proxies, proxyFromDetail(row))
+	}
+	return checkProxyListenerConflicts(proxies, next, ignoreID)
+}
+
+func checkProxyListenerConflicts(proxies []Proxy, next Proxy, ignoreID string) error {
 	for _, existing := range proxies {
 		if existing.ID == ignoreID {
 			continue
@@ -627,18 +640,36 @@ func (db *DB) SoftDeleteProxy(ctx context.Context, nodeName, name string) (Proxy
 }
 
 func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, error) {
-	proxy, err := db.getProxyIncludingDeleted(ctx, nodeName, name)
+	restoredName := ""
+	err := db.withTx(ctx, func(qtx *store.Queries) error {
+		row, err := qtx.GetProxyByNodeAndNameIncludingDeleted(ctx, store.GetProxyByNodeAndNameIncludingDeletedParams{
+			NodeName: normalizeName(nodeName),
+			Name:     normalizeName(name),
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("proxy %q on node %q not found", name, nodeName)
+			}
+			return err
+		}
+		proxy := proxyFromDetail(row)
+		if err := validateProxyListenerTx(ctx, qtx, proxy.NodeName, proxy, proxy.ID); err != nil {
+			return err
+		}
+		affected, err := qtx.RestoreProxy(ctx, proxy.ID)
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "deleted proxy", name+"@"+nodeName); err != nil {
+			return err
+		}
+		restoredName = proxy.Name
+		return nil
+	})
 	if err != nil {
 		return Proxy{}, err
 	}
-	affected, err := db.q.RestoreProxy(ctx, proxy.ID)
-	if err != nil {
-		return Proxy{}, err
-	}
-	if err := requireAffected(affected, "deleted proxy", name+"@"+nodeName); err != nil {
-		return Proxy{}, err
-	}
-	return db.GetProxy(ctx, nodeName, proxy.Name)
+	return db.GetProxy(ctx, nodeName, restoredName)
 }
 
 func (db *DB) getProxyIncludingDeleted(ctx context.Context, nodeName, name string) (Proxy, error) {

@@ -371,18 +371,20 @@ UPDATE proxy_accesses
 SET
   enabled = 1,
   deleted_at = NULL,
+  credential_json = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE proxy_user_id = ?1
-  AND proxy_id = ?2
+WHERE proxy_user_id = ?2
+  AND proxy_id = ?3
 `
 
 type RestoreProxyAccessParams struct {
-	ProxyUserID string `json:"proxy_user_id"`
-	ProxyID     string `json:"proxy_id"`
+	CredentialJson string `json:"credential_json"`
+	ProxyUserID    string `json:"proxy_user_id"`
+	ProxyID        string `json:"proxy_id"`
 }
 
 func (q *Queries) RestoreProxyAccess(ctx context.Context, arg RestoreProxyAccessParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, restoreProxyAccess, arg.ProxyUserID, arg.ProxyID)
+	result, err := q.db.ExecContext(ctx, restoreProxyAccess, arg.CredentialJson, arg.ProxyUserID, arg.ProxyID)
 	if err != nil {
 		return 0, err
 	}

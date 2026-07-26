@@ -22,6 +22,7 @@
     "@tanstack/react-table": "^8.21.3",
     "date-fns": "^4.4.0",
     "diff": "^9.0.0",
+    "echarts": "^6.1.0",
     "meta-json-schema": "^1.19.28",
     "monaco-editor": "^0.56.0",
     "monaco-yaml": "^5.5.1",
@@ -31,7 +32,6 @@
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.77.0",
     "react-router-dom": "^7.17.0",
-    "recharts": "^3.8.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

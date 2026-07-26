@@ -1,22 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Icon } from "@phosphor-icons/react";
-import {
-  ArrowClockwiseIcon,
-  CheckCircleIcon,
-  FunnelIcon,
-  InfoIcon,
-  TerminalWindowIcon,
-  WarningCircleIcon,
-  XCircleIcon
-} from "@phosphor-icons/react";
-import { Button, Collapsible, Combobox, Input, Select, Table } from "@cloudflare/kumo";
+import { ArrowClockwiseIcon, FunnelIcon, TerminalWindowIcon } from "@phosphor-icons/react";
+import { Badge, Banner, Button, Collapsible, Combobox, Dialog, Input, Select, Table } from "@cloudflare/kumo";
 
 import type { SystemLog, SystemLogsResponse } from "../types";
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString } from "@/admin/query";
-import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
-import { PageHeader, PageTopBar } from "./operations-common";
+import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import { AppPageHeader } from "@/components/app-page-header";
+import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
 type LevelFilter = "all" | "error" | "warn" | "info" | "debug";
 type LogSort = "observed_at" | "node" | "service" | "level" | "message" | "ingested_at";
@@ -32,28 +24,29 @@ function normalizeLevel(level: string): Exclude<LevelFilter, "all"> {
   return "info";
 }
 
-function levelMeta(level: string): { label: string; icon: Icon; className: string } {
+function levelBadge(level: string): { label: string; tone: StatusTone } {
   switch (normalizeLevel(level)) {
     case "error":
-      return { label: level || "error", icon: XCircleIcon, className: "text-kumo-danger" };
+      return { label: "Error", tone: "error" };
     case "warn":
-      return { label: level || "warn", icon: WarningCircleIcon, className: "text-kumo-warning" };
+      return { label: "Warning", tone: "warning" };
     case "debug":
-      return { label: level || "debug", icon: InfoIcon, className: "text-kumo-subtle" };
+      return { label: "Debug", tone: "neutral" };
     default:
-      return { label: level || "info", icon: CheckCircleIcon, className: "text-kumo-info" };
+      return { label: "Info", tone: "info" };
   }
 }
 
 function formatTimestamp(value: string): string {
-  if (!value) return "n/a";
+  if (!value) return "—";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    second: "2-digit"
   }).format(date);
 }
 
@@ -99,6 +92,7 @@ export function SystemLogsPage() {
   const [search, setSearch] = useState("");
   const [sort, setSortValue] = useState<LogSort>("observed_at");
   const [direction, setDirection] = useState<SortDirection>("desc");
+  const [detail, setDetail] = useState<SystemLog | null>(null);
 
   const path = "/api/admin/system-logs" + queryString({ limit: fetchLimit });
   const logsQuery = useQuery({
@@ -113,12 +107,7 @@ export function SystemLogsPage() {
   const serviceOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.service).filter(Boolean))).sort(), [logs]);
   const nodeChoices = useMemo(() => ["all", ...nodeOptions], [nodeOptions]);
   const serviceChoices = useMemo(() => ["all", ...serviceOptions], [serviceOptions]);
-  const activeFilterCount = [
-    level !== "all",
-    node !== "all",
-    service !== "all",
-    fetchLimit !== 100
-  ].filter(Boolean).length;
+  const activeFilterCount = [level !== "all", node !== "all", service !== "all"].filter(Boolean).length;
 
   function setSort(column: LogSort) {
     setPage(1);
@@ -184,38 +173,33 @@ export function SystemLogsPage() {
   const offset = (page - 1) * perPage;
   const visibleRows = filtered.slice(offset, offset + perPage);
   const total = filtered.length;
-  const error = logsQuery.error instanceof Error ? logsQuery.error.message : "Request failed.";
+  const isRefreshing = logsQuery.isFetching && !logsQuery.isLoading;
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="System Logs" />
+      <AppPageHeader
+        title="System Logs"
+        description="Inspect recent agent, sing-box, and service journal entries reported by nodes."
+        actions={
+          <Button
+            variant="secondary"
+            icon={ArrowClockwiseIcon}
+            disabled={logsQuery.isFetching}
+            onClick={() => void logsQuery.refetch()}
+          >
+            Refresh
+          </Button>
+        }
+      />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader
-          title="System Logs"
-          description="Inspect recent agent, sing-box, and service journal entries reported by nodes."
-          actions={
-            <Button
-              variant="secondary"
-              icon={ArrowClockwiseIcon}
-              disabled={logsQuery.isFetching}
-              onClick={() => void logsQuery.refetch()}
-            >
-              Refresh
-            </Button>
-          }
-        />
-
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
           <section className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-kumo-default">Recent logs</h2>
-                <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No logs"}
-                  {logs.length > 0 ? `, ${logs.length} fetched` : ""}
-                </p>
-              </div>
-              {note ? <p className="max-w-xl text-sm text-kumo-subtle">{note}</p> : null}
+            <div>
+              <h2 className="text-base font-semibold text-kumo-default">Recent logs</h2>
+              <p className="text-sm text-kumo-subtle">
+                {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No logs"}
+                {logs.length > 0 ? `, ${logs.length} fetched` : ""}
+              </p>
             </div>
 
             <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
@@ -240,7 +224,12 @@ export function SystemLogsPage() {
                   </Button>
                 </form>
                 <Collapsible.Trigger render={<Button type="button" variant="secondary" icon={FunnelIcon} />}>
-                  Filter{activeFilterCount > 0 ? ` ${activeFilterCount}` : ""}
+                  Filter
+                  {activeFilterCount > 0 ? (
+                    <Badge variant="secondary" className="ml-1.5">
+                      {activeFilterCount}
+                    </Badge>
+                  ) : null}
                 </Collapsible.Trigger>
               </div>
 
@@ -314,79 +303,140 @@ export function SystemLogsPage() {
                   <Button variant="secondary" size="sm" onClick={resetFilters}>
                     Reset
                   </Button>
-                  <Button variant="primary" size="sm" onClick={() => setFilterOpen(false)}>
+                  <Button variant="secondary" size="sm" onClick={() => setFilterOpen(false)}>
                     Done
                   </Button>
                 </div>
               </Collapsible.Panel>
             </Collapsible.Root>
 
-            <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
-                <Table className="min-w-[900px] table-fixed">
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <SortHead label="Observed" column="observed_at" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                      <SortHead label="Node" column="node" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 w-40 bg-kumo-base" />
-                      <SortHead label="Service" column="service" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                      <SortHead label="Level" column="level" sort={sort} direction={direction} setSort={setSort} className="w-20" />
-                      <SortHead label="Message" column="message" sort={sort} direction={direction} setSort={setSort} className="w-[35%]" />
-                      <SortHead label="Ingested" column="ingested_at" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {logsQuery.error ? (
-                      <TableEmpty colSpan={6}>{error}</TableEmpty>
-                    ) : logsQuery.isLoading ? (
-                      <TableLoading colSpan={6} />
-                    ) : visibleRows.length > 0 ? (
-                      visibleRows.map((log, index) => {
-                        const meta = levelMeta(log.level);
-                        const LevelIcon = meta.icon;
-                        const rowKey = `${log.observed_at}-${log.node}-${log.service}-${index}`;
-                        return (
-                          <Table.Row key={rowKey}>
-                            <Table.Cell className="w-36">
-                              <span className="whitespace-nowrap text-kumo-subtle">{formatTimestamp(log.observed_at)}</span>
-                            </Table.Cell>
-                            <Table.Cell className="sticky left-0 z-10 w-40 bg-kumo-base">
-                              <span className="block truncate text-kumo-default" title={log.node}>{log.node || "n/a"}</span>
-                            </Table.Cell>
-                            <Table.Cell className="w-36">
-                              <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-kumo-subtle">
-                                <TerminalWindowIcon className="size-4 shrink-0" />
-                                <span className="truncate">{log.service || "system"}</span>
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell className="w-20">
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${meta.className}`}>
-                                <LevelIcon className="size-4 shrink-0" />
-                                {meta.label}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className="block truncate text-kumo-default" title={log.message}>
-                                {log.message || "n/a"}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell className="w-36">
-                              <span className="whitespace-nowrap text-kumo-subtle">{formatTimestamp(log.ingested_at)}</span>
-                            </Table.Cell>
-                          </Table.Row>
-                        );
-                      })
-                    ) : (
-                      <TableEmpty colSpan={6}>No logs match this filter.</TableEmpty>
-                    )}
-                  </Table.Body>
-                </Table>
-              </div>
-            </div>
+            {note ? <Banner variant="secondary" title={note} /> : null}
+
+            <TableCard>
+              <Table className={`min-w-[900px] table-fixed transition-opacity ${isRefreshing ? "opacity-60" : ""}`}>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <SortHead label="Observed" column="observed_at" sort={sort} direction={direction} setSort={setSort} sticky="left" className="w-40" />
+                    <SortHead label="Node" column="node" sort={sort} direction={direction} setSort={setSort} className="w-40" />
+                    <SortHead label="Service" column="service" sort={sort} direction={direction} setSort={setSort} className="w-36" />
+                    <SortHead label="Level" column="level" sort={sort} direction={direction} setSort={setSort} className="w-28" />
+                    <SortHead label="Message" column="message" sort={sort} direction={direction} setSort={setSort} className="w-[35%]" />
+                    <SortHead label="Ingested" column="ingested_at" sort={sort} direction={direction} setSort={setSort} className="w-40" />
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {logsQuery.error ? (
+                    <TableError colSpan={6}>
+                      {logsQuery.error instanceof Error ? logsQuery.error.message : "Request failed."}
+                    </TableError>
+                  ) : logsQuery.isLoading ? (
+                    <TableLoading colSpan={6} />
+                  ) : visibleRows.length > 0 ? (
+                    visibleRows.map((log) => {
+                      const meta = levelBadge(log.level);
+                      const rowKey = `${log.observed_at}|${log.ingested_at}|${log.node}|${log.service}|${log.message.slice(0, 24)}`;
+                      return (
+                        <Table.Row key={rowKey}>
+                          <Table.Cell sticky="left" className="w-40">
+                            <span className="whitespace-nowrap text-kumo-subtle" title={log.observed_at || undefined}>
+                              {formatTimestamp(log.observed_at)}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell className="w-40">
+                            <span className="block truncate text-kumo-default" title={log.node || undefined}>
+                              {log.node || "—"}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell className="w-36">
+                            <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-kumo-subtle">
+                              <TerminalWindowIcon className="size-4 shrink-0" />
+                              <span className="truncate">{log.service || "—"}</span>
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell className="w-28">
+                            <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <button
+                              type="button"
+                              className="block w-full min-w-0 truncate text-left text-kumo-default hover:underline"
+                              title={log.message || undefined}
+                              aria-label={`View full log message from ${log.node || "unknown node"}`}
+                              onClick={() => setDetail(log)}
+                            >
+                              {log.message || "—"}
+                            </button>
+                          </Table.Cell>
+                          <Table.Cell className="w-40">
+                            <span className="whitespace-nowrap text-kumo-subtle" title={log.ingested_at || undefined}>
+                              {formatTimestamp(log.ingested_at)}
+                            </span>
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })
+                  ) : (
+                    <TableEmpty colSpan={6}>No logs match this filter.</TableEmpty>
+                  )}
+                </Table.Body>
+              </Table>
+            </TableCard>
 
             <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>
         </div>
       </main>
+      {detail ? <LogDetailDialog log={detail} onClose={() => setDetail(null)} /> : null}
     </div>
+  );
+}
+
+function LogDetailDialog({ log, onClose }: { log: SystemLog; onClose: () => void }) {
+  const meta = levelBadge(log.level);
+  return (
+    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+        <Dialog.Title className="text-xl font-semibold text-kumo-default">Log entry</Dialog.Title>
+        <Dialog.Description className="mb-4 text-kumo-subtle">
+          Full journal entry as reported by the node.
+        </Dialog.Description>
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-kumo-subtle">Node</span>
+            <span className="text-sm text-kumo-default">{log.node || "—"}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-kumo-subtle">Service</span>
+            <span className="text-sm text-kumo-default">{log.service || "—"}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-kumo-subtle">Level</span>
+            <span>
+              <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-kumo-subtle">Observed</span>
+            <span className="text-sm text-kumo-default" title={log.observed_at || undefined}>
+              {formatTimestamp(log.observed_at)}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium text-kumo-subtle">Ingested</span>
+            <span className="text-sm text-kumo-default" title={log.ingested_at || undefined}>
+              {formatTimestamp(log.ingested_at)}
+            </span>
+          </div>
+        </div>
+        <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-kumo-tint p-3 font-mono text-sm text-kumo-default">
+          {log.message || "—"}
+        </pre>
+        <div className="mt-2 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </Dialog>
+    </Dialog.Root>
   );
 }

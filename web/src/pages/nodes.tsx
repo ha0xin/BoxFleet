@@ -4,7 +4,6 @@ import {
   ArrowsClockwiseIcon,
   ArrowRightIcon,
   CheckCircleIcon,
-  DotsThreeIcon,
   DownloadSimpleIcon,
   FunnelIcon,
   HardDrivesIcon,
@@ -16,20 +15,17 @@ import {
 import { Banner, Button, DropdownMenu, Input, Table } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodesResponse, AdminRelease, NodeUpdateCampaignDetail } from "../types";
-import {
-  formatNodeVersion,
-  formatRelativeTime,
-  nodeHealth,
-  PageHeader,
-  PageTopBar,
-} from "./operations-common";
+import { formatRelativeTime, nodeHealth } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString } from "@/admin/query";
-import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
+import { AppPageHeader } from "@/components/app-page-header";
+import { RowActionsMenu } from "@/components/row-actions-menu";
+import { StatusBadge } from "@/components/status-badge";
+import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
-import { NodeUpdateDialog, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
+import { NodeUpdateDialog, phaseLabel, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
 
 type NodeFilter = "all" | "active" | "disabled" | "degraded" | "deleted";
 type NodeSort = "name" | "status" | "public_host" | "last_seen_at" | "sing_box_version";
@@ -58,7 +54,7 @@ function nodeIsOffline(node: AdminNode) {
 }
 
 function VersionTarget({ current, target }: { current?: string; target: string }) {
-	const displayCurrent = current?.match(/v?\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?/i)?.[0] ?? current;
+  const displayCurrent = current?.match(/v?\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?/i)?.[0] ?? current;
   if (!current || versionsEqual(current, target)) {
     return <span className="whitespace-nowrap text-kumo-subtle" title={current}>{displayCurrent || "n/a"}</span>;
   }
@@ -71,31 +67,54 @@ function VersionTarget({ current, target }: { current?: string; target: string }
   );
 }
 
-function nodeUpdateStatus(node: AdminNode, release?: AdminRelease) {
+// Current → target config version with the same arrow treatment as VersionTarget.
+function ConfigVersion({ node }: { node: AdminNode }) {
+  const current = node.current_version || "n/a";
+  const target = node.target_version || current;
+  if (current === target) {
+    return <span className="whitespace-nowrap text-kumo-subtle">{current}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
+      <span className="text-kumo-subtle">{current}</span>
+      <ArrowRightIcon className="size-3.5 text-kumo-inactive" />
+      <span className="font-medium text-kumo-default">{target}</span>
+    </span>
+  );
+}
+
+// Single source of truth for a node's update eligibility: the Update cell and
+// the kebab menu items both read this, so they can never disagree.
+function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
+  label: string;
+  available: boolean;
+  canUpdateAgent: boolean;
+  canUpdateSingBox: boolean;
+} {
+  const none = { available: false, canUpdateAgent: false, canUpdateSingBox: false };
   if (node.active_operation) {
     if (node.active_operation.status === "queued" && nodeIsOffline(node)) {
-      return { label: "Queued — waiting for node", className: "text-kumo-warning" };
+      return { ...none, label: "Queued — waiting for node" };
     }
-    return {
-      label: node.active_operation.phase.replaceAll("_", " "),
-      className: node.active_operation.status === "running" ? "text-kumo-info" : "text-kumo-warning"
-    };
+    return { ...none, label: phaseLabel(node.active_operation.phase) };
   }
-  if (!release?.updates_enabled) return { label: "Unavailable", className: "text-kumo-inactive" };
+  if (!release?.updates_enabled || node.deleted_at || node.has_active_token === false) {
+    return { ...none, label: "Unavailable" };
+  }
   if (!hasCapability(node, "operations.v1")) {
-    return { label: "Manual agent upgrade required", className: "text-kumo-warning" };
+    return { ...none, label: "Manual agent upgrade required" };
   }
   const agentOutdated = !versionsEqual(node.agent_version, release.agent_version);
   const singBoxOutdated = !versionsEqual(node.sing_box_version, release.sing_box_version);
   const canUpdateAgent = agentOutdated && hasCapability(node, "update.agent.v1");
   const canUpdateSingBox = singBoxOutdated && hasCapability(node, "update.sing_box.v1");
   if (canUpdateAgent || canUpdateSingBox) {
-    return { label: nodeIsOffline(node) ? "Available · offline" : "Available", className: "text-kumo-info" };
+    return { available: true, canUpdateAgent, canUpdateSingBox, label: "Update available" };
   }
   if (agentOutdated || singBoxOutdated) {
-    return { label: "Manual component upgrade required", className: "text-kumo-warning" };
+    return { ...none, label: "Manual component upgrade required" };
   }
-  return { label: "Up to date", className: "text-kumo-success" };
+  return { ...none, label: "Up to date" };
 }
 
 export function NodesPage() {
@@ -176,33 +195,33 @@ export function NodesPage() {
   const release = releaseQuery.data;
   const campaign = campaignQuery.data ?? undefined;
 
+  // Render-phase adjustment (react.dev "you might not need an effect"):
+  // clamp when the row count shrinks below the current page.
   const lastPage = Math.max(1, Math.ceil(total / perPage));
   if (page > lastPage) setPage(lastPage);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="Nodes" />
+      <AppPageHeader
+        title="Nodes"
+        description="Operate edge nodes, config versions, heartbeats, and proxy placement."
+        actions={
+          <Fragment>
+            <Button
+              variant="secondary"
+              icon={DownloadSimpleIcon}
+              disabled={!release?.updates_enabled}
+              onClick={() => setUpdateDialog({ mode: "all", campaign })}
+            >
+              Update all
+            </Button>
+            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "enroll" })}>
+              Enroll
+            </Button>
+          </Fragment>
+        }
+      />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader
-          title="Nodes"
-          description="Operate edge nodes, config versions, heartbeats, and proxy placement."
-          actions={
-            <Fragment>
-              <Button
-                variant="secondary"
-                icon={DownloadSimpleIcon}
-                disabled={!release?.updates_enabled}
-                onClick={() => setUpdateDialog({ mode: "all", campaign })}
-              >
-                Update all
-              </Button>
-              <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "enroll" })}>
-                Enroll
-              </Button>
-            </Fragment>
-          }
-        />
-
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
           {campaign ? (
             <Banner
@@ -216,14 +235,14 @@ export function NodesPage() {
               }
             />
           ) : release?.update_error ? (
-            <Banner variant="secondary" title="Managed updates unavailable" description={release.update_error} />
+            <Banner variant="alert" title="Managed updates unavailable" description={release.update_error} />
           ) : null}
           <section className="flex flex-col gap-3">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-kumo-default">Node inventory</h2>
                 <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No nodes"}
+                  {total > 0 ? `${total} ${total === 1 ? "node" : "nodes"}` : "No nodes"}
                 </p>
               </div>
             </div>
@@ -289,122 +308,99 @@ export function NodesPage() {
               </DropdownMenu>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
-                <Table className="min-w-[1180px]">
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 bg-kumo-base" />
-                      <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
-                      <Table.Head>Agent</Table.Head>
-                      <SortHead label="sing-box" column="sing_box_version" sort={sort} direction={direction} setSort={setSort} />
-                      <Table.Head>Config</Table.Head>
-                      <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} className="hidden xl:table-cell" />
-                      <Table.Head>Update</Table.Head>
-                      <Table.Head className="text-right">
-                        <span className="sr-only">Actions</span>
-                      </Table.Head>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {nodesQuery.error ? (
-                      <TableEmpty colSpan={9}>{error}</TableEmpty>
-                    ) : nodesQuery.isLoading ? (
-                      <TableLoading colSpan={9} />
-                    ) : nodes.length > 0 ? (
-                      nodes.map((node) => {
-                        const health = node.deleted_at
-                          ? { label: "Deleted", icon: ProhibitIcon, className: "text-kumo-subtle" }
-                          : nodeHealth(node);
-                        const StatusIcon = health.icon;
-                        const statusClassName = health.label === "Disabled" ? "text-kumo-subtle" : health.className;
-                        return (
-                          <Table.Row key={node.id}>
-                            <Table.Cell className="sticky left-0 z-10 bg-kumo-base">
-                              <div className="flex min-w-44 items-center gap-2">
-                                <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
-                                <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
-                              </div>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${statusClassName}`}>
-                                <StatusIcon className="size-4 shrink-0" />
-                                {health.label}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">
-                                {node.public_host || node.api_base_url || "n/a"}
-                                {node.hosts && node.hosts.length > 1 ? (
-                                  <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
-                                ) : null}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <VersionTarget current={node.agent_version} target={release?.agent_version ?? node.agent_version ?? "n/a"} />
-                            </Table.Cell>
-                            <Table.Cell>
-                              <VersionTarget current={node.sing_box_version} target={release?.sing_box_version ?? node.sing_box_version ?? "n/a"} />
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">{formatNodeVersion(node)}</span>
-                            </Table.Cell>
-                            <Table.Cell className="hidden xl:table-cell">
-                              <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${nodeUpdateStatus(node, release).className}`}>
-                                <span className="size-1.5 rounded-full bg-current" />
-                                {nodeUpdateStatus(node, release).label}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell className="text-right">
-                              <div className="inline-flex items-center gap-1">
-                                {node.active_operation ? (
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => setUpdateDialog({ mode: "node", node })}
-                                  >
-                                    View
-                                  </Button>
-                                ) : release?.updates_enabled &&
-                                  hasCapability(node, "operations.v1") &&
-                                  ((!versionsEqual(node.agent_version, release.agent_version) && hasCapability(node, "update.agent.v1")) ||
-                                    (!versionsEqual(node.sing_box_version, release.sing_box_version) && hasCapability(node, "update.sing_box.v1"))) &&
-                                  !node.deleted_at && node.has_active_token !== false ? (
-                                  <Button size="sm" onClick={() => setUpdateDialog({ mode: "node", node })}>
-                                    Update
-                                  </Button>
-                                ) : null}
-                                <DropdownMenu>
-                                <DropdownMenu.Trigger
-                                  render={
-                                    <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${node.name}`}>
-                                      <DotsThreeIcon className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <DropdownMenu.Content>
-                                  {node.deleted_at ? (
-                                    <DropdownMenu.Item icon={ArrowsClockwiseIcon} onClick={() => restore.mutate(node)}>
-                                      Restore
-                                    </DropdownMenu.Item>
-                                  ) : (
-                                    <>
+            <TableCard>
+              <Table className="min-w-[1280px]">
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <SortHead label="Node" column="name" sort={sort} direction={direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Public host" column="public_host" sort={sort} direction={direction} setSort={setSort} />
+                    <Table.Head>Agent</Table.Head>
+                    <SortHead label="sing-box" column="sing_box_version" sort={sort} direction={direction} setSort={setSort} />
+                    <Table.Head>Config</Table.Head>
+                    <SortHead label="Last seen" column="last_seen_at" sort={sort} direction={direction} setSort={setSort} />
+                    <Table.Head>Update</Table.Head>
+                    <Table.Head className="text-right">
+                      <span className="sr-only">Actions</span>
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {nodesQuery.error ? (
+                    <TableError colSpan={9}>{error}</TableError>
+                  ) : nodesQuery.isLoading ? (
+                    <TableLoading colSpan={9} />
+                  ) : nodes.length > 0 ? (
+                    nodes.map((node) => {
+                      const health = node.deleted_at
+                        ? { label: "Deleted", badgeTone: "error" as const }
+                        : nodeHealth(node);
+                      const updateStatus = nodeUpdateStatus(node, release);
+                      return (
+                        <Table.Row key={node.id}>
+                          <Table.Cell sticky="left">
+                            <div className="flex min-w-48 items-center gap-2">
+                              <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
+                              <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <StatusBadge tone={health.badgeTone}>{health.label}</StatusBadge>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <span className="whitespace-nowrap text-kumo-subtle">
+                              {node.public_host || node.api_base_url || "n/a"}
+                              {node.hosts && node.hosts.length > 1 ? (
+                                <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
+                              ) : null}
+                            </span>
+                          </Table.Cell>
+                          <Table.Cell>
+                            <VersionTarget current={node.agent_version} target={release?.agent_version ?? node.agent_version ?? "n/a"} />
+                          </Table.Cell>
+                          <Table.Cell>
+                            <VersionTarget current={node.sing_box_version} target={release?.sing_box_version ?? node.sing_box_version ?? "n/a"} />
+                          </Table.Cell>
+                          <Table.Cell>
+                            <ConfigVersion node={node} />
+                          </Table.Cell>
+                          <Table.Cell>
+                            <span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(nodeTimestamp(node))}</span>
+                          </Table.Cell>
+                          <Table.Cell>
+                            {updateStatus.available ? (
+                              <StatusBadge tone="info">Update available</StatusBadge>
+                            ) : (
+                              <span className="whitespace-nowrap text-kumo-subtle">{updateStatus.label}</span>
+                            )}
+                          </Table.Cell>
+                          <Table.Cell className="text-right">
+                            <RowActionsMenu label={`Actions for ${node.name}`}>
+                              {node.deleted_at ? (
+                                <DropdownMenu.Item
+                                  icon={ArrowsClockwiseIcon}
+                                  disabled={restore.isPending}
+                                  onClick={() => restore.mutate(node)}
+                                >
+                                  Restore
+                                </DropdownMenu.Item>
+                              ) : (
+                                <>
                                   {node.active_operation ? (
-                                    <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node })}>
-                                      View update
-                                    </DropdownMenu.Item>
-                                  ) : release?.updates_enabled && hasCapability(node, "operations.v1") ? (
                                     <>
-                                      {!versionsEqual(node.agent_version, release.agent_version) && hasCapability(node, "update.agent.v1") ? (
+                                      <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node })}>
+                                        View update
+                                      </DropdownMenu.Item>
+                                      <DropdownMenu.Separator />
+                                    </>
+                                  ) : updateStatus.available ? (
+                                    <>
+                                      {updateStatus.canUpdateAgent ? (
                                         <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node, components: ["agent"] })}>
                                           Update agent
                                         </DropdownMenu.Item>
                                       ) : null}
-                                      {!versionsEqual(node.sing_box_version, release.sing_box_version) && hasCapability(node, "update.sing_box.v1") ? (
+                                      {updateStatus.canUpdateSingBox ? (
                                         <DropdownMenu.Item icon={DownloadSimpleIcon} onClick={() => setUpdateDialog({ mode: "node", node, components: ["sing_box"] })}>
                                           Update sing-box
                                         </DropdownMenu.Item>
@@ -433,6 +429,7 @@ export function NodesPage() {
                                     <>
                                       <DropdownMenu.Item
                                         icon={node.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                        disabled={toggleStatus.isPending}
                                         onClick={() => toggleStatus.mutate(node)}
                                       >
                                         {node.status === "disabled" ? "Enable" : "Disable"}
@@ -443,22 +440,19 @@ export function NodesPage() {
                                       </DropdownMenu.Item>
                                     </>
                                   )}
-                                    </>
-                                  )}
-                                </DropdownMenu.Content>
-                                </DropdownMenu>
-                              </div>
-                            </Table.Cell>
-                          </Table.Row>
-                        );
-                      })
-                    ) : (
-                      <TableEmpty colSpan={9}>No nodes match this filter.</TableEmpty>
-                    )}
-                  </Table.Body>
-                </Table>
-              </div>
-            </div>
+                                </>
+                              )}
+                            </RowActionsMenu>
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })
+                  ) : (
+                    <TableEmpty colSpan={9}>No nodes match this filter.</TableEmpty>
+                  )}
+                </Table.Body>
+              </Table>
+            </TableCard>
 
             <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>

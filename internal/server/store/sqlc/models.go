@@ -30,6 +30,15 @@ type ConfigVersion struct {
 	PublishedAt sql.NullString `json:"published_at"`
 }
 
+type DomainServiceOverride struct {
+	Suffix    string `json:"suffix"`
+	Service   string `json:"service"`
+	Label     string `json:"label"`
+	Category  string `json:"category"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type Endpoint struct {
 	ID        string `json:"id"`
 	ProxyID   string `json:"proxy_id"`

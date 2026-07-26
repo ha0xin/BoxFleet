@@ -1,5 +1,5 @@
 import { CheckCircleIcon, WarningCircleIcon, XCircleIcon, XIcon } from "@phosphor-icons/react";
-import { Button, Loader } from "@cloudflare/kumo";
+import { Button, Loader, Tooltip } from "@cloudflare/kumo";
 
 import { usePublishStatus } from "./publish-status";
 import type { PublishStatus } from "./publish-status";
@@ -37,10 +37,12 @@ export function PublishStrip() {
     // silently implying every node is up to date.
     if (changesError) {
       return (
-        <div className="flex items-center gap-1.5 text-sm font-medium text-kumo-warning" title={changesError}>
-          <WarningCircleIcon className="size-4" weight="fill" />
-          Config status unavailable
-        </div>
+        <Tooltip content={changesError}>
+          <span className="flex items-center gap-1.5 text-sm font-medium text-kumo-warning">
+            <WarningCircleIcon className="size-4" weight="fill" />
+            Config status unavailable
+          </span>
+        </Tooltip>
       );
     }
     return null;
@@ -85,7 +87,7 @@ export function PublishStrip() {
   // failed / incomplete
   const failedLabel =
     progress.failed > 0
-      ? `Apply failed on ${progress.failed} node(s)`
+      ? `Apply failed on ${progress.failed} ${progress.failed === 1 ? "node" : "nodes"}`
       : progress.total > 0
         ? `Apply incomplete — ${progress.applied}/${progress.total} nodes responded`
         : "Publish failed";
@@ -95,7 +97,7 @@ export function PublishStrip() {
         <XCircleIcon className="size-4" weight="fill" />
         {failedLabel}
       </span>
-      <Button size="sm" variant="ghost" onClick={openDiff}>
+      <Button size="sm" onClick={openDiff}>
         Review
       </Button>
       <Button size="sm" variant="ghost" shape="square" aria-label="Dismiss" onClick={dismiss}>

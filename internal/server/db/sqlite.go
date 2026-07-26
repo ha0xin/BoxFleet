@@ -75,10 +75,15 @@ func OpenSQLite(path string) (*DB, error) {
 	return db, nil
 }
 
+// sqliteDSN opens every pooled connection with BEGIN IMMEDIATE. Several
+// transactions read before they write, and in WAL mode a deferred transaction
+// whose read snapshot goes stale fails the first write with SQLITE_BUSY_SNAPSHOT
+// straight away — busy_timeout does not cover snapshot upgrades. Taking the
+// write lock up front turns that spurious failure into a normal busy wait.
 func sqliteDSN(path string) string {
 	escaped := strings.ReplaceAll(url.PathEscape(path), "%2F", "/")
 	return "file:" + escaped +
-		"?_foreign_keys=on&_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000"
+		"?_foreign_keys=on&_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000&_txlock=immediate"
 }
 
 func (db *DB) Close() error {

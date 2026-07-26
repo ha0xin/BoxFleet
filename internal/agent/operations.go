@@ -124,9 +124,9 @@ func (a *Agent) runClaimedOperation(ctx context.Context, state *OperationState) 
 	leaseErrors := make(chan error, 1)
 	go a.monitorOperationLease(opCtx, state.Assignment, &cancelRequested, cancel, leaseErrors)
 
-	a.maintenanceMu.Lock()
+	// Each executor takes maintenanceMu only around the steps that mutate the live
+	// install, so heartbeats keep flowing during long downloads.
 	result, executeErr := a.executeNodeOperation(opCtx, state, &cancelRequested)
-	a.maintenanceMu.Unlock()
 	// Capture a real parent/lease cancellation before stopping the lease
 	// monitor. Calling cancel(nil) records context.Canceled as the cause, which
 	// must not replace a concrete executor error such as a version mismatch.
@@ -148,11 +148,9 @@ func (a *Agent) runClaimedOperation(ctx context.Context, state *OperationState) 
 	// terminal event.
 	if executeErr == nil {
 		cancelled, err := a.renewOperationLeaseWithRetry(ctx, state.Assignment)
-		if err != nil {
-			executeErr = err
-		} else if cancelled && !operationResultCommitted(result) {
+		executeErr = finalLeaseError(result, cancelled, err)
+		if errors.Is(executeErr, errOperationCancelled) {
 			cancelRequested.Store(true)
-			executeErr = errOperationCancelled
 		}
 	}
 
@@ -194,6 +192,23 @@ func operationResultCommitted(result map[string]any) bool {
 	return committed
 }
 
+// finalLeaseError turns the final lease renewal into an operation outcome. A
+// committed update cannot be undone by a late cancellation or by a renewal that
+// failed while the node was shutting down, so reporting it as failed would
+// contradict what is actually installed.
+func finalLeaseError(result map[string]any, cancelled bool, renewErr error) error {
+	if operationResultCommitted(result) {
+		return nil
+	}
+	if renewErr != nil {
+		return renewErr
+	}
+	if cancelled {
+		return errOperationCancelled
+	}
+	return nil
+}
+
 func (a *Agent) executeNodeOperation(ctx context.Context, state *OperationState, cancelRequested *atomic.Bool) (map[string]any, error) {
 	if err := operationBoundary(ctx, cancelRequested); err != nil {
 		return nil, err
@@ -205,7 +220,7 @@ func (a *Agent) executeNodeOperation(ctx context.Context, state *OperationState,
 		}); err != nil {
 			return nil, err
 		}
-		if err := a.once(ctx); err != nil {
+		if err := a.Once(ctx); err != nil {
 			return nil, err
 		}
 		return map[string]any{"reconciled": true}, operationBoundary(ctx, cancelRequested)
@@ -418,7 +433,7 @@ func (a *Agent) operationJSONRequest(ctx context.Context, path string, payload a
 		return nil, err
 	}
 	request.Header.Set("Authorization", "Bearer "+a.Config.Token)
-	request.Header.Set("X-BoxFleet-Node", a.Config.NodeName)
+	request.Header.Set("X-BoxFleet-Node", a.nodeName())
 	request.Header.Set("Content-Type", "application/json")
 	response, err := a.client().Do(request)
 	if err != nil {

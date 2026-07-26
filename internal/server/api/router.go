@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +14,16 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/install"
 	"github.com/haoxin/boxfleet/internal/server/render"
 	"github.com/haoxin/boxfleet/internal/server/webui"
+)
+
+// Node report bodies are bounded so a node token cannot exhaust server memory.
+// Apply results and heartbeats are fixed-shape and tiny; journal and traffic
+// reports are the only legitimately large payloads (the agent caps a journal
+// batch at 100 entries / 256 KiB of message content, so 1 MiB leaves room for
+// JSON framing and escaping).
+const (
+	maxNodeReportBytes     = 64 * 1024
+	maxNodeBulkReportBytes = 1024 * 1024
 )
 
 type Options struct {
@@ -127,6 +138,7 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/nodes/{node}/raw-network-logs", adminNodeRawNetworkLogsHandler(options.DB))
 		r.Get("/system-logs", adminSystemLogsHandler(options.DB))
 		r.Post("/nodes/{node}/config/publish", adminPublishConfigHandler(options.DB))
+		registerTelemetryRoutes(r, options.DB)
 	})
 	if options.ArtifactDir != "" {
 		router.Handle("/artifacts/*", http.StripPrefix("/artifacts/", http.FileServer(http.Dir(options.ArtifactDir))))
@@ -173,7 +185,14 @@ func nodeConfigHandler(store *db.DB) http.HandlerFunc {
 		// PATCH, not the token-revoking decommission path), so its agent daemon
 		// still polls here. Signal it to stop serving (systemctl stop sing-box)
 		// instead of handing back config; re-enabling resumes normal config.
-		if node, err := store.GetNode(r.Context(), nodeName); err == nil && node.Status == "disabled" {
+		node, err := store.GetNode(r.Context(), nodeName)
+		if err != nil {
+			// Fail closed: serving the enabled path would restart sing-box on a
+			// node the operator paused.
+			http.Error(w, "node lookup failed", http.StatusInternalServerError)
+			return
+		}
+		if node.Status == "disabled" {
 			// Body is a valid no-inbound config so legacy agents that ignore the
 			// header still stop serving on apply; new agents act on the header.
 			body, err := render.RenderDisabledConfig()
@@ -189,9 +208,26 @@ func nodeConfigHandler(store *db.DB) http.HandlerFunc {
 			_, _ = w.Write([]byte("\n"))
 			return
 		}
-		version, err := store.GetTargetConfig(r.Context(), nodeName)
-		var config []byte
+		// Only a node that has never been published falls back to live rendering; a
+		// lookup failure must not silently bypass the publish/review workflow.
+		status, err := store.GetNodeConfigStatus(r.Context(), nodeName)
 		if err != nil {
+			http.Error(w, "config status lookup failed", http.StatusInternalServerError)
+			return
+		}
+		var config []byte
+		if status.TargetConfigVersionID.Valid {
+			version, err := store.GetTargetConfig(r.Context(), nodeName)
+			if err != nil {
+				http.Error(w, "published config lookup failed", http.StatusInternalServerError)
+				return
+			}
+			config = []byte(version.ConfigJson)
+			w.Header().Set("X-BoxFleet-Config-Mode", "published")
+			w.Header().Set("X-BoxFleet-Config-Version-ID", version.ID)
+			w.Header().Set("X-BoxFleet-Config-Version", fmt.Sprintf("%d", version.Version))
+			w.Header().Set("X-BoxFleet-Config-SHA256", version.ConfigHash)
+		} else {
 			config, err = render.RenderNodeConfig(r.Context(), store, nodeName)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -199,12 +235,6 @@ func nodeConfigHandler(store *db.DB) http.HandlerFunc {
 			}
 			w.Header().Set("X-BoxFleet-Config-Mode", "rendered")
 			w.Header().Set("X-BoxFleet-Config-SHA256", db.SHA256Hex(config))
-		} else {
-			config = []byte(version.ConfigJson)
-			w.Header().Set("X-BoxFleet-Config-Mode", "published")
-			w.Header().Set("X-BoxFleet-Config-Version-ID", version.ID)
-			w.Header().Set("X-BoxFleet-Config-Version", fmt.Sprintf("%d", version.Version))
-			w.Header().Set("X-BoxFleet-Config-SHA256", version.ConfigHash)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(config)
@@ -219,8 +249,7 @@ func nodeApplyResultHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		var result db.ApplyResult
-		if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+		if !decodeNodeReport(w, r, maxNodeReportBytes, &result) {
 			return
 		}
 		result.NodeName = nodeName
@@ -240,8 +269,7 @@ func nodeHeartbeatHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		var heartbeat db.Heartbeat
-		if err := json.NewDecoder(r.Body).Decode(&heartbeat); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+		if !decodeNodeReport(w, r, maxNodeReportBytes, &heartbeat) {
 			return
 		}
 		heartbeat.NodeName = nodeName
@@ -261,8 +289,7 @@ func nodeTrafficHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		var report db.TrafficReport
-		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+		if !decodeNodeReport(w, r, maxNodeBulkReportBytes, &report) {
 			return
 		}
 		report.NodeName = nodeName
@@ -282,8 +309,7 @@ func nodeLogsHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		var report db.LogEventReport
-		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+		if !decodeNodeReport(w, r, maxNodeBulkReportBytes, &report) {
 			return
 		}
 		report.NodeName = nodeName
@@ -303,8 +329,7 @@ func nodeSystemLogsHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		var report db.SystemLogReport
-		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+		if !decodeNodeReport(w, r, maxNodeBulkReportBytes, &report) {
 			return
 		}
 		report.NodeName = nodeName
@@ -315,6 +340,20 @@ func nodeSystemLogsHandler(store *db.DB) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	}
+}
+
+func decodeNodeReport(w http.ResponseWriter, r *http.Request, limit int64, target any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func authenticateNode(w http.ResponseWriter, r *http.Request, store *db.DB) (string, bool) {

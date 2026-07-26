@@ -1,0 +1,17 @@
+# VLESS-Reality inbound, the shape that produces every usable log_events row.
+# sing-box renders these with log.Formatter using timestamp format
+# "-0700 2006-01-02 15:04:05" and colors enabled, which is what BoxFleet's
+# rendered configs (log.timestamp = true, no disable_color) emit to journald.
+# The literal two-character sequence \x1b stands for a real ESC byte.
+# Lines starting with # are comments and are not fed to the parser.
++0800 2026-05-16 11:20:01 \x1b[36mINFO\x1b[0m sing-box started (0.42s)
++0800 2026-05-16 11:23:43 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m3999106428\x1b[0m 0ms] inbound/vless[vless-39090]: inbound connection from 115.27.221.55:62895
++0800 2026-05-16 11:23:43 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m3999106428\x1b[0m 236ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to speed.cloudflare.com:443
+# FormatDuration switches units at one second and one minute, so the elapsed
+# field appears as "0ms", "1.50s" and "2m30s" on the same node.
++0800 2026-05-16 11:23:44 \x1b[36mINFO\x1b[0m [\x1b[38;5;38m2211998877\x1b[0m 0ms] inbound/vless[vless-39090]: inbound connection from 203.0.113.77:51001
++0800 2026-05-16 11:23:44 \x1b[36mINFO\x1b[0m [\x1b[38;5;38m2211998877\x1b[0m 1.50s] inbound/vless[vless-39090]: [vless-39090@bob] inbound connection to www.youtube.com:443
+# The matching "inbound connection from" landed in an earlier journal batch, so
+# the source ip is unknown while the connection itself still counts.
++0800 2026-05-16 11:25:45 \x1b[36mINFO\x1b[0m [\x1b[38;5;99m1000000001\x1b[0m 2m30s] inbound/vless[vless-39090]: [vless-39090@carol] inbound connection to github.com:443
++0800 2026-05-16 11:25:45 \x1b[36mINFO\x1b[0m [\x1b[38;5;99m1000000001\x1b[0m 2m30s] outbound/direct[direct]: outbound connection to github.com:443

@@ -146,6 +146,8 @@ func (a *Agent) ConfirmAgentUpdateGuard() error {
 	if err := os.Remove(a.Config.AgentGuardStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	a.pruneReleaseDirs("boxfleet-agent", state.CandidateTarget, state.PreviousTarget)
+	a.pruneDownloadDirs("")
 	return nil
 }
 

@@ -114,6 +114,65 @@ func TestIssueVLESSRealityCredential(t *testing.T) {
 	if reissued.ID != access.ID || !reissued.Enabled {
 		t.Fatalf("reissued access = %#v, want same enabled access %s", reissued, access.ID)
 	}
+	var reissuedVLESS VLESSRealityCredential
+	if err := json.Unmarshal([]byte(reissued.CredentialJSON), &reissuedVLESS); err != nil {
+		t.Fatal(err)
+	}
+	if reissuedVLESS.UUID == vless.UUID {
+		t.Fatalf("reissue after revoke reinstated the revoked uuid %q", vless.UUID)
+	}
+	if reissuedVLESS.Flow != VLESSRealityFlowVision {
+		t.Fatalf("reissued flow = %q", reissuedVLESS.Flow)
+	}
+}
+
+func TestReissueAfterSoftDeleteRotatesShadowsocksPassword(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:     "azus",
+		Name:         "ss-8443",
+		Protocol:     ProtocolShadowsocks2022,
+		ListenPort:   8443,
+		Enabled:      true,
+		SettingsJSON: `{}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BindUserToNode(ctx, "alice", "azus"); err != nil {
+		t.Fatal(err)
+	}
+	params := IssueCredentialParams{UserName: "alice", NodeName: "azus", ProxyName: "ss-8443"}
+	access, err := store.IssueShadowsocks2022Credential(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SoftDeleteProxyCredential(ctx, "alice", "azus", "ss-8443"); err != nil {
+		t.Fatal(err)
+	}
+	reissued, err := store.IssueShadowsocks2022Credential(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reissued.ID != access.ID || !reissued.Enabled || reissued.DeletedAt.Valid {
+		t.Fatalf("reissued access = %#v, want restored access %s", reissued, access.ID)
+	}
+	var before, after Shadowsocks2022Credential
+	if err := json.Unmarshal([]byte(access.CredentialJSON), &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(reissued.CredentialJSON), &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Password == before.Password {
+		t.Fatal("restore after soft delete reinstated the previous password")
+	}
 }
 
 func TestAuthNameDelimitersRejected(t *testing.T) {

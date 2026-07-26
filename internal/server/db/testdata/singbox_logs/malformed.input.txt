@@ -1,0 +1,24 @@
+# Lines the parser must survive without panicking. Most are ignored outright;
+# a few are accepted with degraded fields, and the golden output is the record
+# of which is which.
++0000 2026-05-16 05:00:01 \x1b[36mINFO\x1b[0m [abc 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:443
++0000 2026-05-16 05:00:02 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090] [vless-39090@alice] inbound connection to example.com:443
++0000 2026-05-16 05:00:03 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:
++0000 2026-05-16 05:00:04 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to :443
++0000 2026-05-16 05:00:05 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:99999
++0000 2026-05-16 05:00:06 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:+443
++0000 2026-05-16 05:00:07 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com
++0000 2026-05-16 05:00:08 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [] inbound connection to example.com:443
++0000 2026-05-16 05:00:09 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]: [vless-39090@ali]ce] inbound connection to example.com:443
++0000 2026-05-16 05:00:10 \x1b[36mINFO\x1b[0m [7000000002 not-a-duration] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:443
++0000 2026-05-16 05:00:11 \x1b[36mINFO\x1b[0m [7000000002 0ms] inbound/vless[vless-39090]:
+# No timestamp at all: the event survives with an empty window and the ingest
+# path substitutes the server clock.
+\x1b[36mINFO\x1b[0m [7000000004 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:443
+# Bracketed zone offset with no bare offset: the timestamp is present but the
+# window is still dropped.
+[+0800] 2026-05-16 05:00:12 \x1b[36mINFO\x1b[0m [7000000003 0ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:443
+# Truncated journal line.
++0000 2026-05-16 05:00:13 \x1b[36mINFO\x1b[0m [7000000005 0ms] inbound/vl
+# Deeply nested brackets, to keep the regexes off a pathological backtrack.
++0000 2026-05-16 05:00:14 \x1b[36mINFO\x1b[0m [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[ [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[ inbound connection to example.com:443

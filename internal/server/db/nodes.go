@@ -599,29 +599,26 @@ func (db *DB) SetNodeStatus(ctx context.Context, name, status string) error {
 	return requireAffected(affected, "node", name)
 }
 
-func (db *DB) DisableNode(ctx context.Context, name string) (Node, error) {
-	if err := db.SetNodeStatus(ctx, name, "disabled"); err != nil {
-		return Node{}, err
-	}
-	if err := db.RevokeNodeTokens(ctx, name); err != nil {
-		return Node{}, err
-	}
-	return db.GetNode(ctx, name)
-}
-
+// SoftDeleteNode decommissions a node: the soft delete and the token revocation
+// that cuts its agent off must commit together, otherwise a decommissioned node
+// keeps authenticating and the retry is blocked because the node no longer
+// resolves. Pausing a node goes through UpdateNodeByName and never revokes.
 func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 	node, err := db.GetNode(ctx, name)
 	if err != nil {
 		return Node{}, err
 	}
-	affected, err := db.q.SoftDeleteNode(ctx, node.Name)
+	err = db.withTx(ctx, func(qtx *store.Queries) error {
+		affected, err := qtx.SoftDeleteNode(ctx, node.Name)
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "node", name); err != nil {
+			return err
+		}
+		return qtx.RevokeNodeTokensByNodeID(ctx, node.ID)
+	})
 	if err != nil {
-		return Node{}, err
-	}
-	if err := requireAffected(affected, "node", name); err != nil {
-		return Node{}, err
-	}
-	if err := db.q.RevokeNodeTokensByNodeID(ctx, node.ID); err != nil {
 		return Node{}, err
 	}
 	return db.getNodeIncludingDeleted(ctx, node.Name)

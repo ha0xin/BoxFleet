@@ -2,14 +2,13 @@ import { useEffect, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CopyIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { Banner, Button, Dialog, Input, Switch } from "@cloudflare/kumo";
+import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { Banner, Button, ClipboardText, Dialog, Input, Switch } from "@cloudflare/kumo";
 
 import type { AdminNode, AdminNodeBootstrap } from "../types";
 import type { AdminRequest } from "@/admin/api";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
-import { copyText } from "@/utils";
 
 export type NodeDialogState =
   | { mode: "enroll" }
@@ -31,51 +30,18 @@ function installCommand(scriptUrl: string, bootstrap: string): string {
   return `curl -fsSL ${shellQuote(scriptUrl)} -o /tmp/boxfleet-install.sh && sudo sh /tmp/boxfleet-install.sh ${shellQuote(bootstrap)}`;
 }
 
-function CopyField({ label, value, wrap = false }: { label: string; value: string; wrap?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState("");
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-kumo-default">{label}</span>
-      <div className="flex items-stretch gap-2">
-        <code
-          className={`min-w-0 flex-1 rounded-md border border-kumo-line bg-kumo-canvas px-3 py-2 font-mono text-xs text-kumo-subtle ${
-            wrap ? "whitespace-pre-wrap break-all" : "truncate"
-          }`}
-        >
-          {value}
-        </code>
-        <Button
-          variant="secondary"
-          size="sm"
-          shape="square"
-          aria-label={`Copy ${label}`}
-          onClick={() => {
-            void copyText(value).then(() => {
-              setCopyError("");
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            }).catch((error: unknown) => setCopyError(error instanceof Error ? error.message : "Unable to copy."));
-          }}
-        >
-          <CopyIcon className="size-4" />
-        </Button>
-      </div>
-      {copied ? <span className="text-xs text-kumo-success">Copied</span> : null}
-      {copyError ? <span className="text-xs text-kumo-danger">{copyError}</span> : null}
-    </div>
-  );
-}
-
 // Shared success view for enroll + re-enroll: one copy-paste install command.
 function BootstrapResult({ result, onClose }: { result: AdminNodeBootstrap; onClose: () => void }) {
   return (
     <div className="flex flex-col gap-4">
-      <CopyField
-        label="Install command"
-        value={installCommand(result.install_script_url, result.bootstrap_string)}
-        wrap
-      />
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-kumo-default">Install command</span>
+        <ClipboardText
+          size="sm"
+          text={installCommand(result.install_script_url, result.bootstrap_string)}
+          tooltip={{ text: "Copy install command", copiedText: "Copied" }}
+        />
+      </div>
       <div className="mt-2 flex justify-end">
         <Button onClick={onClose}>Done</Button>
       </div>
@@ -104,7 +70,7 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
         method: "POST",
         body: JSON.stringify({ name: values.name.trim(), public_host: values.public_host.trim() || undefined })
       }),
-    { onSuccess: (data) => setResult(data) }
+    { onSuccess: (data) => setResult(data), toastError: false }
   );
 
   return (
@@ -140,7 +106,7 @@ export function EnrollNodeDialog({ request, onClose }: { request: AdminRequest; 
               {...form.register("public_host")}
             />
             <div className="mt-2 flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={onClose}>
+              <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
                 Cancel
               </Button>
               <Button type="submit" loading={mutation.isPending}>
@@ -173,7 +139,7 @@ export function ReenrollNodeDialog({
   const mutation = useAdminMutation<void, AdminNodeBootstrap>(
     request,
     (req) => req(`/api/admin/nodes/${encodeURIComponent(node.name)}/reenroll`, { method: "POST" }),
-    { onSuccess: (data) => setResult(data) }
+    { onSuccess: (data) => setResult(data), toastError: false }
   );
 
   return (
@@ -196,7 +162,7 @@ export function ReenrollNodeDialog({
           <BootstrapResult result={result} onClose={onClose} />
         ) : (
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
               Cancel
             </Button>
             <Button loading={mutation.isPending} onClick={() => mutation.mutate()}>
@@ -309,7 +275,7 @@ export function EditNodeDialog({
         body: JSON.stringify({ name: values.name.trim(), hosts, api_base_url: values.api_base_url.trim() })
       });
     },
-    { onSuccess: onClose }
+    { onSuccess: onClose, toastError: false }
   );
 
   const hostsErrors = form.formState.errors.hosts;
@@ -383,7 +349,7 @@ export function EditNodeDialog({
           </div>
           <Input label="API base URL" placeholder="https://203.0.113.10:18080" {...form.register("api_base_url")} />
           <div className="mt-2 flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" loading={mutation.isPending}>

@@ -1,10 +1,9 @@
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Icon } from "@phosphor-icons/react";
 import {
+  ArrowsClockwiseIcon,
   CheckCircleIcon,
-  DotsThreeIcon,
   FunnelIcon,
   IdentificationCardIcon,
   KeyIcon,
@@ -12,24 +11,34 @@ import {
   PlusIcon,
   ProhibitIcon,
   TrashIcon,
-  UserIcon,
-  WarningCircleIcon,
-  XCircleIcon
+  UserIcon
 } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
+import { Badge, Banner, Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
 
 import type { AdminUser, TrafficRow } from "../types";
 import { formatBytes } from "../utils";
-import { PageHeader, PageTopBar } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { AdminApiError, useAdminApi } from "@/admin/api";
 import { adminKeys } from "@/admin/query";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
-import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
+import { AppPageHeader } from "@/components/app-page-header";
+import { RowActionsMenu } from "@/components/row-actions-menu";
+import { StatusBadge } from "@/components/status-badge";
+import type { StatusTone } from "@/components/status-badge";
+import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 
 type UserFilter = "all" | "active" | "disabled" | "expired" | "quota_exceeded" | "deleted";
+
+const FILTER_LABELS: Record<UserFilter, string> = {
+  all: "All",
+  active: "Active",
+  disabled: "Disabled",
+  expired: "Expired",
+  quota_exceeded: "Over quota",
+  deleted: "Deleted"
+};
 type UserSort = "name" | "status" | "traffic" | "quota" | "proxy_count" | "expire_at";
 type SortDirection = "asc" | "desc";
 
@@ -91,22 +100,21 @@ function formatExpiry(value: string): string {
 function userStatus(user: AdminUser, total: number): {
   key: Exclude<UserFilter, "all">;
   label: string;
-  icon: Icon;
-  className: string;
+  tone: StatusTone;
 } {
   if (user.deleted_at) {
-    return { key: "deleted", label: "Deleted", icon: XCircleIcon, className: "text-kumo-subtle" };
+    return { key: "deleted", label: "Deleted", tone: "error" };
   }
   if (user.status === "disabled") {
-    return { key: "disabled", label: "Disabled", icon: XCircleIcon, className: "text-kumo-subtle" };
+    return { key: "disabled", label: "Disabled", tone: "neutral" };
   }
   if (user.status === "quota_exceeded" || (user.global_quota_bytes > 0 && total >= user.global_quota_bytes)) {
-    return { key: "quota_exceeded", label: "Over quota", icon: WarningCircleIcon, className: "text-kumo-warning" };
+    return { key: "quota_exceeded", label: "Over quota", tone: "warning" };
   }
   if (user.status === "expired" || isExpired(user)) {
-    return { key: "expired", label: "Expired", icon: WarningCircleIcon, className: "text-kumo-warning" };
+    return { key: "expired", label: "Expired", tone: "warning" };
   }
-  return { key: "active", label: "Active", icon: CheckCircleIcon, className: "text-kumo-success" };
+  return { key: "active", label: "Active", tone: "success" };
 }
 
 function compareText(left: string | number | undefined, right: string | number | undefined, direction: SortDirection) {
@@ -260,36 +268,29 @@ export function UsersPage() {
   const total = filtered.length;
 
   const lastPage = Math.max(1, Math.ceil(total / perPage));
+  // Render-phase adjustment (react.dev "you might not need an effect"):
+  // clamp when the row count shrinks below the current page.
   if (page > lastPage) setPage(lastPage);
 
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="Users" />
+      <AppPageHeader
+        title="Users"
+        description="Manage proxy users, quotas, access counts, expiration, and traffic usage."
+        actions={
+          <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "create" })}>
+            Create
+          </Button>
+        }
+      />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader
-          title="Users"
-          description="Manage proxy users, quotas, access counts, expiration, and traffic usage."
-          actions={
-            <Button variant="primary" icon={PlusIcon} onClick={() => setDialog({ mode: "create" })}>
-              Create
-            </Button>
-          }
-        />
-
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
           <section className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-kumo-default">User inventory</h2>
-                <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No users"}
-                </p>
-              </div>
-              {trafficError ? (
-                <p className="max-w-xl text-sm text-kumo-warning">
-                  Traffic usage is unavailable: {trafficError}
-                </p>
-              ) : null}
+            <div>
+              <h2 className="text-base font-semibold text-kumo-default">User inventory</h2>
+              <p className="text-sm text-kumo-subtle">
+                {total > 0 ? `${total} ${total === 1 ? "user" : "users"}` : "No users"}
+              </p>
             </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -317,6 +318,7 @@ export function UsersPage() {
                   render={
                     <Button variant="secondary" icon={FunnelIcon}>
                       Filter
+                      {filter !== "all" ? <Badge variant="secondary">{FILTER_LABELS[filter]}</Badge> : null}
                     </Button>
                   }
                 />
@@ -357,121 +359,115 @@ export function UsersPage() {
               </DropdownMenu>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">
-                <Table className="min-w-[1215px]">
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <SortHead label="User" column="name" sort={sort} direction={direction} setSort={setSort} className="sticky left-0 z-20 bg-kumo-base" />
-                      <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Traffic" column="traffic" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Quota" column="quota" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Access" column="proxy_count" sort={sort} direction={direction} setSort={setSort} />
-                      <SortHead label="Expires" column="expire_at" sort={sort} direction={direction} setSort={setSort} />
-                      <Table.Head className="text-right">
-                        <span className="sr-only">Actions</span>
-                      </Table.Head>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {error ? (
-                      <TableEmpty colSpan={7}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty>
-                    ) : loading ? (
-                      <TableLoading colSpan={7} />
-                    ) : visibleRows.length > 0 ? (
-                      visibleRows.map((row) => {
-                        const StatusIcon = row.status.icon;
-                        return (
-                          <Table.Row key={row.user.id}>
-                            <Table.Cell className="sticky left-0 z-10 bg-kumo-base">
-                              <div className="flex min-w-52 items-center gap-2">
-                                <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
-                                <div className="min-w-0">
-                                  <div className="truncate text-base font-medium text-kumo-default">{row.user.name}</div>
-                                  {row.user.display_name ? (
-                                    <div className="truncate text-sm text-kumo-subtle">{row.user.display_name}</div>
-                                  ) : null}
-                                </div>
+            {trafficError ? (
+              <Banner variant="error" title="Traffic data unavailable" description={trafficError} />
+            ) : null}
+
+            <TableCard>
+              <Table className="min-w-[1215px]">
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <SortHead label="User" column="name" sort={sort} direction={direction} setSort={setSort} sticky="left" />
+                    <SortHead label="Status" column="status" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Traffic" column="traffic" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Quota" column="quota" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Access" column="proxy_count" sort={sort} direction={direction} setSort={setSort} />
+                    <SortHead label="Expires" column="expire_at" sort={sort} direction={direction} setSort={setSort} />
+                    <Table.Head className="text-right">
+                      <span className="sr-only">Actions</span>
+                    </Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {error ? (
+                    <TableError colSpan={7}>{error instanceof Error ? error.message : "Request failed."}</TableError>
+                  ) : loading ? (
+                    <TableLoading colSpan={7} />
+                  ) : visibleRows.length > 0 ? (
+                    visibleRows.map((row) => (
+                      <Table.Row key={row.user.id}>
+                        <Table.Cell sticky="left">
+                          <div className="flex min-w-52 items-center gap-2">
+                            <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
+                            <div className="min-w-0">
+                              <div className="truncate text-base font-medium text-kumo-default" title={row.user.name}>
+                                {row.user.name}
                               </div>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${row.status.className}`}>
-                                <StatusIcon className="size-4 shrink-0" />
-                                {row.status.label}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <div className="whitespace-nowrap">
-                                <div className="text-kumo-default">{formatBytes(row.total)}</div>
-                                <div className="text-xs text-kumo-subtle">
-                                  raw {formatBytes(row.traffic.rawUpload + row.traffic.rawDownload)}
-                                </div>
-                              </div>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <QuotaMeter user={row.user} traffic={row.traffic} />
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">{row.user.proxy_count}</span>
-                            </Table.Cell>
-                            <Table.Cell>
-                              <span className="whitespace-nowrap text-kumo-subtle">
-                                {formatExpiry(row.user.expire_at)}
-                              </span>
-                            </Table.Cell>
-                            <Table.Cell className="text-right">
-                              <DropdownMenu>
-                                <DropdownMenu.Trigger
-                                  render={
-                                    <Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${row.user.name}`}>
-                                      <DotsThreeIcon className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                                <DropdownMenu.Content>
-                                  {row.user.deleted_at ? (
-                                    <DropdownMenu.Item icon={CheckCircleIcon} onClick={() => restore.mutate(row.user)}>
-                                      Restore
-                                    </DropdownMenu.Item>
-                                  ) : (
-                                    <>
-                                      <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
-                                        Edit
-                                      </DropdownMenu.Item>
-                                      <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
-                                        Manage access
-                                      </DropdownMenu.Item>
-                                      <DropdownMenu.Item
-                                        icon={IdentificationCardIcon}
-                                        onClick={() => setDialog({ mode: "connection", user: row.user })}
-                                      >
-                                        Connection info
-                                      </DropdownMenu.Item>
-                                      <DropdownMenu.Item
-                                        icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
-                                        onClick={() => toggleStatus.mutate(row.user)}
-                                      >
-                                        {row.user.status === "disabled" ? "Enable" : "Disable"}
-                                      </DropdownMenu.Item>
-                                      <DropdownMenu.Separator />
-                                      <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row.user)}>
-                                        Delete
-                                      </DropdownMenu.Item>
-                                    </>
-                                  )}
-                                </DropdownMenu.Content>
-                              </DropdownMenu>
-                            </Table.Cell>
-                          </Table.Row>
-                        );
-                      })
-                    ) : (
-                      <TableEmpty colSpan={7}>No users match this filter.</TableEmpty>
-                    )}
-                  </Table.Body>
-                </Table>
-              </div>
-            </div>
+                              {row.user.display_name ? (
+                                <div className="truncate text-sm text-kumo-subtle">{row.user.display_name}</div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <StatusBadge tone={row.status.tone}>{row.status.label}</StatusBadge>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <div className="whitespace-nowrap">
+                            <div className="text-kumo-default">{formatBytes(row.total)}</div>
+                            <div className="text-xs text-kumo-subtle">
+                              raw {formatBytes(row.traffic.rawUpload + row.traffic.rawDownload)}
+                            </div>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <QuotaMeter user={row.user} traffic={row.traffic} />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <span className="whitespace-nowrap text-kumo-subtle">{row.user.proxy_count}</span>
+                        </Table.Cell>
+                        <Table.Cell>
+                          <span className="whitespace-nowrap text-kumo-subtle">
+                            {formatExpiry(row.user.expire_at)}
+                          </span>
+                        </Table.Cell>
+                        <Table.Cell className="text-right">
+                          <RowActionsMenu label={`Actions for ${row.user.name}`}>
+                            {row.user.deleted_at ? (
+                              <DropdownMenu.Item
+                                icon={ArrowsClockwiseIcon}
+                                disabled={restore.isPending}
+                                onClick={() => restore.mutate(row.user)}
+                              >
+                                Restore
+                              </DropdownMenu.Item>
+                            ) : (
+                              <>
+                                <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => setDialog({ mode: "edit", user: row.user })}>
+                                  Edit
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item icon={KeyIcon} onClick={() => setDialog({ mode: "access", user: row.user })}>
+                                  Manage access
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                  icon={IdentificationCardIcon}
+                                  onClick={() => setDialog({ mode: "connection", user: row.user })}
+                                >
+                                  Connection info
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item
+                                  icon={row.user.status === "disabled" ? CheckCircleIcon : ProhibitIcon}
+                                  disabled={toggleStatus.isPending}
+                                  onClick={() => toggleStatus.mutate(row.user)}
+                                >
+                                  {row.user.status === "disabled" ? "Enable" : "Disable"}
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Separator />
+                                <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row.user)}>
+                                  Delete
+                                </DropdownMenu.Item>
+                              </>
+                            )}
+                          </RowActionsMenu>
+                        </Table.Cell>
+                      </Table.Row>
+                    ))
+                  ) : (
+                    <TableEmpty colSpan={7}>No users match this filter.</TableEmpty>
+                  )}
+                </Table.Body>
+              </Table>
+            </TableCard>
 
             <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
           </section>

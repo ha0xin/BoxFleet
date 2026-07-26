@@ -1,0 +1,4 @@
+line 04 tracked-source conn=1111111111 source=2001:db8:85a3::8a2e:370:7334
+line 05 parsed action=connect auth=vless-39090@alice source=2001:db8:85a3::8a2e:370:7334 host=2606:4700:4700::1111 port=443 window_start=2026-05-16T03:24:59.988Z window_end=2026-05-16T03:25:00Z
+line 06 tracked-source conn=1111111112 source=::ffff:192.0.2.9
+line 07 parsed action=connect auth=vless-39090@alice source=::ffff:192.0.2.9 host=198.51.100.7 port=8443 window_start=2026-05-16T03:25:00.992Z window_end=2026-05-16T03:25:01Z

@@ -16,11 +16,12 @@ test("mobile navigation and wide tables remain reachable", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Nodes", exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 1180, height: 900 });
-  await page.goto("network-events");
+  // Page-size controls are hidden while the table is empty, so drive the
+  // URL-synced limit directly and assert the empty pagination state.
+  await page.goto("network-events?limit=50");
   await expect(page.getByRole("button", { name: "Filter", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "Page size", exact: true }).click();
-  await page.getByRole("option", { name: "50", exact: true }).click();
-  await expect(page).toHaveURL(/limit=50/);
+  await expect(page.getByText("0 items", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Page size", exact: true })).toHaveCount(0);
   const tableGeometry = await page.locator(".bf-table-scroll").evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,

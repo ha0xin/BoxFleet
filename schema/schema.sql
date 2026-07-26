@@ -417,6 +417,9 @@ CREATE INDEX IF NOT EXISTS idx_traffic_usage_node_observed
 CREATE INDEX IF NOT EXISTS idx_traffic_usage_auth_node_observed
   ON traffic_usage_deltas(auth_name, node_id, observed_at);
 
+CREATE INDEX IF NOT EXISTS idx_traffic_usage_deltas_observed
+  ON traffic_usage_deltas(observed_at, direction, billable_bytes_delta, raw_bytes_delta);
+
 CREATE TABLE IF NOT EXISTS traffic_usage_totals (
   proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
   direction TEXT NOT NULL CHECK (direction IN ('uplink', 'downlink')),
@@ -534,6 +537,10 @@ CREATE INDEX IF NOT EXISTS idx_log_events_visible_user_window
 
 CREATE INDEX IF NOT EXISTS idx_log_events_visible_node_user_window
   ON log_events(node_id, proxy_user_id, window_end, window_start)
+  WHERE proxy_user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_log_events_visible_window_host
+  ON log_events(window_end, window_start, target_host, count)
   WHERE proxy_user_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_log_events_created_window
@@ -773,3 +780,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_node_update_campaigns_one_active
 
 CREATE INDEX IF NOT EXISTS idx_node_update_campaign_members_batch
   ON node_update_campaign_members(campaign_id, batch_number, status, position);
+
+CREATE TABLE IF NOT EXISTS domain_service_overrides (
+  suffix TEXT PRIMARY KEY,
+  service TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);

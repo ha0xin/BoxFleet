@@ -80,7 +80,13 @@ jobs:
           )
           sing_box_version_output="$("$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" version)"
           grep -F "sing-box version ${SING_BOX_REVISION#v}" <<<"$sing_box_version_output"
+          # Verify every tag BoxFleet depends on. with_v2ray_api backs per-user
+          # traffic counters; with_clash_api backs connection tracking and is the
+          # prerequisite for any future connection-telemetry migration
+          # (docs/adr/0001-network-event-telemetry-source.md). Losing either
+          # silently must fail the build, not a node.
           grep -F 'with_v2ray_api' <<<"$sing_box_version_output"
+          grep -F 'with_clash_api' <<<"$sing_box_version_output"
 
       - name: Package artifacts
         shell: bash

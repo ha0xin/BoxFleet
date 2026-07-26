@@ -241,6 +241,52 @@ func TestSingBoxUpdateKeepsDisabledNodeStopped(t *testing.T) {
 	}
 }
 
+func TestPruneKeepsCurrentAndPreviousRelease(t *testing.T) {
+	t.Parallel()
+	installDir := t.TempDir()
+	release := func(version string) string {
+		path := filepath.Join(installDir, "releases", "sing-box", version, "sing-box")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(version), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	stale, previous, candidate := release("1.0.0"), release("1.1.0"), release("1.2.0")
+	for _, id := range []string{"op_old", "op_current"} {
+		if err := os.MkdirAll(filepath.Join(installDir, "downloads", id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := New(Config{NodeName: "edge", Token: "token", ServerURL: "https://example.invalid", InstallDir: installDir})
+
+	// An unknown live target proves nothing stale, so nothing is removed.
+	a.pruneReleaseDirs("sing-box", candidate, "")
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("release pruned without a known previous target: %v", err)
+	}
+
+	a.pruneReleaseDirs("sing-box", candidate, previous)
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("superseded release was kept: %v", err)
+	}
+	for _, path := range []string{candidate, previous} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("live release %s was pruned: %v", path, err)
+		}
+	}
+
+	a.pruneDownloadDirs("op_current")
+	if _, err := os.Stat(filepath.Join(installDir, "downloads", "op_old")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("abandoned partial download was kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "downloads", "op_current")); err != nil {
+		t.Fatalf("in-flight download was pruned: %v", err)
+	}
+}
+
 func TestAgentGuardRollsBackAfterThreeFailedStarts(t *testing.T) {
 	t.Parallel()
 	installDir := t.TempDir()

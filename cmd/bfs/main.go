@@ -5,7 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -22,7 +25,9 @@ var (
 )
 
 func main() {
-	if err := newServerCommand().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := newServerCommand().ExecuteContext(ctx); err != nil {
 		_, _ = os.Stderr.WriteString(err.Error() + "\n")
 		os.Exit(1)
 	}
@@ -92,10 +97,44 @@ func runServer(ctx context.Context) error {
 		SingBoxVersion:     install.DefaultSingBoxVersion,
 	})
 
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       time.Minute,
+		// The node operations long-poll blocks up to 45s server-side, so the write
+		// deadline has to stay comfortably above that or claims would be cut off.
+		WriteTimeout: 90 * time.Second,
+		IdleTimeout:  2 * time.Minute,
+	}
+
 	logger.Info().Str("addr", addr).Str("db", dbPath).Str("artifact_dir", artifactDir).Str("version", version).Bool("admin_auth", adminToken != "").Bool("admin_path_token", adminPathToken != "").Msg("starting boxfleet-server")
-	if err := http.ListenAndServe(addr, router); err != nil {
-		logger.Error().Err(err).Msg("server stopped")
+	serveErr := make(chan error, 1)
+	go func() {
+		err := server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serveErr <- err
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			logger.Error().Err(err).Msg("server stopped")
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+	}
+
+	// Long enough for an in-flight 45s operations long-poll to drain.
+	logger.Info().Msg("shutting down boxfleet-server")
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error().Err(err).Msg("graceful shutdown")
 		return err
 	}
-	return nil
+	return <-serveErr
 }

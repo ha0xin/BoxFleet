@@ -292,6 +292,97 @@ func TestRenderShadowsocks2022DialerPath(t *testing.T) {
 	}
 }
 
+func TestRenderShadowsocks2022OnlyNodeClientProfiles(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	proxy := seedShadowsocks2022Fixture(t, ctx, store, "alice", "bob")
+
+	var settings db.Shadowsocks2022Settings
+	if err := json.Unmarshal([]byte(proxy.SettingsJSON), &settings); err != nil {
+		t.Fatal(err)
+	}
+	aliceKey := shadowsocks2022UserKey(t, ctx, store, "alice")
+	bobKey := shadowsocks2022UserKey(t, ctx, store, "bob")
+
+	rawInfo, err := RenderNodeInfo(ctx, store, "alice", "ss-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info NodeInfo
+	if err := json.Unmarshal(rawInfo, &info); err != nil {
+		t.Fatal(err)
+	}
+	if len(info.Proxies) != 1 {
+		t.Fatalf("proxies = %d, want the Shadowsocks 2022 profile: %s", len(info.Proxies), rawInfo)
+	}
+	profile := info.Proxies[0]
+	if profile.Name != "ss-8443" || profile.ProxyName != "ss-8443" ||
+		profile.Type != db.ProtocolShadowsocks2022 ||
+		profile.Server != "198.51.100.7" || profile.ServerPort != 8443 {
+		t.Fatalf("unexpected profile identity: %#v", profile)
+	}
+	if profile.Cipher != db.DefaultShadowsocks2022Method {
+		t.Fatalf("cipher = %q", profile.Cipher)
+	}
+	if want := settings.ServerPassword + ":" + aliceKey; profile.Password != want {
+		t.Fatalf("password = %q, want iPSK:uPSK %q", profile.Password, want)
+	}
+
+	rawClient, err := RenderClientConfig(ctx, store, ClientConfigParams{
+		UserName:  "alice",
+		NodeName:  "ss-node",
+		ProxyName: "ss-8443",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var client map[string]any
+	if err := json.Unmarshal(rawClient, &client); err != nil {
+		t.Fatal(err)
+	}
+	outbound := client["outbounds"].([]any)[0].(map[string]any)
+	if outbound["type"] != "shadowsocks" || outbound["tag"] != "proxy" ||
+		outbound["server"] != "198.51.100.7" || outbound["server_port"].(float64) != 8443 ||
+		outbound["method"] != db.DefaultShadowsocks2022Method ||
+		outbound["password"] != settings.ServerPassword+":"+aliceKey {
+		t.Fatalf("unexpected Shadowsocks outbound: %#v", outbound)
+	}
+
+	// The client legitimately receives its own iPSK:uPSK pair and nothing else:
+	// no other user's uPSK and no server-only material.
+	for _, rendered := range [][]byte{rawInfo, rawClient} {
+		if strings.Contains(string(rendered), bobKey) {
+			t.Fatalf("client output leaked another user's uPSK:\n%s", rendered)
+		}
+		if strings.Contains(string(rendered), "server_password") {
+			t.Fatalf("client output leaked raw server settings:\n%s", rendered)
+		}
+	}
+}
+
+func TestRenderVLESSClientOutputExcludesRealityPrivateKey(t *testing.T) {
+	ctx := context.Background()
+	store := openRenderTestDB(t)
+	seedVLESSRealityFixture(t, ctx, store)
+
+	rawInfo, err := RenderNodeInfo(ctx, store, "alice", "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawClient, err := RenderClientConfig(ctx, store, ClientConfigParams{
+		UserName: "alice", NodeName: "azus", ProxyName: "vless-39090",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rendered := range [][]byte{rawInfo, rawClient} {
+		if strings.Contains(string(rendered), "private-key") ||
+			strings.Contains(string(rendered), "reality_private_key") {
+			t.Fatalf("client output leaked Reality private key:\n%s", rendered)
+		}
+	}
+}
+
 func TestRenderMihomoProfileUsesInlineProxies(t *testing.T) {
 	ctx := context.Background()
 	store := openRenderTestDB(t)
@@ -573,6 +664,57 @@ func openRenderTestDB(t *testing.T) *db.DB {
 		t.Fatal(err)
 	}
 	return store
+}
+
+// seedShadowsocks2022Fixture publishes a node whose only proxy is Shadowsocks
+// 2022 and grants every named user an access on it.
+func seedShadowsocks2022Fixture(t *testing.T, ctx context.Context, store *db.DB, userNames ...string) db.Proxy {
+	t.Helper()
+	if _, err := store.CreateNode(ctx, "ss-node", "198.51.100.7", ""); err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := store.CreateProxy(ctx, db.CreateProxyParams{
+		NodeName:     "ss-node",
+		Name:         "ss-8443",
+		Protocol:     db.ProtocolShadowsocks2022,
+		Listen:       "0.0.0.0",
+		ListenPort:   8443,
+		Transport:    db.TransportTCPUDP,
+		Enabled:      true,
+		SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, userName := range userNames {
+		if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: userName}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.BindUserToNode(ctx, userName, "ss-node"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.IssueShadowsocks2022Access(ctx, db.IssueCredentialParams{
+			UserName:  userName,
+			NodeName:  "ss-node",
+			ProxyName: "ss-8443",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return proxy
+}
+
+func shadowsocks2022UserKey(t *testing.T, ctx context.Context, store *db.DB, userName string) string {
+	t.Helper()
+	access, err := store.GetProxyCredential(ctx, userName, "ss-node", "ss-8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var credential db.Shadowsocks2022Credential
+	if err := json.Unmarshal([]byte(access.CredentialJSON), &credential); err != nil {
+		t.Fatal(err)
+	}
+	return credential.Password
 }
 
 func seedVLESSRealityFixture(t *testing.T, ctx context.Context, store *db.DB) {

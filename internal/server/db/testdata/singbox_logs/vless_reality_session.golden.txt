@@ -1,0 +1,7 @@
+line 07 ignored
+line 08 tracked-source conn=3999106428 source=115.27.221.55
+line 09 parsed action=connect auth=vless-39090@alice source=115.27.221.55 host=speed.cloudflare.com port=443 window_start=2026-05-16T03:23:42.764Z window_end=2026-05-16T03:23:43Z
+line 12 tracked-source conn=2211998877 source=203.0.113.77
+line 13 parsed action=connect auth=vless-39090@bob source=203.0.113.77 host=www.youtube.com port=443 window_start=2026-05-16T03:23:42.5Z window_end=2026-05-16T03:23:44Z
+line 16 parsed action=connect auth=vless-39090@carol source=- host=github.com port=443 window_start=2026-05-16T03:23:15Z window_end=2026-05-16T03:25:45Z
+line 17 parsed action=outbound_connect auth=- source=- host=github.com port=443 window_start=2026-05-16T03:23:15Z window_end=2026-05-16T03:25:45Z

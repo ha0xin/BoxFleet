@@ -117,6 +117,7 @@ func TestGrantPathToUserIssuesCredentialsForWholeChain(t *testing.T) {
 	if err != nil || entryCredential.Enabled {
 		t.Fatalf("unused entry credential remained enabled: %#v, err=%v", entryCredential, err)
 	}
+	revokedPassword := credential.Password
 	if _, err := store.GrantPathToUser(ctx, "alice", root.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +125,58 @@ func TestGrantPathToUserIssuesCredentialsForWholeChain(t *testing.T) {
 	ss, _ = store.GetProxyCredential(ctx, "alice", "exit", "home-ss")
 	if !entryCredential.Enabled || !ss.Enabled {
 		t.Fatalf("regrant did not restore chain credentials: entry=%v exit=%v", entryCredential.Enabled, ss.Enabled)
+	}
+	if err := json.Unmarshal([]byte(ss.CredentialJSON), &credential); err != nil {
+		t.Fatal(err)
+	}
+	if credential.Password == revokedPassword {
+		t.Fatal("regrant reinstated the revoked exit password")
+	}
+}
+
+func TestDeletePathDisablesCredentialsItWasTheLastConsumerOf(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNode(ctx, "exit", "203.0.113.30", ""); err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName: "exit", Name: "exit-vless", Protocol: ProtocolVLESSReality,
+		ListenPort: 443, Enabled: true, SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, _ := store.GetNode(ctx, "exit")
+	endpoint, err := store.EnsureEndpoint(ctx, proxy.ID, node.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.CreatePath(ctx, CreatePathParams{
+		Name: "custom", DisplayName: "Custom exit", EndpointID: endpoint.ID,
+		Enabled: true, Visibility: PathVisibilitySelectable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GrantPathToUser(ctx, "alice", path.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeletePath(ctx, path.ID); err != nil {
+		t.Fatal(err)
+	}
+	credential, err := store.GetProxyCredential(ctx, "alice", "exit", "exit-vless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Enabled {
+		t.Fatalf("credential stayed enabled after its only path was deleted: %#v", credential)
+	}
+	if _, err := store.GetPath(ctx, path.ID); err == nil {
+		t.Fatal("deleted path is still readable")
 	}
 }
 

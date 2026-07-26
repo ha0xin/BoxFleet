@@ -18,4 +18,18 @@ describe("adminKeys", () => {
     expect(adminKeys.users(false)).toEqual(["admin", "users", false]);
     expect(adminKeys.users(true)).toEqual(["admin", "users", true]);
   });
+
+  it("separates the telemetry series caches from the network-events table cache", () => {
+    const filters = { range: "24h", bucket: "hour" };
+    const keys = [
+      adminKeys.networkEvents(filters),
+      adminKeys.networkEventSeries(filters),
+      adminKeys.networkEventServices(filters),
+      adminKeys.networkEventHosts(filters),
+      adminKeys.trafficSeries(filters)
+    ];
+    expect(new Set(keys.map((key) => key[1])).size).toBe(keys.length);
+    expect(keys.every((key) => key[0] === "admin")).toBe(true);
+    expect(adminKeys.trafficSeries(filters)).toEqual(["admin", "traffic-series", filters]);
+  });
 });

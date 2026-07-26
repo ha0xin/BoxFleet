@@ -198,3 +198,78 @@ func TestUpdateProxyByNameRenamesAndUpdatesAtomically(t *testing.T) {
 		t.Fatalf("old name resolved to %#v", viaOldName)
 	}
 }
+
+func TestRestoreProxyRejectsListenerConflict(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:     "azus",
+		Name:         "hy2-443-old",
+		Protocol:     ProtocolHysteria2,
+		Listen:       "0.0.0.0",
+		ListenPort:   443,
+		Transport:    TransportUDP,
+		Enabled:      true,
+		SettingsJSON: `{}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SoftDeleteProxy(ctx, "azus", "hy2-443-old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:     "azus",
+		Name:         "hy2-443-new",
+		Protocol:     ProtocolHysteria2,
+		Listen:       "0.0.0.0",
+		ListenPort:   443,
+		Transport:    TransportUDP,
+		Enabled:      true,
+		SettingsJSON: `{"obfs":"salamander"}`,
+	}); err != nil {
+		t.Fatalf("creating a replacement on the freed listener: %v", err)
+	}
+	if _, err := store.RestoreProxy(ctx, "azus", "hy2-443-old"); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("expected listener conflict on restore, got %v", err)
+	}
+	restored, err := store.getProxyIncludingDeleted(ctx, "azus", "hy2-443-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored.DeletedAt.Valid {
+		t.Fatal("proxy was restored despite the listener conflict")
+	}
+}
+
+func TestRestoreProxySucceedsWhenListenerIsFree(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName:     "azus",
+		Name:         "hy2-8443",
+		Protocol:     ProtocolHysteria2,
+		Listen:       "0.0.0.0",
+		ListenPort:   8443,
+		Transport:    TransportUDP,
+		Enabled:      true,
+		SettingsJSON: `{}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SoftDeleteProxy(ctx, "azus", "hy2-8443"); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := store.RestoreProxy(ctx, "azus", "hy2-8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.DeletedAt.Valid {
+		t.Fatalf("restored proxy still soft deleted: %#v", restored)
+	}
+}

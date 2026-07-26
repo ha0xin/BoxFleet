@@ -1,23 +1,36 @@
-import type { ReactNode } from "react";
+import { useMemo } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { startOfDay, startOfHour, subDays } from "date-fns";
 import {
   ArrowRightIcon,
   ArrowsClockwiseIcon,
-  CalendarBlankIcon,
   ChartLineUpIcon,
-  CheckCircleIcon,
   GaugeIcon,
   HardDrivesIcon,
   ListChecksIcon,
   PlusIcon,
   ShieldCheckIcon,
-  TrendUpIcon,
-  UsersIcon,
-  XCircleIcon
+  UsersIcon
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
-import { Button, LayerCard, Link, LinkButton } from "@cloudflare/kumo";
+import { Button, Empty, LayerCard, Link } from "@cloudflare/kumo";
 
-import type { AdminNode, AdminUser, Overview, SystemLog, TrafficRow } from "../types";
+import { useAdminApi } from "@/admin/api";
+import { adminKeys, queryString } from "@/admin/query";
+import { AppPageHeader } from "@/components/app-page-header";
+import { Sparkline } from "@/components/sparkline";
+import { StatusBadge } from "@/components/status-badge";
+import type {
+  AdminNode,
+  AdminUser,
+  NetworkEventSeriesResponse,
+  Overview,
+  SystemLog,
+  TrafficRow,
+  TrafficSeriesResponse
+} from "../types";
 import { formatBytes } from "../utils";
 import {
   adminPath,
@@ -26,34 +39,47 @@ import {
   isNodeDrifting,
   isNodeOnline,
   nodeHealth,
-  PageHeader,
-  PageTopBar,
   rowDelay,
-  SparkArea,
-  toSparkline,
+  rowLinkClassName,
   toneClass,
   WidgetHeader,
-  type SparklinePoint,
   type Tone
 } from "./operations-common";
 
 type TrafficByUser = { user: string; upload: number; download: number };
 
-// Placeholder shapes preserve the dashboard layout until the server exposes
-// time-series telemetry. They must not be interpreted as measurements. When the
-// time-series API lands, enable the time-range control and the tile's "live" delta.
-const PLACEHOLDER_NODE_SPARKLINES = [
-  [18, 17, 19, 18, 21, 20, 22, 23, 21, 24, 26, 25, 27, 29, 31, 28, 30, 33],
-  [8, 8, 9, 40, 10, 9, 11, 33, 10, 9, 10, 9, 11, 10, 12, 16, 10, 9],
-  [12, 14, 11, 26, 13, 12, 15, 32, 14, 23, 13, 12, 11, 26, 12, 13, 11, 12],
-  [10, 10, 10, 11, 10, 10, 12, 10, 10, 11, 10, 10, 10, 11, 10, 10, 10, 10],
-] as const;
+// Overview trends are a fixed seven-day, day-bucketed window. The server owns
+// bucketing and zero-fill, so every series arrives contiguous and oldest first.
+const TREND_DAYS = 7;
+const TREND_LABEL = "last 7 days";
+// Node rows only show the first few nodes, but the ranking is by volume, so ask
+// for the full page rather than the default 25 to keep quiet nodes covered.
+const NODE_TREND_LIMIT = 100;
+const TREND_TONE = "text-kumo-info";
 
-const PLACEHOLDER_ANALYTICS_SPARKLINES = {
-  traffic: [0, 12, 8, 18, 16, 22, 20, 26, 24, 29, 28, 36, 34, 41, 39, 44, 42, 48],
-  users: [8, 9, 10, 10, 12, 12, 13, 15, 15, 16, 18, 19, 18, 21, 23, 22, 24, 26],
-  logs: [4, 8, 5, 12, 7, 10, 13, 9, 14, 18, 16, 20, 17, 22, 24, 21, 23, 25],
-} as const;
+const USER_STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  disabled: "Disabled"
+};
+
+function userStatusLabel(status: string): string {
+  if (USER_STATUS_LABELS[status]) return USER_STATUS_LABELS[status];
+  return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Unknown";
+}
+
+// The server returns at most 10 recent system logs, so counts saturate there.
+function formatLogCount(count: number): string {
+  return count >= 10 ? "10+" : formatCompactNumber(count);
+}
+
+function useSpaNavigate() {
+  const navigate = useNavigate();
+  return (path: string) => (event: MouseEvent<HTMLElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(path);
+  };
+}
 
 function groupTrafficByUser(rows: TrafficRow[]): TrafficByUser[] {
   const byUser = new Map<string, TrafficByUser>();
@@ -69,8 +95,72 @@ function groupTrafficByUser(rows: TrafficRow[]): TrafficByUser[] {
   return [...byUser.values()].sort((a, b) => b.upload + b.download - (a.upload + a.download));
 }
 
-function placeholderNodeSparkline(index: number): SparklinePoint[] {
-  return toSparkline(PLACEHOLDER_NODE_SPARKLINES[index % PLACEHOLDER_NODE_SPARKLINES.length]);
+type TrendWindow = { start: string; end: string; bucket: "day"; offset_minutes: number };
+
+function useTrendWindow(): TrendWindow {
+  // Truncating the window end to the hour keeps the query key — and with it the
+  // cache entry — stable while the operator moves between pages.
+  return useMemo(() => {
+    const end = startOfHour(new Date());
+    return {
+      start: startOfDay(subDays(end, TREND_DAYS - 1)).toISOString(),
+      end: end.toISOString(),
+      bucket: "day",
+      // The server adds this to UTC to get local time, the opposite of the JS sign.
+      offset_minutes: -end.getTimezoneOffset()
+    };
+  }, []);
+}
+
+function useTrafficTrend(trend: TrendWindow, group: "total" | "node") {
+  const { request } = useAdminApi();
+  const params = { ...trend, group, limit: group === "node" ? NODE_TREND_LIMIT : undefined };
+  return useQuery({
+    queryKey: adminKeys.trafficSeries(params),
+    queryFn: () => request<TrafficSeriesResponse>(`/api/admin/traffic/series${queryString(params)}`),
+    staleTime: 60_000
+  });
+}
+
+function useNetworkEventTrend(trend: TrendWindow) {
+  const { request } = useAdminApi();
+  const params = { ...trend, group: "total" };
+  return useQuery({
+    queryKey: adminKeys.networkEventSeries(params),
+    queryFn: () => request<NetworkEventSeriesResponse>(`/api/admin/network-events/series${queryString(params)}`),
+    staleTime: 60_000
+  });
+}
+
+function bucketBytes(point: { uplink_billable_bytes: number; downlink_billable_bytes: number }): number {
+  return point.uplink_billable_bytes + point.downlink_billable_bytes;
+}
+
+export function trafficTrendValues(response: TrafficSeriesResponse | undefined, key = "total"): number[] {
+  const series = response?.series.find((entry) => entry.key === key);
+  return series ? series.points.map(bucketBytes) : [];
+}
+
+export function trafficTrendTotal(response: TrafficSeriesResponse | undefined, key = "total"): number | null {
+  const series = response?.series.find((entry) => entry.key === key);
+  return series ? bucketBytes(series.totals) : null;
+}
+
+export function nodeTrendValues(response: TrafficSeriesResponse | undefined): Map<string, number[]> {
+  const trends = new Map<string, number[]>();
+  for (const series of response?.series ?? []) {
+    trends.set(series.key, series.points.map(bucketBytes));
+  }
+  return trends;
+}
+
+export function networkEventTrend(response: NetworkEventSeriesResponse | undefined): {
+  values: number[];
+  total: number | null;
+} {
+  const series = response?.series.find((entry) => entry.key === "total");
+  if (!series) return { values: [], total: null };
+  return { values: series.points.map((point) => point.count), total: series.total };
 }
 
 function AnalyticsTile({
@@ -78,23 +168,24 @@ function AnalyticsTile({
   value,
   detail,
   href,
-  sparkline,
-  gradientId,
-  delta,
+  trend,
+  trendLabel,
   delay = 0
 }: {
   label: string;
   value: string;
   detail?: string;
   href: string;
-  sparkline?: SparklinePoint[];
-  gradientId?: string;
-  delta?: string;
+  trend?: readonly number[];
+  trendLabel?: string;
   delay?: number;
 }) {
+  const spaNavigate = useSpaNavigate();
+  const sparkline = trend && trend.length > 1 && trendLabel ? trend : null;
   return (
     <Link
-      href={href}
+      href={adminPath(href)}
+      onClick={spaNavigate(href)}
       variant="current"
       className="group flex h-full w-full !no-underline outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-kumo-brand animate-fade-slide-in"
       style={rowDelay(delay)}
@@ -104,22 +195,16 @@ function AnalyticsTile({
           sparkline ? "pb-0" : "pb-4"
         }`}
       >
-        <div className="flex items-center gap-1 text-xs font-medium text-kumo-subtle">
+        <div className="flex items-center text-xs font-medium text-kumo-subtle">
           {label}
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-xl font-semibold leading-none text-kumo-default">{value}</span>
           {detail ? <span className="text-sm font-medium text-kumo-subtle">{detail}</span> : null}
-          {delta ? (
-            <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-xs font-semibold text-kumo-success">
-              <TrendUpIcon className="size-3" />
-              {delta}
-            </span>
-          ) : null}
         </div>
-        {sparkline && gradientId ? (
-          <div className="-mx-4 mt-auto w-[calc(100%+2rem)] min-w-0">
-            <SparkArea data={sparkline} gradientId={gradientId} />
+        {sparkline && trendLabel ? (
+          <div className={`-mx-4 mt-auto h-8 w-[calc(100%+2rem)] min-w-0 ${TREND_TONE}`}>
+            <Sparkline values={sparkline} label={trendLabel} />
           </div>
         ) : null}
       </div>
@@ -157,8 +242,10 @@ function AnalyticsCard({
 
 type ListWidgetItem = {
   label: string;
+  // Router path ("/users"); rendered with the /admin prefix so middle-click works.
   href: string;
   value?: string;
+  valueBadge?: ReactNode;
   detail?: string;
   icon?: Icon;
   iconClassName?: string;
@@ -172,6 +259,7 @@ function SimpleListWidget({
   icon,
   href,
   actionHref,
+  emptyTitle,
   items
 }: {
   title: string;
@@ -179,65 +267,72 @@ function SimpleListWidget({
   icon?: Icon;
   href?: string;
   actionHref?: string;
+  emptyTitle?: string;
   items: ListWidgetItem[];
 }) {
+  const spaNavigate = useSpaNavigate();
   return (
     <LayerCard className="flex h-full w-full flex-col">
       <WidgetHeader title={title} count={count} icon={icon} href={href} actionHref={actionHref} />
       <LayerCard.Primary className="flex-1 p-0">
         <div className="relative flex-1">
-          <ul role="list" className="mx-3 flex flex-col divide-y divide-kumo-hairline">
-            {items.map((item, index) => {
-              const ItemIcon = item.icon;
-              return (
-                <li
-                  key={`${item.label}-${index}`}
-                  className="flex h-12 items-center justify-between gap-3 px-1 animate-fade-slide-in"
-                  style={rowDelay(index)}
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    {ItemIcon ? (
-                      <ItemIcon className={`size-4 shrink-0 ${item.iconClassName ?? "text-kumo-subtle"}`} />
-                    ) : null}
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                      <Link
-                        href={item.href}
-                        variant="current"
-                        target={item.external ? "_blank" : undefined}
-                        rel={item.external ? "noreferrer" : undefined}
-                        className="flex w-full min-w-0 items-center gap-2 overflow-hidden !no-underline !decoration-[0.1em] text-base font-medium text-kumo-default hover:!underline"
-                      >
-                        <span className="truncate">{item.label}</span>
-                        {item.external ? <ArrowRightIcon className="size-4 shrink-0 text-kumo-subtle" /> : null}
-                      </Link>
-                      {item.detail ? <div className="truncate text-xs text-kumo-subtle">{item.detail}</div> : null}
+          {items.length === 0 ? (
+            <div className="flex min-h-36 items-center justify-center p-4">
+              <Empty size="sm" title={emptyTitle ?? "No items"} />
+            </div>
+          ) : (
+            <ul role="list" className="mx-3 flex flex-col divide-y divide-kumo-hairline">
+              {items.map((item, index) => {
+                const ItemIcon = item.icon;
+                return (
+                  <li
+                    key={`${item.label}-${item.href}-${index}`}
+                    className="flex h-12 items-center justify-between gap-3 px-1 animate-fade-slide-in"
+                    style={rowDelay(index)}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      {ItemIcon ? (
+                        <ItemIcon className={`size-4 shrink-0 ${item.iconClassName ?? "text-kumo-subtle"}`} />
+                      ) : null}
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <Link
+                          href={item.external ? item.href : adminPath(item.href)}
+                          onClick={item.external ? undefined : spaNavigate(item.href)}
+                          variant="current"
+                          target={item.external ? "_blank" : undefined}
+                          rel={item.external ? "noreferrer" : undefined}
+                          className={`${rowLinkClassName} flex w-full items-center gap-2 overflow-hidden`}
+                        >
+                          <span className="truncate">{item.label}</span>
+                          {item.external ? <ArrowRightIcon className="size-4 shrink-0 text-kumo-subtle" /> : null}
+                        </Link>
+                        {item.detail ? <div className="truncate text-xs text-kumo-subtle">{item.detail}</div> : null}
+                      </div>
                     </div>
-                  </div>
-                  {item.value ? (
-                    <span className={`max-w-[40%] shrink-0 truncate whitespace-nowrap text-sm font-medium tabular-nums ${toneClass(item.valueTone ?? "subtle")}`} title={item.value}>
-                      {item.value}
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                    {item.valueBadge ? (
+                      <span className="shrink-0">{item.valueBadge}</span>
+                    ) : item.value ? (
+                      <span className={`max-w-[40%] shrink-0 truncate whitespace-nowrap text-sm font-medium tabular-nums ${toneClass(item.valueTone ?? "subtle")}`} title={item.value}>
+                        {item.value}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </LayerCard.Primary>
     </LayerCard>
   );
 }
 
-function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
+function NodesWidget({ nodes, trends }: { nodes: AdminNode[]; trends: Map<string, number[]> }) {
+  const spaNavigate = useSpaNavigate();
   const rows = nodes.slice(0, 4);
   return (
     <LayerCard className="flex h-full w-full flex-col">
-      <WidgetHeader
-        title="Nodes"
-        count={nodes.length}
-        href={adminPath("/nodes")}
-        actionHref={adminPath("/nodes")}
-      />
+      <WidgetHeader title="Nodes" count={nodes.length} href="/nodes" actionHref="/nodes" />
       <LayerCard.Primary className="flex-1 p-0">
         <div className="relative flex-1">
           {rows.length > 0 ? (
@@ -245,6 +340,7 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
               {rows.map((node, index) => {
                 const status = nodeHealth(node);
                 const StatusIcon = status.icon;
+                const trend = trends.get(node.name) ?? [];
                 return (
                   <li
                     key={node.id}
@@ -256,16 +352,19 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
                       <div className="z-10 col-span-2 col-start-1 row-start-1 flex min-w-0 items-center pr-10">
                         <Link
                           href={adminPath("/nodes")}
+                          onClick={spaNavigate("/nodes")}
                           variant="current"
-                          className="block max-w-full truncate bg-kumo-base pr-2 text-base font-medium text-kumo-default !no-underline !decoration-[0.1em] group-hover/row:!underline"
+                          className={`${rowLinkClassName} block max-w-full truncate bg-kumo-base pr-2`}
                           title={node.name}
                         >
                           {node.name}
                         </Link>
                       </div>
-                      <div className="absolute right-0 bottom-0 flex h-8 w-[40%] min-w-0 items-center pb-px">
-                        <SparkArea data={placeholderNodeSparkline(index)} gradientId={`node-sparkline-${index}`} />
-                      </div>
+                      {trend.length > 1 ? (
+                        <div className={`absolute right-0 bottom-0 h-8 w-[40%] min-w-0 pb-px ${TREND_TONE}`}>
+                          <Sparkline values={trend} label={`Billable traffic for ${node.name}, ${TREND_LABEL}`} />
+                        </div>
+                      ) : null}
                     </div>
                     <span className="truncate text-right text-sm text-kumo-subtle" title={formatNodeVersion(node)}>{formatNodeVersion(node)}</span>
                   </li>
@@ -273,8 +372,8 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
               })}
             </ul>
           ) : (
-            <div className="flex h-full min-h-36 items-center justify-center text-sm text-kumo-subtle">
-              No nodes.
+            <div className="flex min-h-36 items-center justify-center p-4">
+              <Empty size="sm" title="No nodes" />
             </div>
           )}
         </div>
@@ -284,27 +383,23 @@ function NodesWidget({ nodes }: { nodes: AdminNode[] }) {
 }
 
 function buildUserItems(users: AdminUser[]): ListWidgetItem[] {
-  if (users.length === 0) {
-    return [{ label: "No users", href: adminPath("/users"), value: "—", icon: UsersIcon }];
-  }
   return users.slice(0, 4).map((user) => ({
     label: user.display_name || user.name,
-    href: adminPath("/users"),
-    value: user.status,
+    href: "/users",
+    valueBadge: (
+      <StatusBadge tone={user.status === "active" ? "success" : "neutral"}>
+        {userStatusLabel(user.status)}
+      </StatusBadge>
+    ),
     detail: `${user.proxy_count} proxies`,
-    icon: user.status === "active" ? CheckCircleIcon : XCircleIcon,
-    iconClassName: user.status === "active" ? "text-kumo-success" : "text-kumo-inactive",
-    valueTone: user.status === "active" ? "success" : "subtle",
+    icon: UsersIcon
   }));
 }
 
 function buildTrafficItems(trafficUsers: TrafficByUser[]): ListWidgetItem[] {
-  if (trafficUsers.length === 0) {
-    return [{ label: "No traffic yet", href: adminPath("/traffic"), value: "—", icon: GaugeIcon }];
-  }
   return trafficUsers.slice(0, 4).map((row) => ({
     label: row.user,
-    href: adminPath("/traffic"),
+    href: "/traffic",
     value: formatBytes(row.upload + row.download),
     detail: `${formatBytes(row.upload)} up, ${formatBytes(row.download)} down`,
     icon: GaugeIcon
@@ -318,20 +413,20 @@ function buildSystemItems(overview: Overview | null): ListWidgetItem[] {
   const items: ListWidgetItem[] = [
     {
       label: "BoxFleet server",
-      href: adminPath("/settings"),
+      href: "/settings",
       value: release?.boxfleet_version ?? "—",
       icon: HardDrivesIcon
     },
     {
       label: "sing-box target",
-      href: adminPath("/settings"),
+      href: "/settings",
       value: release?.sing_box_version ?? "—",
       icon: ArrowsClockwiseIcon
     },
     {
       label: "System logs",
-      href: adminPath("/system-logs"),
-      value: formatCompactNumber(logs.length),
+      href: "/system-logs",
+      value: formatLogCount(logs.length),
       detail: note || undefined,
       icon: ListChecksIcon
     }
@@ -347,13 +442,10 @@ function latestLogTone(log: SystemLog): Tone {
 }
 
 function buildLogItems(logs: SystemLog[]): ListWidgetItem[] {
-  if (logs.length === 0) {
-    return [{ label: "No recent log events", href: adminPath("/system-logs"), value: "—", icon: ListChecksIcon }];
-  }
   return logs.slice(0, 4).map((log) => ({
     label: log.message,
-    href: adminPath("/system-logs"),
-    value: log.level || log.service,
+    href: "/system-logs",
+    value: log.level || "—",
     detail: `${log.node} · ${log.service}`,
     icon: ListChecksIcon,
     valueTone: latestLogTone(log)
@@ -367,17 +459,17 @@ function NextStepsWidget() {
       items={[
         {
           label: "Create or enroll a node",
-          href: adminPath("/nodes"),
+          href: "/nodes",
           icon: HardDrivesIcon
         },
         {
           label: "Invite users and issue access",
-          href: adminPath("/users"),
+          href: "/users",
           icon: UsersIcon
         },
         {
           label: "Review recent network events",
-          href: adminPath("/network-events"),
+          href: "/network-events",
           icon: ChartLineUpIcon
         }
       ]}
@@ -394,6 +486,7 @@ function OverviewGridItem({ children, wide = false }: { children: ReactNode; wid
 }
 
 export function OverviewPage({ overview }: { overview: Overview | null }) {
+  const navigate = useNavigate();
   const nodes = overview?.nodes ?? [];
   const users = overview?.users ?? [];
   const trafficRows = overview?.traffic ?? [];
@@ -406,142 +499,147 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
   const totalTraffic = trafficRows.reduce((sum, row) => sum + row.billable_bytes, 0);
   const trafficUsers = groupTrafficByUser(trafficRows);
 
+  const trendWindow = useTrendWindow();
+  const trafficTrendQuery = useTrafficTrend(trendWindow, "total");
+  const nodeTrafficTrendQuery = useTrafficTrend(trendWindow, "node");
+  const eventTrendQuery = useNetworkEventTrend(trendWindow);
+
+  const trafficTrend = trafficTrendValues(trafficTrendQuery.data);
+  const trafficTrendWindowTotal = trafficTrendTotal(trafficTrendQuery.data);
+  const nodeTrends = useMemo(() => nodeTrendValues(nodeTrafficTrendQuery.data), [nodeTrafficTrendQuery.data]);
+  const eventTrend = networkEventTrend(eventTrendQuery.data);
+
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="Account home" />
+      <AppPageHeader
+        title="Overview"
+        description="Central control plane for nodes, users, traffic, and config versions."
+        actions={
+          <Button variant="primary" icon={PlusIcon} onClick={() => navigate("/nodes")}>
+            Add node
+          </Button>
+        }
+      />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader
-          title="BoxFleet Admin"
-          description="Central control plane for nodes, users, traffic, and config versions."
-          actions={
-            <>
-              <LinkButton href={adminPath("/nodes")} variant="primary" icon={PlusIcon}>
-                Add
-              </LinkButton>
-            </>
-          }
-        />
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col px-6 md:gap-4 md:px-8 lg:px-10 xl:gap-6">
-          <div className="pb-6 tabular-nums xl:pb-8">
-            <div className="grid auto-rows-min grid-cols-6 gap-4">
-              <div className="col-span-6">
-                <section aria-label="Analytics" className="w-full space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <h2 className="text-base font-semibold text-kumo-default">Analytics</h2>
-                      <p className="text-xs text-kumo-subtle">Trend lines are layout previews until historical telemetry is available.</p>
-                    </div>
-                    {/* TODO(time-series): enable this picker when its value drives the telemetry query. */}
-                    <Button variant="secondary" icon={CalendarBlankIcon} disabled>
-                      Last 24 hours
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <AnalyticsCard
-                      title="Security"
-                      icon={ShieldCheckIcon}
-                      tiles={[
-                        {
-                          label: "Nodes needing attention",
-                          value: formatCompactNumber(attentionNodes),
-                          detail: `${driftingNodes} config drift`,
-                          href: adminPath("/nodes")
-                        },
-                        {
-                          label: "System warnings",
-                          value: formatCompactNumber(logs.filter((log) => latestLogTone(log) !== "subtle").length),
-                          detail: `${logs.length} log events`,
-                          href: adminPath("/system-logs")
-                        }
-                      ]}
-                    />
-                    <AnalyticsCard
-                      title="Performance"
-                      icon={GaugeIcon}
-                      tiles={[
-                        {
-                          label: "Billable traffic",
-                          value: formatBytes(totalTraffic),
-                          href: adminPath("/traffic"),
-                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.traffic),
-                          gradientId: "traffic-analytics-sparkline"
-                          // TODO(time-series): add delta="live" only after the sparkline is backed by telemetry.
-                        },
-                        {
-                          label: "Traffic users",
-                          value: formatCompactNumber(trafficUsers.length),
-                          detail: `${activeUsers}/${users.length} active`,
-                          href: adminPath("/traffic")
-                        }
-                      ]}
-                    />
-                    <AnalyticsCard
-                      title="Activity"
-                      icon={ChartLineUpIcon}
-                      tiles={[
-                        {
-                          label: "Active nodes",
-                          value: `${activeNodes}/${nodes.length}`,
-                          href: adminPath("/nodes"),
-                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.users),
-                          gradientId: "nodes-analytics-sparkline"
-                        },
-                        {
-                          label: "Recent logs",
-                          value: formatCompactNumber(logs.length),
-                          href: adminPath("/system-logs"),
-                          sparkline: toSparkline(PLACEHOLDER_ANALYTICS_SPARKLINES.logs),
-                          gradientId: "logs-analytics-sparkline"
-                        }
-                      ]}
-                    />
-                  </div>
-                </section>
-              </div>
-
-              <OverviewGridItem>
-                <NodesWidget nodes={nodes} />
-              </OverviewGridItem>
-              <OverviewGridItem>
-                <SimpleListWidget
-                  title="Users"
-                  count={users.length}
-                  icon={UsersIcon}
-                  href={adminPath("/users")}
-                  actionHref={adminPath("/users")}
-                  items={buildUserItems(users)}
-                />
-              </OverviewGridItem>
-              <OverviewGridItem>
-                <SimpleListWidget
-                  title="Traffic"
-                  count={trafficUsers.length}
-                  icon={GaugeIcon}
-                  href={adminPath("/traffic")}
-                  items={buildTrafficItems(trafficUsers)}
-                />
-              </OverviewGridItem>
-              <OverviewGridItem>
-                <SimpleListWidget
-                  title="System"
-                  icon={HardDrivesIcon}
-                  href={adminPath("/settings")}
-                  items={buildSystemItems(overview)}
-                />
-              </OverviewGridItem>
-              <OverviewGridItem wide>
-                <SimpleListWidget
-                  title="System logs"
-                  count={logs.length}
-                  icon={ListChecksIcon}
-                  href={adminPath("/system-logs")}
-                  items={buildLogItems(logs)}
-                />
-              </OverviewGridItem>
-              <OverviewGridItem>
-                <NextStepsWidget />
-              </OverviewGridItem>
+        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+          <div className="grid auto-rows-min grid-cols-6 gap-4 tabular-nums">
+            <div className="col-span-6">
+              <section aria-label="Analytics" className="w-full space-y-3">
+                <div>
+                  <h2 className="text-base font-semibold text-kumo-default">Analytics</h2>
+                  <p className="text-xs text-kumo-subtle">Trend lines cover the {TREND_LABEL}, one point per day.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <AnalyticsCard
+                    title="Security"
+                    icon={ShieldCheckIcon}
+                    tiles={[
+                      {
+                        label: "Nodes needing attention",
+                        value: formatCompactNumber(attentionNodes),
+                        detail: `${driftingNodes} config drift`,
+                        href: "/nodes"
+                      },
+                      {
+                        label: "System warnings",
+                        value: formatCompactNumber(logs.filter((log) => latestLogTone(log) !== "subtle").length),
+                        detail: `${formatLogCount(logs.length)} log events`,
+                        href: "/system-logs"
+                      }
+                    ]}
+                  />
+                  <AnalyticsCard
+                    title="Performance"
+                    icon={GaugeIcon}
+                    tiles={[
+                      {
+                        label: "Billable traffic",
+                        value: formatBytes(totalTraffic),
+                        detail: trafficTrendWindowTotal === null
+                          ? undefined
+                          : `${formatBytes(trafficTrendWindowTotal)} ${TREND_LABEL}`,
+                        href: "/traffic",
+                        trend: trafficTrend,
+                        trendLabel: `Billable traffic, ${TREND_LABEL}`
+                      },
+                      {
+                        label: "Traffic users",
+                        value: formatCompactNumber(trafficUsers.length),
+                        detail: `${activeUsers}/${users.length} active`,
+                        href: "/traffic"
+                      }
+                    ]}
+                  />
+                  <AnalyticsCard
+                    title="Activity"
+                    icon={ChartLineUpIcon}
+                    tiles={[
+                      {
+                        // No historical node-status table exists, so this tile
+                        // carries no trend line rather than an invented one.
+                        label: "Active nodes",
+                        value: `${activeNodes}/${nodes.length}`,
+                        href: "/nodes"
+                      },
+                      {
+                        label: "Network events",
+                        value: eventTrend.total === null ? "—" : formatCompactNumber(eventTrend.total),
+                        detail: TREND_LABEL,
+                        href: "/network-events",
+                        trend: eventTrend.values,
+                        trendLabel: `Network events, ${TREND_LABEL}`
+                      }
+                    ]}
+                  />
+                </div>
+              </section>
             </div>
+
+            <OverviewGridItem>
+              <NodesWidget nodes={nodes} trends={nodeTrends} />
+            </OverviewGridItem>
+            <OverviewGridItem>
+              <SimpleListWidget
+                title="Users"
+                count={users.length}
+                icon={UsersIcon}
+                href="/users"
+                actionHref="/users"
+                emptyTitle="No users"
+                items={buildUserItems(users)}
+              />
+            </OverviewGridItem>
+            <OverviewGridItem>
+              <SimpleListWidget
+                title="Traffic"
+                count={trafficUsers.length}
+                icon={GaugeIcon}
+                href="/traffic"
+                emptyTitle="No traffic yet"
+                items={buildTrafficItems(trafficUsers)}
+              />
+            </OverviewGridItem>
+            <OverviewGridItem>
+              <SimpleListWidget
+                title="System"
+                icon={HardDrivesIcon}
+                href="/settings"
+                items={buildSystemItems(overview)}
+              />
+            </OverviewGridItem>
+            <OverviewGridItem wide>
+              <SimpleListWidget
+                title="System logs"
+                count={logs.length}
+                icon={ListChecksIcon}
+                href="/system-logs"
+                emptyTitle="No recent log events"
+                items={buildLogItems(logs)}
+              />
+            </OverviewGridItem>
+            <OverviewGridItem>
+              <NextStepsWidget />
+            </OverviewGridItem>
           </div>
         </div>
       </main>

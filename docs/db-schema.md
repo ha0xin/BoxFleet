@@ -86,6 +86,54 @@ never rewritten after a multiplier changes. Counter regression increments
 `counter_epoch`. Summary reads use maintained rollups rather than scanning all
 deltas.
 
+Bucketed traffic series aggregate `traffic_usage_deltas` directly — there is no
+time-bucketed rollup table. `traffic_usage_totals` is keyed
+`(proxy_user_id, direction)` with no timestamp, node, or proxy column, so it
+cannot be decomposed into buckets. `idx_traffic_usage_deltas_observed`
+(migration 024) leads with `observed_at` and carries `direction`,
+`billable_bytes_delta`, and `raw_bytes_delta`, making the unfiltered range
+aggregation covering; every other delta index leads with an entity column.
+Series reads bound the scan at the API layer instead of at the schema layer.
+
+`traffic_usage_deltas` and `traffic_reports` are never pruned. There is no
+scheduler on the server; network-event retention is piggy-backed inline on
+`RecordLogEvents`. Traffic retention needs the same trick or a real scheduler.
+
+## Time buckets
+
+Every bucketed read derives its keys in one place, `series_common.go`, and both
+the SQL expression and the Go walk are pinned against each other by test.
+
+- Bucket on `window_start` / `window_end` (events) or `observed_at` (traffic).
+  Never on `created_at`: the log-event upsert bumps `created_at` to `now` on
+  every merge, so it is last-touched, not first-seen, and bucketing on it
+  silently shifts events into later buckets.
+- Hour buckets are UTC (`substr(col,1,13) || ':00:00Z'`).
+- Day buckets honour an `offset_minutes` parameter and resolve to the UTC
+  instant of local midnight. Valid range is `-720`..`840` — real UTC offsets run
+  from -12:00 to +14:00.
+- Both slice `substr(col,1,19)` to fixed width before any `datetime()` call.
+  Stored values are RFC3339Nano with up to nine fractional digits and SQLite's
+  date parser is reliably specified to three.
+- Span ceilings are enforced by the API: 8 days for hour buckets, 400 days for
+  day buckets, 422 beyond.
+- Zero-fill is server-side. Clients receive contiguous, oldest-first points and
+  must never bucket, fill, or sort.
+
+`observed_at`, `window_start`, and `window_end` all come from the agent's clock
+via sing-box timestamps and are unclamped; only `created_at` is server
+authoritative. A skewed node lands in the wrong bucket and nothing corrects it.
+
+Retention also skews the oldest buckets: pruning is on `window_end` while reads
+filter on both `window_end >= start` and `window_start <= end`, so a long-lived
+connection whose `window_start` predates the cutoff survives. Buckets near the
+retention boundary are partially populated and not reproducible afterwards.
+
+Soft-deleted users are handled **asymmetrically, deliberately**: traffic series
+exclude them, matching the existing traffic summaries; network-event series
+include them, matching the paged event table rendered above the chart. Each
+aggregation matches the pipeline it extends. Do not unify these.
+
 ## Logs
 
 Node log uploads are parsed into aggregated `log_events`. Raw rows are not
@@ -93,8 +141,52 @@ retained in normal operation; `raw_message` on an event is a compact diagnostic
 sample. FTS tables and triggers maintain operator search. Retention is controlled
 by the `network_event_retention_days` setting, default 90.
 
-`system_logs` and `raw_log_entries` remain in the schema for compatibility but
-the current ingestion path does not retain them.
+`RecordSystemLogs` writes `system_logs` rows keyed by a
+`(service, cursor, message)` hash. `raw_log_entries` remains in the schema for
+compatibility but the current ingestion path does not retain it.
+
+Only `action = 'connect'` rows reach `log_events`. The parser also produces
+`invalid_connection` and `outbound_connect`, but neither carries an `auth_name`,
+so ingestion drops both. Grouping a series by action returns one bucket.
+
+`target_host` is stored with its original casing — only `aggregate_key`
+lowercases it — so `Example.com` and `example.com` are distinct rows. Any host
+aggregation must `GROUP BY lower(target_host)`.
+
+`log_events` has no `proxy_id` and no byte columns, so proxy grouping is
+traffic-only and **bytes can never be attributed to a destination host**. The
+service audit is a connections-per-service view.
+
+## Domain service classification
+
+`domain_service_overrides` (migration 024) stores operator-supplied
+`suffix -> (service, label, category)` mappings. `suffix` is the primary key and
+is normalized on write: lowercased, trimmed, leading and trailing dots stripped;
+empty values and suffixes containing `/ ? # @` or whitespace are rejected.
+
+Classification happens at **read time**, not at ingest. Overrides are consulted
+first, then the embedded catalog in `internal/servicecatalog`, then eTLD+1 via
+`publicsuffix`; IP literals short-circuit to `direct-ip`.
+
+There is deliberately **no `service` column on `log_events`**:
+
+- A stored column freezes each row's classification at ingest, so a catalog or
+  override change would only affect future rows.
+- Correcting history would mean a mass `UPDATE` over the highest-volume table.
+  `log_events` search is maintained by five FTS triggers, and every updated row
+  fires `log_events_search_after_update`, which deletes and re-inserts that
+  row's FTS3 document — the backfill cost is the FTS rebuild, not the update.
+- Read-time classification is a pure function over a bounded, already-grouped
+  host list, so a catalog bump retroactively improves historical views with no
+  backfill and no schema change.
+
+`idx_log_events_visible_window_host` covers the host aggregation:
+`(window_end, window_start, target_host, count) WHERE proxy_user_id IS NOT NULL`.
+It is a bounded range scan rather than a genuinely covering one — the query
+references `proxy_user_id` explicitly and the partial predicate does not satisfy
+the planner's covering check. Adding `proxy_user_id` to the index would satisfy
+it at the cost of a TEXT id per row on the highest-volume table; that trade was
+measured and declined.
 
 ## Mihomo data
 

@@ -24,6 +24,8 @@ import (
 	"github.com/haoxin/boxfleet/internal/model"
 )
 
+const defaultServiceReadyWait = 20 * time.Second
+
 var (
 	ErrAgentRestartRequired = errors.New("agent restart required to continue update")
 	semanticVersionPattern  = regexp.MustCompile(`(?i)(v?\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?)`)
@@ -190,6 +192,10 @@ func (a *Agent) updateAgent(
 	if err := operationBoundary(ctx, cancelRequested); err != nil {
 		return false, err
 	}
+	// Serialize the live install against the config apply path only from here on:
+	// the download above must not block heartbeats for minutes.
+	a.maintenanceMu.Lock()
+	defer a.maintenanceMu.Unlock()
 	if err := a.ensureAgentGuardBinary(); err != nil {
 		return false, err
 	}
@@ -262,6 +268,12 @@ func (a *Agent) updateSingBox(
 	if !strings.Contains(string(output), "with_v2ray_api") {
 		return errors.New("candidate sing-box was not built with with_v2ray_api")
 	}
+	// Everything above only wrote to the download and release directories. The
+	// live install is mutated from here on, so it is serialized against the config
+	// apply path — while the (possibly multi-minute) download above is not, or the
+	// node would look heartbeat-dead for the whole update.
+	a.maintenanceMu.Lock()
+	defer a.maintenanceMu.Unlock()
 	if err := a.Runner.Run(ctx, candidate, "check", "-c", a.Config.SingBoxConfig); err != nil {
 		return fmt.Errorf("candidate sing-box config check: %w", err)
 	}
@@ -337,6 +349,7 @@ func (a *Agent) updateSingBox(
 	if err := a.saveUpdateCheckpoint(state, *checkpoint); err != nil {
 		return err
 	}
+	a.pruneReleaseDirs("sing-box", candidate, previous)
 	heartbeatCtx, heartbeatCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	heartbeatStatus := "ok"
 	if disabled {
@@ -371,6 +384,7 @@ func (a *Agent) downloadAndInstallCandidate(ctx context.Context, state *Operatio
 	if valid, _ := fileMatchesAsset(finalPath, asset); valid {
 		return finalPath, nil
 	}
+	a.pruneDownloadDirs(state.Assignment.ID)
 	downloadDir := filepath.Join(a.Config.InstallDir, "downloads", state.Assignment.ID)
 	if err := os.MkdirAll(downloadDir, 0o700); err != nil {
 		return "", err
@@ -447,6 +461,9 @@ downloaded:
 	if err != nil || !valid {
 		return "", fmt.Errorf("installed candidate failed checksum verification: %w", err)
 	}
+	// The partial file was renamed away; drop the directory once it is empty so a
+	// small node does not accumulate one directory per operation.
+	_ = os.Remove(downloadDir)
 	if err := a.reportOperationEventWithRetry(ctx, state, model.NodeOperationEventReport{
 		Status: "running", Phase: "verifying", Message: "download size and SHA256 verified",
 		Details: mustJSONObject(map[string]any{"component": asset.Component, "sha256": asset.SHA256}),
@@ -456,12 +473,63 @@ downloaded:
 	return finalPath, nil
 }
 
-// streamUnverifiedBinary is retained for the bootstrap-only sing_box_url path,
-// where no release checksum is available. It still never buffers the binary in
-// memory: grab streams into a same-filesystem temporary file, which is renamed
-// only after a complete transfer. Managed updates always use the stricter
-// size+SHA256 path above.
-func (a *Agent) streamUnverifiedBinary(ctx context.Context, sourceURL, target string) error {
+// pruneDownloadDirs removes partial downloads left behind by failed or cancelled
+// operations. Nodes are disk-constrained, and a resumable partial is only useful
+// for the operation that created it.
+func (a *Agent) pruneDownloadDirs(keepOperationID string) {
+	root := filepath.Join(a.Config.InstallDir, "downloads")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Name() == keepOperationID {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+	}
+}
+
+// pruneReleaseDirs keeps only the release directories holding the given
+// binaries — the running version and the one it can roll back to — and removes
+// superseded or abandoned downloads.
+func (a *Agent) pruneReleaseDirs(componentDir string, keep ...string) {
+	for _, binary := range keep {
+		if binary == "" {
+			// An unknown live target means nothing can be proven stale.
+			return
+		}
+	}
+	root := filepath.Join(a.Config.InstallDir, "releases", componentDir)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		retained := false
+		for _, binary := range keep {
+			if samePath(dir, filepath.Dir(binary)) {
+				retained = true
+				break
+			}
+		}
+		if !retained {
+			_ = os.RemoveAll(dir)
+		}
+	}
+}
+
+// streamBootstrapBinary is the bootstrap-only sing_box_url path. It never
+// buffers the binary in memory: grab streams into a same-filesystem temporary
+// file, which is renamed only after a complete transfer and, when the bootstrap
+// carried a sing_box_sha256, only after that digest matches. Without a digest
+// the binary is trusted on transport alone, which is why sing_box_url must be
+// https. Managed updates always use the stricter size+SHA256 path above.
+func (a *Agent) streamBootstrapBinary(ctx context.Context, sourceURL, target, expectedSHA256 string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
@@ -483,6 +551,12 @@ func (a *Agent) streamUnverifiedBinary(ctx context.Context, sourceURL, target st
 		_ = os.Remove(temporary)
 		return err
 	}
+	if expectedSHA256 != "" {
+		if err := verifyFileSHA256(temporary, expectedSHA256); err != nil {
+			_ = os.Remove(temporary)
+			return err
+		}
+	}
 	if err := os.Chmod(temporary, defaultBinaryFilePerm); err != nil {
 		return err
 	}
@@ -493,6 +567,23 @@ func (a *Agent) streamUnverifiedBinary(ctx context.Context, sourceURL, target st
 		return err
 	}
 	return syncDirectory(filepath.Dir(target))
+}
+
+func verifyFileSHA256(path, expected string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.CopyBuffer(hash, file, make([]byte, 128*1024)); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actual, expected) {
+		return fmt.Errorf("download SHA256 is %s, want %s", actual, expected)
+	}
+	return nil
 }
 
 func (a *Agent) preserveCurrentBinary(currentPath, component, operationID string) (string, error) {
@@ -529,7 +620,11 @@ func switchVersionedBinary(linkPath, nextTarget, previousTarget string) error {
 }
 
 func (a *Agent) waitServiceActive(ctx context.Context, service string) error {
-	backoff := retry.WithMaxDuration(20*time.Second, retry.NewConstant(time.Second))
+	wait := a.ServiceReadyWait
+	if wait <= 0 {
+		wait = defaultServiceReadyWait
+	}
+	backoff := retry.WithMaxDuration(wait, retry.NewConstant(time.Second))
 	return retry.Do(ctx, backoff, func(ctx context.Context) error {
 		output, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", service)
 		if err != nil {

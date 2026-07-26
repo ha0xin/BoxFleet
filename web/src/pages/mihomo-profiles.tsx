@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
 import {
   ArrowDownIcon,
@@ -9,23 +12,24 @@ import {
   BracketsCurlyIcon,
   CodeIcon,
   CopyIcon,
-  DotsThreeIcon,
   FunnelIcon,
   LinkSimpleIcon,
   PencilSimpleIcon,
   PlusIcon,
   TrashIcon
 } from "@phosphor-icons/react";
-import { Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
+import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
 
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { MihomoCodeEditor } from "@/components/mihomo-code-editor";
 import { useAdminApi, type AdminRequest } from "@/admin/api";
 import { adminKeys } from "@/admin/query";
 import { useSubscription } from "@/admin/use-subscription";
-import { AdminPagination, SortHead, TableEmpty, TableLoading } from "@/components/admin-table";
+import { AppPageHeader } from "@/components/app-page-header";
+import { RowActionsMenu } from "@/components/row-actions-menu";
+import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { copyText, formatDateTime } from "@/utils";
-import { formatRelativeTime, PageHeader, PageTopBar, rowLinkClassName } from "./operations-common";
+import { formatRelativeTime, rowLinkClassName } from "./operations-common";
 import type {
   AdminUser,
   MihomoPreview,
@@ -94,17 +98,16 @@ export function MihomoProfilesPage() {
   const templates = templatesQuery.data ?? [];
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="Mihomo Profiles" />
+      <AppPageHeader
+        title="Mihomo Profiles"
+        description="Build complete Mihomo subscriptions from inline proxies and ordered rewrite pipelines."
+        actions={
+          <Button variant="primary" icon={PlusIcon} onClick={() => tab === "configurations" ? navigate("/mihomo-profiles/new") : setTemplateDialog("new")}>
+            {tab === "configurations" ? "New configuration" : "New rewrite"}
+          </Button>
+        }
+      />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader
-          title="Mihomo Profiles"
-          description="Build complete Mihomo subscriptions from inline proxies and ordered rewrite pipelines."
-          actions={
-            <Button variant="primary" icon={PlusIcon} onClick={() => tab === "configurations" ? navigate("/mihomo-profiles/new") : setTemplateDialog("new")}>
-              {tab === "configurations" ? "New configuration" : "New rewrite"}
-            </Button>
-          }
-        />
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
           <div className="border-b border-kumo-line">
             <Tabs
@@ -168,10 +171,9 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
   const total = rows.length;
   const offset = (page - 1) * perPage;
   const visible = rows.slice(offset, offset + perPage);
-  function setSort(column: string) {
-    const next = column as ConfigurationSort;
-    if (sort === next) setDirection((current) => current === "asc" ? "desc" : "asc");
-    else { setSortValue(next); setDirection(next === "updated" ? "desc" : "asc"); }
+  function setSort(column: ConfigurationSort) {
+    if (sort === column) setDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSortValue(column); setDirection(column === "updated" ? "desc" : "asc"); }
     setPage(1);
   }
   return (
@@ -187,31 +189,34 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
         setFilter={(value) => { setFilter(value as ConfigurationFilter); setPage(1); }}
         options={[{ value: "all", label: "All" }, { value: "yaml", label: "YAML" }, { value: "javascript", label: "JavaScript" }]}
       />
-      <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-        <div className="overflow-x-auto">
-          <Table>
-            <Table.Header variant="compact"><Table.Row>
-              <SortHead label="Configuration" column="name" sort={sort} direction={direction} setSort={setSort} />
-              <SortHead label="User" column="user" sort={sort} direction={direction} setSort={setSort} />
-              <SortHead label="Processors" column="processors" sort={sort} direction={direction} setSort={setSort} />
-              <SortHead label="Updated" column="updated" sort={sort} direction={direction} setSort={setSort} />
-              <Table.Head className="text-right"><span className="sr-only">Actions</span></Table.Head>
-            </Table.Row></Table.Header>
-            <Table.Body>
-              {error ? <TableEmpty colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((profile) => {
-                const enabled = profile.document.rewrites.filter((rewrite) => rewrite.enabled).length;
-                return <Table.Row key={profile.id}>
-                  <Table.Cell><div className="flex min-w-52 items-center gap-2"><BracketsCurlyIcon className="size-4 shrink-0 text-kumo-subtle" /><button type="button" className={rowLinkClassName} onClick={() => onEdit(profile)}>{profile.name}</button></div></Table.Cell>
-                  <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{profile.proxy_user_name}</span></Table.Cell>
-                  <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.document.rewrites.length} enabled</span></Table.Cell>
-                  <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(profile.updated_at)}</span></Table.Cell>
-                  <Table.Cell className="text-right"><ConfigurationRowMenu profile={profile} onEdit={() => onEdit(profile)} onSubscription={() => onSubscription(profile)} /></Table.Cell>
-                </Table.Row>;
-              }) : <TableEmpty colSpan={5}>No configurations match this filter.</TableEmpty>}
-            </Table.Body>
-          </Table>
-        </div>
-      </div>
+      <TableCard>
+        <Table>
+          <Table.Header variant="compact"><Table.Row>
+            <SortHead label="Configuration" column="name" sort={sort} direction={direction} setSort={setSort} />
+            <SortHead label="User" column="user" sort={sort} direction={direction} setSort={setSort} />
+            <SortHead label="Processors" column="processors" sort={sort} direction={direction} setSort={setSort} />
+            <SortHead label="Updated" column="updated" sort={sort} direction={direction} setSort={setSort} />
+            <Table.Head className="text-right"><span className="sr-only">Actions</span></Table.Head>
+          </Table.Row></Table.Header>
+          <Table.Body>
+            {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((profile) => {
+              const enabled = profile.document.rewrites.filter((rewrite) => rewrite.enabled).length;
+              return <Table.Row key={profile.id}>
+                <Table.Cell><div className="flex min-w-52 items-center gap-2"><BracketsCurlyIcon className="size-4 shrink-0 text-kumo-subtle" /><Link to={`/mihomo-profiles/${profile.id}/edit`} className={rowLinkClassName}>{profile.name}</Link></div></Table.Cell>
+                <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{profile.proxy_user_name}</span></Table.Cell>
+                <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.document.rewrites.length} enabled</span></Table.Cell>
+                <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(profile.updated_at)}</span></Table.Cell>
+                <Table.Cell className="text-right">
+                  <RowActionsMenu label={`Actions for ${profile.name}`}>
+                    <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onEdit(profile)}>Edit</DropdownMenu.Item>
+                    <DropdownMenu.Item icon={LinkSimpleIcon} onClick={() => onSubscription(profile)}>Subscription link</DropdownMenu.Item>
+                  </RowActionsMenu>
+                </Table.Cell>
+              </Table.Row>;
+            }) : <TableEmpty colSpan={5}>No configurations match this filter.</TableEmpty>}
+          </Table.Body>
+        </Table>
+      </TableCard>
       <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
     </section>
   );
@@ -242,10 +247,9 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
   const total = rows.length;
   const offset = (page - 1) * perPage;
   const visible = rows.slice(offset, offset + perPage);
-  function setSort(column: string) {
-    const next = column as TemplateSort;
-    if (sort === next) setDirection((current) => current === "asc" ? "desc" : "asc");
-    else { setSortValue(next); setDirection(next === "updated" ? "desc" : "asc"); }
+  function setSort(column: TemplateSort) {
+    if (sort === column) setDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSortValue(column); setDirection(column === "updated" ? "desc" : "asc"); }
     setPage(1);
   }
   return (
@@ -261,7 +265,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
         setFilter={(value) => { setFilter(value as TemplateFilter); setPage(1); }}
         options={[{ value: "all", label: "All" }, { value: "yaml", label: "YAML" }, { value: "javascript", label: "JavaScript" }]}
       />
-      <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base"><div className="overflow-x-auto">
+      <TableCard>
         <Table>
           <Table.Header variant="compact"><Table.Row>
             <SortHead label="Rewrite" column="name" sort={sort} direction={direction} setSort={setSort} />
@@ -271,18 +275,29 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
             <Table.Head className="text-right"><span className="sr-only">Actions</span></Table.Head>
           </Table.Row></Table.Header>
           <Table.Body>
-            {error ? <TableEmpty colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableEmpty> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((template) => (
+            {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((template) => (
               <Table.Row key={template.id}>
                 <Table.Cell><div className="flex min-w-52 items-center gap-2"><CodeIcon className="size-4 shrink-0 text-kumo-subtle" /><button type="button" className={rowLinkClassName} onClick={() => onOpen(template)}>{template.name}</button></div></Table.Cell>
-                <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{template.kind === "javascript" ? "JavaScript" : "YAML"}</span></Table.Cell>
-                <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{template.built_in ? "Built in · read only" : "Reusable"}</span></Table.Cell>
+                <Table.Cell><Badge variant="secondary">{template.kind === "javascript" ? "JavaScript" : "YAML"}</Badge></Table.Cell>
+                <Table.Cell>
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <Badge variant="secondary">{template.built_in ? "Built in" : "Reusable"}</Badge>
+                    {template.built_in ? <span className="text-xs text-kumo-subtle">read only</span> : null}
+                  </div>
+                </Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(template.updated_at)}</span></Table.Cell>
-                <Table.Cell className="text-right"><RowMenu label={`Actions for ${template.name}`} itemLabel={template.built_in ? "Preview" : "Edit"} icon={template.built_in ? <CodeIcon /> : <PencilSimpleIcon />} onSelect={() => onOpen(template)} /></Table.Cell>
+                <Table.Cell className="text-right">
+                  <RowActionsMenu label={`Actions for ${template.name}`}>
+                    <DropdownMenu.Item icon={template.built_in ? CodeIcon : PencilSimpleIcon} onClick={() => onOpen(template)}>
+                      {template.built_in ? "Preview" : "Edit"}
+                    </DropdownMenu.Item>
+                  </RowActionsMenu>
+                </Table.Cell>
               </Table.Row>
             )) : <TableEmpty colSpan={5}>No rewrite templates match this filter.</TableEmpty>}
           </Table.Body>
         </Table>
-      </div></div>
+      </TableCard>
       <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
     </section>
   );
@@ -303,20 +318,6 @@ function InventoryTools({ searchInput, placeholder, ariaLabel, setSearchInput, s
     </form>
     <DropdownMenu><DropdownMenu.Trigger render={<Button variant="secondary" icon={FunnelIcon}>Filter</Button>} /><DropdownMenu.Content><DropdownMenu.Group><DropdownMenu.Label>Filter</DropdownMenu.Label><DropdownMenu.RadioGroup value={filter} onValueChange={setFilter}>{options.map((option) => <DropdownMenu.RadioItem key={option.value} value={option.value}>{option.label}<DropdownMenu.RadioItemIndicator /></DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup></DropdownMenu.Group></DropdownMenu.Content></DropdownMenu>
   </div>;
-}
-
-function RowMenu({ label, itemLabel, icon, onSelect }: { label: string; itemLabel: string; icon: React.ReactNode; onSelect: () => void }) {
-  return <DropdownMenu><DropdownMenu.Trigger render={<Button variant="ghost" size="sm" shape="square" aria-label={label}><DotsThreeIcon className="size-4" /></Button>} /><DropdownMenu.Content><DropdownMenu.Item icon={icon} onClick={onSelect}>{itemLabel}</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu>;
-}
-
-function ConfigurationRowMenu({ profile, onEdit, onSubscription }: { profile: MihomoProfile; onEdit: () => void; onSubscription: () => void }) {
-  return <DropdownMenu>
-    <DropdownMenu.Trigger render={<Button variant="ghost" size="sm" shape="square" aria-label={`Actions for ${profile.name}`}><DotsThreeIcon className="size-4" /></Button>} />
-    <DropdownMenu.Content>
-      <DropdownMenu.Item icon={<PencilSimpleIcon />} onClick={onEdit}>Edit</DropdownMenu.Item>
-      <DropdownMenu.Item icon={<LinkSimpleIcon />} onClick={onSubscription}>Subscription link</DropdownMenu.Item>
-    </DropdownMenu.Content>
-  </DropdownMenu>;
 }
 
 export function MihomoConfigurationPage() {
@@ -366,7 +367,10 @@ export function MihomoConfigurationPage() {
       </ConfigurationPageShell>
     );
   }
-  return <SavedConfigurationWorkbench key={`${profileQuery.data.id}:${profileQuery.data.updated_at}`} request={request} profile={profileQuery.data} templates={templatesQuery.data} />;
+  // Keyed on the id only: remounting on every updated_at change would discard
+  // pipeline edits made between clicking Save and the refetch landing. The
+  // workbench adopts newer server documents itself.
+  return <SavedConfigurationWorkbench key={profileQuery.data.id} request={request} profile={profileQuery.data} templates={templatesQuery.data} />;
 }
 
 function ConfigurationPageShell({ title, description, actions, children }: {
@@ -377,9 +381,8 @@ function ConfigurationPageShell({ title, description, actions, children }: {
 }) {
   return (
     <div className="flex min-h-full flex-col bg-kumo-canvas">
-      <PageTopBar current="Mihomo Profiles" />
+      <AppPageHeader title={title} description={description} actions={actions} />
       <main className="w-full grow bg-kumo-canvas">
-        <PageHeader title={title} description={description} actions={actions} />
         <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
           {children}
         </div>
@@ -406,7 +409,7 @@ function NewConfigurationWorkbench({ request, users, templates }: {
       method: "POST",
       body: JSON.stringify({ name: name.trim(), description: description.trim(), user, document })
     }),
-    { onSuccess: (profile) => navigate(`/mihomo-profiles/${profile.id}/edit`) }
+    { onSuccess: (profile) => navigate(`/mihomo-profiles/${profile.id}/edit`), toastError: false }
   );
   const userItems = useMemo(() => Object.fromEntries(users.map((item) => [item.name, item.display_name || item.name])), [users]);
 
@@ -454,8 +457,16 @@ function SubscriptionQrCode({ value }: { value: string }) {
       cancelled = true;
     };
   }, [value]);
-  if (!dataUrl) return null;
-  return <img src={dataUrl} alt="Subscription link QR code" className="size-56 rounded-md" />;
+  // The QR image bakes in its own white quiet zone — required for scanning.
+  return (
+    <div className="size-56 overflow-hidden rounded-md">
+      {dataUrl ? (
+        <img src={dataUrl} alt="Subscription link QR code" className="size-56" />
+      ) : (
+        <div className="flex size-full items-center justify-center"><Loader size={20} /></div>
+      )}
+    </div>
+  );
 }
 
 function SubscriptionLinkDialog({ request, profile, onClose }: {
@@ -466,71 +477,95 @@ function SubscriptionLinkDialog({ request, profile, onClose }: {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [confirmation, setConfirmation] = useState<"rotate" | "revoke" | null>(null);
+  const endpoint = `/api/admin/mihomo/profiles/${profile.id}/subscription`;
   const { query: subscriptionQuery, generate, rotate, revoke } = useSubscription<MihomoProfileSubscription>(
     request,
     adminKeys.subscription("mihomo-profile", profile.id),
-    `/api/admin/mihomo/profiles/${profile.id}/subscription`,
+    endpoint,
     () => setConfirmation(null)
   );
   const subscription = subscriptionQuery.data;
-  const error = subscriptionQuery.error ?? generate.error ?? rotate.error ?? revoke.error;
+  const error = subscriptionQuery.error ?? generate.error;
+  const confirmError = confirmation === "rotate" ? rotate.error : confirmation === "revoke" ? revoke.error : null;
+  const confirmPending = rotate.isPending || revoke.isPending;
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  useEffect(() => {
+    setCopied(false);
+  }, [subscription?.url]);
+
   return (
-    <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
-      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
-        <Dialog.Title className="text-xl font-semibold text-kumo-default">Subscription link</Dialog.Title>
-        <Dialog.Description className="mb-4 text-kumo-subtle">{profile.name} · proxies from {profile.proxy_user_name}</Dialog.Description>
-        {error ? <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} /> : null}
-        {copyError ? <Banner variant="error" title={copyError} /> : null}
-        {confirmation ? (
-          <div className="mb-4 rounded-lg border border-kumo-line bg-kumo-tint p-4">
-            <Text bold>{confirmation === "rotate" ? "Rotate this subscription link?" : "Revoke this subscription link?"}</Text>
-            <p className="mt-1 text-sm text-kumo-subtle">The current URL will stop working immediately.</p>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={() => setConfirmation(null)}>Cancel</Button>
-              <Button
-                size="sm"
-                variant={confirmation === "revoke" ? "destructive" : "primary"}
-                loading={rotate.isPending || revoke.isPending}
-                onClick={() => confirmation === "rotate" ? rotate.mutate(undefined) : revoke.mutate(undefined)}
-              >
-                {confirmation === "rotate" ? "Rotate link" : "Revoke link"}
-              </Button>
+    <>
+      <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
+        <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+          <Dialog.Title className="text-xl font-semibold text-kumo-default">Subscription link</Dialog.Title>
+          <Dialog.Description className="mb-4 text-kumo-subtle">{profile.name} · proxies from {profile.proxy_user_name}</Dialog.Description>
+          {error ? <Banner variant="error" title={error instanceof Error ? error.message : "Request failed"} className="mb-4" /> : null}
+          {copyError ? <Banner variant="error" title={copyError} className="mb-4" /> : null}
+          {subscriptionQuery.isLoading ? (
+            <div className="flex min-h-32 items-center justify-center"><Loader size={20} /></div>
+          ) : subscription?.active ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1"><Input label="Mihomo subscription URL" readOnly value={subscription.url} className="w-full" /></div>
+                <Button variant="secondary" icon={CopyIcon} onClick={() => {
+                  void copyText(subscription.url)
+                    .then(() => { setCopyError(""); setCopied(true); })
+                    .catch((copyFailure: unknown) => setCopyError(copyFailure instanceof Error ? copyFailure.message : "Unable to copy."));
+                }}>{copied ? "Copied" : "Copy"}</Button>
+              </div>
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-kumo-line bg-kumo-canvas p-4">
+                <SubscriptionQrCode value={subscription.url} />
+              </div>
+              <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
+                <div><dt className="font-medium text-kumo-default">Created</dt><dd>{formatDateTime(subscription.created_at)}</dd></div>
+                <div><dt className="font-medium text-kumo-default">Last fetched</dt><dd>{formatDateTime(subscription.last_used_at)}</dd></div>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" icon={ArrowsClockwiseIcon} onClick={() => setConfirmation("rotate")}>Rotate link</Button>
+                <Button size="sm" variant="destructive" icon={TrashIcon} onClick={() => setConfirmation("revoke")}>Revoke link</Button>
+              </div>
             </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-kumo-line bg-kumo-tint p-4">
+              <p className="text-sm text-kumo-subtle">No subscription link has been generated.</p>
+              <Button size="sm" icon={LinkSimpleIcon} loading={generate.isPending} onClick={() => generate.mutate()}>Generate link</Button>
+            </div>
+          )}
+          <div className="mt-2 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Close</Button></div>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root
+        role="alertdialog"
+        open={confirmation !== null}
+        onOpenChange={(open) => (open || confirmPending ? undefined : setConfirmation(null))}
+      >
+        <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+          <Dialog.Title className="text-xl font-semibold text-kumo-default">
+            {confirmation === "rotate" ? "Rotate subscription link?" : "Revoke subscription link?"}
+          </Dialog.Title>
+          <Dialog.Description className="mb-4 text-kumo-subtle">
+            The current URL will stop working immediately.
+          </Dialog.Description>
+          {confirmError ? <Banner variant="error" title={confirmError.message} className="mb-4" /> : null}
+          <div className="mt-2 flex justify-end gap-2">
+            <Button variant="ghost" disabled={confirmPending} onClick={() => setConfirmation(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              loading={confirmPending}
+              onClick={() => confirmation === "rotate" ? rotate.mutate() : revoke.mutate()}
+            >
+              {confirmation === "rotate" ? "Rotate link" : "Revoke link"}
+            </Button>
           </div>
-        ) : null}
-        {subscriptionQuery.isLoading ? (
-          <div className="flex min-h-32 items-center justify-center"><Loader size={20} /></div>
-        ) : subscription?.active ? (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-end gap-2">
-              <div className="min-w-0 flex-1"><Input label="Mihomo subscription URL" readOnly value={subscription.url} className="w-full" /></div>
-              <Button variant="secondary" icon={<CopyIcon />} onClick={() => {
-                void copyText(subscription.url)
-                  .then(() => { setCopyError(""); setCopied(true); })
-                  .catch((copyFailure: unknown) => setCopyError(copyFailure instanceof Error ? copyFailure.message : "Unable to copy."));
-              }}>{copied ? "Copied" : "Copy"}</Button>
-            </div>
-            <div className="flex flex-col items-center gap-2 rounded-lg border border-kumo-line bg-kumo-canvas p-4">
-              <SubscriptionQrCode value={subscription.url} />
-            </div>
-            <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
-              <div><dt className="font-medium text-kumo-default">Created</dt><dd>{formatDateTime(subscription.created_at)}</dd></div>
-              <div><dt className="font-medium text-kumo-default">Last fetched</dt><dd>{formatDateTime(subscription.last_used_at)}</dd></div>
-            </dl>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" icon={<ArrowsClockwiseIcon />} onClick={() => setConfirmation("rotate")}>Rotate link</Button>
-              <Button size="sm" variant="destructive" icon={<TrashIcon />} onClick={() => setConfirmation("revoke")}>Revoke link</Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3 rounded-lg bg-kumo-canvas p-4">
-            <p className="text-sm text-kumo-subtle">No subscription link has been generated.</p>
-            <Button size="sm" icon={<LinkSimpleIcon />} loading={generate.isPending} onClick={() => generate.mutate(undefined)}>Generate link</Button>
-          </div>
-        )}
-        <div className="mt-5 flex justify-end"><Button variant="secondary" onClick={onClose}>Close</Button></div>
-      </Dialog>
-    </Dialog.Root>
+        </Dialog>
+      </Dialog.Root>
+    </>
   );
 }
 
@@ -542,9 +577,26 @@ function SavedConfigurationWorkbench({ request, profile, templates }: {
   const navigate = useNavigate();
   const [document, setDocument] = useState(() => copyDocument(profile.document));
   const [preview, setPreview] = useState<MihomoPreview | null>(null);
-  const dirty = JSON.stringify(document) !== JSON.stringify(profile.document);
-  const save = useAdminMutation<MihomoProfileDocument, MihomoProfile>(request, (req, nextDocument) =>
-    req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ document: nextDocument }) })
+  const documentJSON = JSON.stringify(document);
+  const profileJSON = JSON.stringify(profile.document);
+  const dirty = documentJSON !== profileJSON;
+  // Server document this local copy was forked from. A newer server version is
+  // adopted only while nothing was edited locally, so edits made during an
+  // in-flight save survive the refetch that follows it.
+  const baseline = useRef(profileJSON);
+  useEffect(() => {
+    if (profileJSON === baseline.current) return;
+    if (documentJSON === baseline.current) {
+      setDocument(copyDocument(profile.document));
+      setPreview(null);
+    }
+    baseline.current = profileJSON;
+  }, [profile.document, profileJSON, documentJSON]);
+  const save = useAdminMutation<MihomoProfileDocument, MihomoProfile>(
+    request,
+    (req, nextDocument) =>
+      req(`/api/admin/mihomo/profiles/${profile.id}`, { method: "PATCH", body: JSON.stringify({ document: nextDocument }) }),
+    { toastError: false }
   );
   const runPreview = useMutation({
     mutationFn: (nextDocument: MihomoProfileDocument) =>
@@ -564,7 +616,7 @@ function SavedConfigurationWorkbench({ request, profile, templates }: {
       actions={
         <>
           <Button variant="secondary" onClick={() => navigate("/mihomo-profiles")}>Back</Button>
-          <Button variant="secondary" icon={<CodeIcon />} loading={runPreview.isPending} disabled={busy} onClick={() => runPreview.mutate(document)}>Preview config</Button>
+          <Button variant="secondary" icon={CodeIcon} loading={runPreview.isPending} disabled={busy} onClick={() => runPreview.mutate(document)}>Preview config</Button>
           <Button loading={save.isPending} disabled={!dirty || busy} onClick={() => save.mutate(document)}>Save</Button>
         </>
       }
@@ -631,17 +683,17 @@ function PipelineEditor({ document, setDocument, templates }: {
         </div>
         <div className="flex flex-col gap-2">
           {document.rewrites.map((rewrite, index) => (
-            <button
-              type="button"
+            <div
               key={rewrite.id}
-              className={`rounded-md border p-2 text-left ${selected?.id === rewrite.id ? "border-kumo-brand bg-kumo-tint" : "border-kumo-line bg-kumo-base"}`}
-              onClick={() => setSelectedID(rewrite.id)}
+              className={`rounded-md border p-2 ${selected?.id === rewrite.id ? "border-kumo-brand bg-kumo-tint" : "border-kumo-line bg-kumo-base"}`}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-medium text-kumo-default">{index + 1}. {rewrite.name}</span>
-                <span className="text-xs text-kumo-subtle">{rewrite.kind === "javascript" ? "JS" : "YAML"}</span>
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setSelectedID(rewrite.id)}>
+                  <span className="block truncate text-sm font-medium text-kumo-default">{index + 1}. {rewrite.name}</span>
+                </button>
+                <Badge variant="secondary">{rewrite.kind === "javascript" ? "JS" : "YAML"}</Badge>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-2" onClick={(event) => event.stopPropagation()}>
+              <div className="mt-2 flex items-center justify-between gap-2">
                 <Switch size="sm" label={rewrite.enabled ? "On" : "Off"} checked={rewrite.enabled} onCheckedChange={(enabled) => update(rewrite.id, { enabled })} />
                 <div className="flex gap-1">
                   <Button shape="square" size="sm" variant="secondary" aria-label="Move up" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUpIcon /></Button>
@@ -649,7 +701,7 @@ function PipelineEditor({ document, setDocument, templates }: {
                   <Button shape="square" size="sm" variant="secondary-destructive" aria-label="Remove" onClick={() => remove(rewrite.id)}><TrashIcon /></Button>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
           {!document.rewrites.length ? <EmptyRow>Add a template or custom processor.</EmptyRow> : null}
         </div>
@@ -667,8 +719,8 @@ function PipelineEditor({ document, setDocument, templates }: {
             }}
           />
           <div className="grid grid-cols-2 gap-2">
-            <Button size="sm" variant="secondary" icon={<PlusIcon />} onClick={() => add(customRewrite("yaml"))}>Custom YAML</Button>
-            <Button size="sm" variant="secondary" icon={<PlusIcon />} onClick={() => add(customRewrite("javascript"))}>Custom JS</Button>
+            <Button size="sm" variant="secondary" icon={PlusIcon} onClick={() => add(customRewrite("yaml"))}>Custom YAML</Button>
+            <Button size="sm" variant="secondary" icon={PlusIcon} onClick={() => add(customRewrite("javascript"))}>Custom JS</Button>
           </div>
         </div>
       </Surface>
@@ -687,7 +739,7 @@ function PipelineEditor({ document, setDocument, templates }: {
                   <Input label="Processor name" value={selected.name} onChange={(event) => update(selected.id, { name: event.target.value })} />
                 )}
               </div>
-              <span className="text-xs text-kumo-subtle">{selected.kind === "javascript" ? "JavaScript" : "YAML"}</span>
+              <Badge variant="secondary">{selected.kind === "javascript" ? "JavaScript" : "YAML"}</Badge>
             </div>
             <MihomoCodeEditor
               key={`${selected.id}:${selected.kind}:${Boolean(selected.template_id)}`}
@@ -705,6 +757,15 @@ function PipelineEditor({ document, setDocument, templates }: {
   );
 }
 
+const templateFormSchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  description: z.string(),
+  kind: z.enum(["yaml", "javascript"]),
+  content: z.string()
+});
+
+type TemplateFormValues = z.infer<typeof templateFormSchema>;
+
 function RewriteTemplateDialog({ request, template, onClose }: {
   request: AdminRequest;
   template: MihomoRewriteTemplate | "new";
@@ -712,33 +773,62 @@ function RewriteTemplateDialog({ request, template, onClose }: {
 }) {
   const existing = template === "new" ? null : template;
   const readOnly = Boolean(existing?.built_in);
-  const [name, setName] = useState(existing?.name ?? "");
-  const [description, setDescription] = useState(existing?.description ?? "");
-  const [kind, setKind] = useState<MihomoRewrite["kind"]>(existing?.kind ?? "yaml");
-  const [content, setContent] = useState(existing?.content ?? "");
-  const save = useAdminMutation<undefined, MihomoRewriteTemplate>(request, (req) =>
-    req(existing ? `/api/admin/mihomo/rewrite-templates/${existing.id}` : "/api/admin/mihomo/rewrite-templates", {
-      method: existing ? "PATCH" : "POST",
-      body: JSON.stringify({ name: name.trim(), description: description.trim(), kind, content })
-    }),
-    { onSuccess: onClose }
+  const form = useForm<TemplateFormValues>({
+    resolver: zodResolver(templateFormSchema),
+    defaultValues: {
+      name: existing?.name ?? "",
+      description: existing?.description ?? "",
+      kind: existing?.kind ?? "yaml",
+      content: existing?.content ?? ""
+    }
+  });
+  const save = useAdminMutation<TemplateFormValues, MihomoRewriteTemplate>(
+    request,
+    (req, values) =>
+      req(existing ? `/api/admin/mihomo/rewrite-templates/${existing.id}` : "/api/admin/mihomo/rewrite-templates", {
+        method: existing ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: values.name.trim(),
+          description: values.description.trim(),
+          kind: values.kind,
+          content: values.content
+        })
+      }),
+    { onSuccess: onClose, toastError: false }
   );
+  const kind = form.watch("kind");
+  const content = form.watch("content");
+  const errors = form.formState.errors;
   return (
-    <Dialog.Root open onOpenChange={(open) => open ? undefined : onClose()}>
+    <Dialog.Root open onOpenChange={(open) => (open || save.isPending ? undefined : onClose())}>
       <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">{readOnly ? "Preview rewrite template" : existing ? "Edit rewrite template" : "New rewrite template"}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">Templates are reusable globally. Saved changes apply to every linked configuration.</Dialog.Description>
-        {save.error ? <Banner variant="error" title={save.error.message} /> : null}
-        <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_14rem]">
-          <Input label="Name" value={name} disabled={readOnly} onChange={(event) => setName(event.target.value)} />
-          <Select label="Type" value={kind} disabled={readOnly} items={{ yaml: "YAML", javascript: "JavaScript" }} onValueChange={(value) => value && setKind(value as MihomoRewrite["kind"])} />
-          <div className="sm:col-span-2"><Input label="Description" value={description} disabled={readOnly} onChange={(event) => setDescription(event.target.value)} /></div>
-        </div>
-        <MihomoCodeEditor key={kind} kind={kind} value={content} readOnly={readOnly} onChange={readOnly ? undefined : setContent} />
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>
-          {!readOnly ? <Button loading={save.isPending} disabled={!name.trim()} onClick={() => save.mutate(undefined)}>Save template</Button> : null}
-        </div>
+        {save.isError ? <Banner variant="error" title={save.error.message} className="mb-4" /> : null}
+        <form className="flex flex-col gap-3" onSubmit={form.handleSubmit((values) => save.mutate(values))}>
+          <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
+            <Input label="Name" disabled={readOnly} error={errors.name?.message} {...form.register("name")} />
+            <Select
+              label="Type"
+              value={kind}
+              disabled={readOnly}
+              items={{ yaml: "YAML", javascript: "JavaScript" }}
+              onValueChange={(value) => value && form.setValue("kind", value as TemplateFormValues["kind"])}
+            />
+            <div className="sm:col-span-2"><Input label="Description" disabled={readOnly} {...form.register("description")} /></div>
+          </div>
+          <MihomoCodeEditor
+            key={kind}
+            kind={kind}
+            value={content}
+            readOnly={readOnly}
+            onChange={readOnly ? undefined : (value) => form.setValue("content", value)}
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button type="button" variant={readOnly ? "secondary" : "ghost"} disabled={save.isPending} onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>
+            {!readOnly ? <Button type="submit" loading={save.isPending}>Save template</Button> : null}
+          </div>
+        </form>
       </Dialog>
     </Dialog.Root>
   );

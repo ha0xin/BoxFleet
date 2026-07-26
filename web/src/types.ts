@@ -254,6 +254,11 @@ export type UserConnectionInfo = {
       server_name: string;
       public_key: string;
       short_id: string;
+      // Shadowsocks 2022 only; omitted by the server for VLESS-Reality.
+      cipher?: string;
+      password?: string;
+      // Set when the Path is chained through another Path.
+      dialer_proxy?: string;
     }>;
   }>;
 };
@@ -349,6 +354,129 @@ export type NetworkEventsResponse = {
   total: number;
   limit: number;
   offset: number;
+};
+
+// Bucketed telemetry. The server owns bucket derivation and zero-fill; the
+// client renders `points` as delivered and never re-buckets. Hour buckets are
+// UTC; day buckets honour the `offset_minutes` the client sends.
+export type SeriesBucket = "hour" | "day";
+
+export type TrafficSeriesGroup = "total" | "user" | "node";
+
+export type TrafficVolume = {
+  uplink_raw_bytes: number;
+  uplink_billable_bytes: number;
+  downlink_raw_bytes: number;
+  downlink_billable_bytes: number;
+};
+
+export type TrafficPoint = TrafficVolume & { bucket_start: string };
+
+export type TrafficSeries = {
+  key: string;
+  label: string;
+  points: TrafficPoint[];
+  totals: TrafficVolume;
+};
+
+export type TrafficSeriesResponse = {
+  bucket: SeriesBucket;
+  offset_minutes: number;
+  start: string;
+  end: string;
+  group: TrafficSeriesGroup;
+  series: TrafficSeries[];
+  truncated: boolean;
+};
+
+export type NetworkEventSeriesGroup = "total" | "action" | "node" | "user";
+
+export type NetworkEventPoint = {
+  bucket_start: string;
+  count: number;
+};
+
+export type NetworkEventSeries = {
+  key: string;
+  label: string;
+  points: NetworkEventPoint[];
+  total: number;
+};
+
+export type NetworkEventActionCount = {
+  action: string;
+  count: number;
+};
+
+export type NetworkEventSeriesResponse = {
+  bucket: SeriesBucket;
+  offset_minutes: number;
+  start: string;
+  end: string;
+  group: NetworkEventSeriesGroup;
+  series: NetworkEventSeries[];
+  actions: NetworkEventActionCount[];
+  truncated: boolean;
+};
+
+export type ServiceUsageGroup = "service" | "category";
+
+// Connections per service — log events carry no byte counts, so this is never
+// traffic. Label it "connections" wherever it is rendered.
+export type ServiceUsageRow = {
+  key: string;
+  label: string;
+  category: string;
+  connections: number;
+  hosts: number;
+};
+
+export type ServiceUsageResponse = {
+  start: string;
+  end: string;
+  group: ServiceUsageGroup;
+  rows: ServiceUsageRow[];
+  other: ServiceUsageRow;
+  total_connections: number;
+  total_hosts: number;
+  truncated: boolean;
+  catalog_version: string;
+};
+
+export type ServiceClassificationSource = "override" | "catalog" | "publicsuffix" | "ip" | "unknown";
+
+export type NetworkEventHost = {
+  host: string;
+  service: string;
+  service_label: string;
+  category: string;
+  source: ServiceClassificationSource;
+  connections: number;
+  last_seen: string;
+};
+
+export type NetworkEventHostsResponse = {
+  hosts: NetworkEventHost[];
+  total: number;
+  limit: number;
+  offset: number;
+  truncated: boolean;
+};
+
+export type DomainServiceOverride = {
+  suffix: string;
+  service: string;
+  label: string;
+  category: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DomainServiceOverrideInput = {
+  suffix: string;
+  service: string;
+  label: string;
+  category: string;
 };
 
 export type AdminSettings = {

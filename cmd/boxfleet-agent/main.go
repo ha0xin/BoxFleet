@@ -4,10 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/haoxin/boxfleet/internal/agent"
 )
+
+// bootstrapEnvVar carries the bootstrap string without exposing the node token
+// in the process arguments.
+const bootstrapEnvVar = "BOXFLEET_BOOTSTRAP"
 
 var version = "dev"
 
@@ -52,14 +58,51 @@ func main() {
 
 func runBootstrapCommand() {
 	fs := flag.NewFlagSet("bootstrap", flag.ExitOnError)
+	fromFile := fs.String("from-file", "", `read the bootstrap string from a file ("-" for stdin)`)
+	allowInsecure := fs.Bool("allow-insecure-transport", false, "permit plaintext http server and sing-box URLs (development only)")
 	_ = fs.Parse(os.Args[2:])
-	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "boxfleet-agent bootstrap requires one bootstrap string")
-		os.Exit(1)
-	}
-	if err := agent.Bootstrap(context.Background(), fs.Arg(0)); err != nil {
+	value, err := bootstrapValue(fs, *fromFile)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "boxfleet-agent bootstrap: %v\n", err)
 		os.Exit(1)
+	}
+	if err := agent.Bootstrap(context.Background(), value, *allowInsecure); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent bootstrap: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// bootstrapValue prefers sources that keep the node token out of the process
+// arguments, which are readable through ps and land in shell history.
+func bootstrapValue(fs *flag.FlagSet, fromFile string) (string, error) {
+	sources := 0
+	if fromFile != "" {
+		sources++
+	}
+	if os.Getenv(bootstrapEnvVar) != "" {
+		sources++
+	}
+	sources += fs.NArg()
+	if sources != 1 {
+		return "", fmt.Errorf("bootstrap requires exactly one of %s, --from-file, or a bootstrap string argument", bootstrapEnvVar)
+	}
+	switch {
+	case fromFile == "-":
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(raw)), nil
+	case fromFile != "":
+		raw, err := os.ReadFile(fromFile)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(raw)), nil
+	case fs.NArg() == 1:
+		return fs.Arg(0), nil
+	default:
+		return strings.TrimSpace(os.Getenv(bootstrapEnvVar)), nil
 	}
 }
 
@@ -82,7 +125,10 @@ func printUsage() {
 	fmt.Println(`boxfleet-agent runs on proxy nodes.
 
 Usage:
-  boxfleet-agent bootstrap <boxfleet-bootstrap:string>
+  BOXFLEET_BOOTSTRAP=<boxfleet-bootstrap:string> boxfleet-agent bootstrap
+  boxfleet-agent bootstrap --from-file <path|->
+  boxfleet-agent bootstrap <boxfleet-bootstrap:string>  (discouraged: the node
+      token is visible in ps and saved in shell history)
   boxfleet-agent install [--config /etc/boxfleet/agent.json]
   boxfleet-agent run [--config /etc/boxfleet/agent.json]
   boxfleet-agent guard [--config /etc/boxfleet/agent.json]
