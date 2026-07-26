@@ -8,7 +8,7 @@ import (
 
 const (
 	DefaultRepo           = "ha0xin/BoxFleet"
-	DefaultSingBoxVersion = "v1.13.13"
+	DefaultSingBoxVersion = "v1.13.14"
 )
 
 //go:embed install.sh.tmpl
