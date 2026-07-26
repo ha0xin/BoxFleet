@@ -22,7 +22,7 @@ export const adminKeys = {
   mihomoProfile: (id: string) => ["admin", "mihomo-profile", id] as const,
   subscription: (kind: "user" | "mihomo-profile", id: string) => ["admin", "subscription", kind, id] as const,
   trafficUsers: ["admin", "traffic-users"] as const,
-  systemLogs: (limit: number) => ["admin", "system-logs", limit] as const,
+  systemLogs: (...state: readonly unknown[]) => ["admin", "system-logs", ...state] as const,
   networkEvents: (filters: object) => ["admin", "network-events", filters] as const,
   trafficSeries: (filters: object) => ["admin", "traffic-series", filters] as const,
   networkEventSeries: (filters: object) => ["admin", "network-event-series", filters] as const,
@@ -33,6 +33,7 @@ export const adminKeys = {
   userConnection: (name: string) => ["admin", "user-connection-info", name] as const,
   nodesPage: (...state: readonly unknown[]) => ["admin", "nodes-page", ...state] as const,
   proxiesPage: (...state: readonly unknown[]) => ["admin", "proxies-page", ...state] as const,
+  usersPage: (...state: readonly unknown[]) => ["admin", "users-page", ...state] as const,
   release: ["admin", "release"] as const,
   nodeOperation: (node: string, operation: string) => ["admin", "node-operation", node, operation] as const,
   nodeUpdateCampaign: (campaign: string) => ["admin", "node-update-campaign", campaign] as const

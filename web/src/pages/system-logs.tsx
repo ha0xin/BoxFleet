@@ -1,22 +1,78 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import { ArrowClockwiseIcon, FunnelIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import { Badge, Banner, Button, Collapsible, Combobox, Dialog, Input, Select, Table } from "@cloudflare/kumo";
 
-import type { SystemLog, SystemLogsResponse } from "../types";
+import type { AdminNode, SystemLog, SystemLogLevelFilter, SystemLogSort, SystemLogsResponse } from "../types";
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString } from "@/admin/query";
+import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
-type LevelFilter = "all" | "error" | "warn" | "info" | "debug";
-type LogSort = "observed_at" | "node" | "service" | "level" | "message" | "ingested_at";
-type SortDirection = "asc" | "desc";
+/**
+ * Filtering, sorting and paging all happen in `/api/admin/system-logs`.
+ *
+ * The page used to pull a flat "last N entries" list and slice it in the
+ * browser, which made every control a lie about the archive: a level filter
+ * could only reach the fetched window, and raising the window to compensate
+ * shipped rows nobody looked at. The URL now carries the whole query, so a
+ * filtered view is linkable and survives a refresh.
+ */
 
-const fetchLimitOptions = [100, 250, 500] as const;
+// `satisfies` pins these lists to the API contract in types.ts: a server-side
+// rename becomes a build error here instead of a silently ignored parameter.
+const sortColumns = ["observed_at", "node", "service", "level", "message", "ingested_at"] as const satisfies
+  readonly SystemLogSort[];
+const levelFilters = ["error", "warn", "info", "debug"] as const satisfies readonly SystemLogLevelFilter[];
 
-function normalizeLevel(level: string): Exclude<LevelFilter, "all"> {
+type LogSort = (typeof sortColumns)[number];
+
+// "all" is the page's sentinel for "no filter"; it is never sent to the server,
+// which has no such value (a node may legitimately be named "all").
+const filterSchema = z.object({
+  search: z.string(),
+  level: z.enum(["all", ...levelFilters]),
+  node: z.string(),
+  service: z.string(),
+  sort: z.enum(sortColumns),
+  direction: z.enum(["asc", "desc"])
+});
+
+type FilterValues = z.infer<typeof filterSchema>;
+
+// Newest first, matching how a journal is read and the server's own default.
+const defaultFilters: FilterValues = {
+  search: "",
+  level: "all",
+  node: "all",
+  service: "all",
+  sort: "observed_at",
+  direction: "desc"
+};
+
+const urlFilterOptions: UseUrlFiltersOptions<FilterValues> = {
+  schema: filterSchema,
+  defaults: defaultFilters,
+  perPage: 25
+};
+
+const levelItems = {
+  all: "All levels",
+  error: "Error",
+  warn: "Warning",
+  info: "Info",
+  debug: "Debug"
+} as const;
+
+const COLUMN_COUNT = 6;
+
+/** Journald levels are free text, so the badge buckets them the way the server does. */
+function normalizeLevel(level: string): Exclude<FilterValues["level"], "all"> {
   const value = (level || "").trim().toLowerCase();
   if (value.includes("fatal") || value.includes("error")) return "error";
   if (value.includes("warn")) return "warn";
@@ -50,129 +106,102 @@ function formatTimestamp(value: string): string {
   }).format(date);
 }
 
-function timeValue(value: string): number {
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : 0;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed.";
 }
 
-function compareText(left: string | number | undefined, right: string | number | undefined, direction: SortDirection) {
-  return String(left ?? "").localeCompare(String(right ?? ""), undefined, { numeric: true }) * (direction === "desc" ? -1 : 1);
-}
-
-function sortLogs(logs: SystemLog[], sort: LogSort, direction: SortDirection): SystemLog[] {
-  const factor = direction === "desc" ? -1 : 1;
-  return [...logs].sort((a, b) => {
-    switch (sort) {
-      case "node":
-        return compareText(a.node, b.node, direction) || compareText(a.service, b.service, "asc");
-      case "service":
-        return compareText(a.service, b.service, direction) || compareText(a.node, b.node, "asc");
-      case "level":
-        return compareText(normalizeLevel(a.level), normalizeLevel(b.level), direction) || compareText(a.node, b.node, "asc");
-      case "message":
-        return compareText(a.message, b.message, direction) || compareText(a.node, b.node, "asc");
-      case "ingested_at":
-        return (timeValue(a.ingested_at) - timeValue(b.ingested_at)) * factor || compareText(a.node, b.node, "asc");
-      default:
-        return (timeValue(a.observed_at) - timeValue(b.observed_at)) * factor || compareText(a.node, b.node, "asc");
-    }
-  });
+/**
+ * "all" plus the server's option list, with the active value forced in.
+ *
+ * Options come from the server rather than from the visible rows because one
+ * page cannot enumerate them and because a filter's choices must not move when
+ * the filter is applied. A link can still name a node or service that has since
+ * aged out, and the control has to keep showing what it is filtering by.
+ */
+export function choiceList(options: readonly string[] | undefined, active: string): string[] {
+  const values = new Set((options ?? []).filter(Boolean));
+  if (active !== "all") values.add(active);
+  return ["all", ...[...values].sort()];
 }
 
 export function SystemLogsPage() {
   const { request } = useAdminApi();
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(25);
-  const [fetchLimit, setFetchLimit] = useState<(typeof fetchLimitOptions)[number]>(100);
+  const { filters, page, perPage, offset, setFilters, setPage, setPerPage, resetFilters } =
+    useUrlFilters(urlFilterOptions);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [level, setLevel] = useState<LevelFilter>("all");
-  const [node, setNode] = useState("all");
-  const [service, setService] = useState("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSortValue] = useState<LogSort>("observed_at");
-  const [direction, setDirection] = useState<SortDirection>("desc");
   const [detail, setDetail] = useState<SystemLog | null>(null);
 
-  const path = "/api/admin/system-logs" + queryString({ limit: fetchLimit });
+  // react-hook-form is the draft layer for the search box only; the facets
+  // commit on change. `values: filters` re-syncs the draft on Back/Forward.
+  const form = useForm<FilterValues>({ resolver: zodResolver(filterSchema), values: filters });
+
+  const path = "/api/admin/system-logs" + queryString({
+    limit: perPage,
+    offset,
+    search: filters.search,
+    level: filters.level === "all" ? undefined : filters.level,
+    node: filters.node === "all" ? undefined : filters.node,
+    service: filters.service === "all" ? undefined : filters.service,
+    sort: filters.sort,
+    direction: filters.direction
+  });
   const logsQuery = useQuery({
-    queryKey: adminKeys.systemLogs(fetchLimit),
-    queryFn: () => request<SystemLogsResponse>(path),
+    queryKey: adminKeys.systemLogs(
+      perPage,
+      offset,
+      filters.search,
+      filters.level,
+      filters.node,
+      filters.service,
+      filters.sort,
+      filters.direction
+    ),
+    queryFn: ({ signal }) => request<SystemLogsResponse>(path, { signal }),
     placeholderData: (previous) => previous
+  });
+  // Node options are the full node list, not the names on this page, for the
+  // same reason the server sends the full service list.
+  const nodesQuery = useQuery({
+    queryKey: adminKeys.nodes,
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
 
   const logs = useMemo(() => logsQuery.data?.logs ?? [], [logsQuery.data?.logs]);
   const note = logsQuery.data?.note ?? "";
-  const nodeOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.node).filter(Boolean))).sort(), [logs]);
-  const serviceOptions = useMemo(() => Array.from(new Set(logs.map((log) => log.service).filter(Boolean))).sort(), [logs]);
-  const nodeChoices = useMemo(() => ["all", ...nodeOptions], [nodeOptions]);
-  const serviceChoices = useMemo(() => ["all", ...serviceOptions], [serviceOptions]);
-  const activeFilterCount = [level !== "all", node !== "all", service !== "all"].filter(Boolean).length;
+  const total = logsQuery.data?.total ?? 0;
+  const serviceChoices = useMemo(
+    () => choiceList(logsQuery.data?.services, filters.service),
+    [filters.service, logsQuery.data?.services]
+  );
+  const nodeChoices = useMemo(
+    () => choiceList(nodesQuery.data?.map((node) => node.name), filters.node),
+    [filters.node, nodesQuery.data]
+  );
+
+  // The hook's own `activeFilterCount` includes sort and direction, which are a
+  // view preference rather than a filter; the badge counts only the facets.
+  const activeFilterCount = [filters.level !== "all", filters.node !== "all", filters.service !== "all"]
+    .filter(Boolean).length;
+  const narrowed = filters.search !== "" || activeFilterCount > 0;
+
+  // The hook never sees `total`, so the upper clamp lives here, in an effect —
+  // calling setSearchParams during render is a navigation. It waits for a
+  // response: `total` is 0 during the first fetch, and clamping then would
+  // rewrite a shared `?page=3` before its rows ever arrive.
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  useEffect(() => {
+    if (logsQuery.data && page > lastPage) setPage(lastPage, "replace");
+  }, [lastPage, logsQuery.data, page, setPage]);
 
   function setSort(column: LogSort) {
-    setPage(1);
-    if (sort === column) {
-      setDirection((value) => (value === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortValue(column);
-    setDirection(column === "observed_at" || column === "ingested_at" ? "desc" : "asc");
-  }
-
-  function setPageSize(value: number) {
-    setPerPage(value);
-    setPage(1);
-  }
-
-  function setLevelFilter(value: LevelFilter) {
-    setLevel(value);
-    setPage(1);
-  }
-
-  function setNodeFilter(value: string) {
-    setNode(value);
-    setPage(1);
-  }
-
-  function setServiceFilter(value: string) {
-    setService(value);
-    setPage(1);
-  }
-
-  function setLimit(value: string) {
-    const parsed = Number(value);
-    if (fetchLimitOptions.includes(parsed as (typeof fetchLimitOptions)[number])) {
-      setFetchLimit(parsed as (typeof fetchLimitOptions)[number]);
-      setPage(1);
-    }
-  }
-
-  function resetFilters() {
-    setLevel("all");
-    setNode("all");
-    setService("all");
-    setFetchLimit(100);
-    setPage(1);
-  }
-
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return sortLogs(
-      logs.filter((log) => {
-        if (level !== "all" && normalizeLevel(log.level) !== level) return false;
-        if (node !== "all" && log.node !== node) return false;
-        if (service !== "all" && log.service !== service) return false;
-        if (!needle) return true;
-        return [log.node, log.service, log.level, log.message].some((value) => value.toLowerCase().includes(needle));
-      }),
-      sort,
-      direction
+    setFilters((current) =>
+      current.sort === column
+        ? { direction: current.direction === "asc" ? "desc" : "asc" }
+        // Time columns read newest-first; text columns read A-Z.
+        : { sort: column, direction: column === "observed_at" || column === "ingested_at" ? "desc" : "asc" }
     );
-  }, [direction, level, logs, node, search, service, sort]);
+  }
 
-  const offset = (page - 1) * perPage;
-  const visibleRows = filtered.slice(offset, offset + perPage);
-  const total = filtered.length;
   const isRefreshing = logsQuery.isFetching && !logsQuery.isLoading;
 
   return (
@@ -198,7 +227,6 @@ export function SystemLogsPage() {
               <h2 className="text-base font-semibold text-kumo-default">Recent logs</h2>
               <p className="text-sm text-kumo-subtle">
                 {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No logs"}
-                {logs.length > 0 ? `, ${logs.length} fetched` : ""}
               </p>
             </div>
 
@@ -206,18 +234,13 @@ export function SystemLogsPage() {
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <form
                   className="flex min-w-0 flex-1 gap-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setSearch(searchInput.trim());
-                    setPage(1);
-                  }}
+                  onSubmit={form.handleSubmit((values) => setFilters({ search: values.search.trim() }))}
                 >
                   <Input
                     placeholder="Search by node, service, level, or message"
                     aria-label="Search system logs"
-                    value={searchInput}
-                    onChange={(event) => setSearchInput(event.target.value)}
                     className="min-w-0 flex-1"
+                    {...form.register("search")}
                   />
                   <Button type="submit" variant="secondary">
                     Search
@@ -234,24 +257,18 @@ export function SystemLogsPage() {
               </div>
 
               <Collapsible.Panel className="rounded-lg bg-kumo-tint p-3">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-3">
                   <Select
                     label="Level"
-                    value={level}
-                    onValueChange={(value) => setLevelFilter((value ?? "all") as LevelFilter)}
-                    items={{
-                      all: "All levels",
-                      error: "Error",
-                      warn: "Warning",
-                      info: "Info",
-                      debug: "Debug"
-                    }}
+                    value={filters.level}
+                    onValueChange={(value) => setFilters({ level: (value ?? "all") as FilterValues["level"] })}
+                    items={levelItems}
                   />
 
                   <Combobox
                     label="Service"
-                    value={service}
-                    onValueChange={(value) => setServiceFilter((value as string | null) ?? "all")}
+                    value={filters.service}
+                    onValueChange={(value) => setFilters({ service: (value as string | null) ?? "all" })}
                     items={serviceChoices}
                   >
                     <Combobox.TriggerValue placeholder="All services">
@@ -272,8 +289,8 @@ export function SystemLogsPage() {
 
                   <Combobox
                     label="Node"
-                    value={node}
-                    onValueChange={(value) => setNodeFilter((value as string | null) ?? "all")}
+                    value={filters.node}
+                    onValueChange={(value) => setFilters({ node: (value as string | null) ?? "all" })}
                     items={nodeChoices}
                   >
                     <Combobox.TriggerValue placeholder="All nodes">
@@ -291,16 +308,9 @@ export function SystemLogsPage() {
                       </Combobox.List>
                     </Combobox.Content>
                   </Combobox>
-
-                  <Select
-                    label="Fetch limit"
-                    value={String(fetchLimit)}
-                    onValueChange={(value) => setLimit(value ?? "100")}
-                    items={{ "100": "100", "250": "250", "500": "500" }}
-                  />
                 </div>
                 <div className="mt-3 flex justify-end gap-2">
-                  <Button variant="secondary" size="sm" onClick={resetFilters}>
+                  <Button variant="secondary" size="sm" onClick={() => resetFilters()}>
                     Reset
                   </Button>
                   <Button variant="secondary" size="sm" onClick={() => setFilterOpen(false)}>
@@ -316,23 +326,21 @@ export function SystemLogsPage() {
               <Table className={`min-w-[900px] table-fixed transition-opacity ${isRefreshing ? "opacity-60" : ""}`}>
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="Observed" column="observed_at" sort={sort} direction={direction} setSort={setSort} sticky="left" className="w-40" />
-                    <SortHead label="Node" column="node" sort={sort} direction={direction} setSort={setSort} className="w-40" />
-                    <SortHead label="Service" column="service" sort={sort} direction={direction} setSort={setSort} className="w-36" />
-                    <SortHead label="Level" column="level" sort={sort} direction={direction} setSort={setSort} className="w-28" />
-                    <SortHead label="Message" column="message" sort={sort} direction={direction} setSort={setSort} className="w-[35%]" />
-                    <SortHead label="Ingested" column="ingested_at" sort={sort} direction={direction} setSort={setSort} className="w-40" />
+                    <SortHead label="Observed" column="observed_at" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" className="w-40" />
+                    <SortHead label="Node" column="node" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-40" />
+                    <SortHead label="Service" column="service" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-36" />
+                    <SortHead label="Level" column="level" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-28" />
+                    <SortHead label="Message" column="message" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-[35%]" />
+                    <SortHead label="Ingested" column="ingested_at" sort={filters.sort} direction={filters.direction} setSort={setSort} className="w-40" />
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
                   {logsQuery.error ? (
-                    <TableError colSpan={6}>
-                      {logsQuery.error instanceof Error ? logsQuery.error.message : "Request failed."}
-                    </TableError>
+                    <TableError colSpan={COLUMN_COUNT}>{errorMessage(logsQuery.error)}</TableError>
                   ) : logsQuery.isLoading ? (
-                    <TableLoading colSpan={6} />
-                  ) : visibleRows.length > 0 ? (
-                    visibleRows.map((log) => {
+                    <TableLoading colSpan={COLUMN_COUNT} />
+                  ) : logs.length > 0 ? (
+                    logs.map((log) => {
                       const meta = levelBadge(log.level);
                       const rowKey = `${log.observed_at}|${log.ingested_at}|${log.node}|${log.service}|${log.message.slice(0, 24)}`;
                       return (
@@ -375,14 +383,26 @@ export function SystemLogsPage() {
                         </Table.Row>
                       );
                     })
+                  ) : narrowed ? (
+                    <TableEmpty colSpan={COLUMN_COUNT} description="Widen the search or clear the filters to see more entries.">
+                      No logs match this filter
+                    </TableEmpty>
                   ) : (
-                    <TableEmpty colSpan={6}>No logs match this filter.</TableEmpty>
+                    // An unfiltered empty archive is not a dead end: nodes only
+                    // report journal entries once their agent is running, so say
+                    // so rather than implying something was filtered away.
+                    <TableEmpty
+                      colSpan={COLUMN_COUNT}
+                      description="Node agents upload journal entries as they run. Entries appear here once a node reports them."
+                    >
+                      No logs yet
+                    </TableEmpty>
                   )}
                 </Table.Body>
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
           </section>
         </div>
       </main>

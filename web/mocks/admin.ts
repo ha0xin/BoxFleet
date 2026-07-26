@@ -11,6 +11,9 @@ import type {
   AdminProxiesResponse,
   AdminSubscription,
   AdminUser,
+  AdminUserEffectiveStatus,
+  AdminUserRow,
+  AdminUsersResponse,
   MihomoPreview,
   MihomoProfile,
   MihomoProfileDocument,
@@ -38,6 +41,7 @@ import type {
   TrafficRow,
   TrafficSeriesGroup,
   TrafficSeriesResponse,
+  TrafficVolume,
   UserConnectionInfo
 } from "../src/types";
 
@@ -227,7 +231,26 @@ const users: AdminUser[] = [
     expire_at: iso(2 * DAY),
     proxy_count: 1,
     deleted_at: ""
-  }
+  },
+  // Enough of a tail that the paged inventory needs more than one page, with
+  // every derived status represented: quota exhaustion and expiry are states the
+  // stored column does not carry, so the page cannot be exercised without them.
+  ...Array.from({ length: 21 }, (_, index): AdminUser => {
+    const name = `user${String(index + 4).padStart(2, "0")}`;
+    const expired = index % 5 === 2;
+    const disabled = index % 7 === 3;
+    const deleted = index === 19;
+    return {
+      id: `user_${name}`,
+      name,
+      display_name: `Team Member ${index + 4}`,
+      status: disabled || deleted ? "disabled" : "active",
+      global_quota_bytes: index % 4 === 0 ? 0 : (25 + index * 15) * GiB,
+      expire_at: expired ? iso((index + 1) * DAY) : iso(-(index + 10) * DAY),
+      proxy_count: index % 4,
+      deleted_at: deleted ? iso(3 * DAY) : ""
+    };
+  })
 ];
 
 const traffic: TrafficRow[] = [
@@ -236,7 +259,17 @@ const traffic: TrafficRow[] = [
   { user_name: "bob", direction: "uplink", raw_bytes: 11 * GiB, billable_bytes: 16 * GiB },
   { user_name: "bob", direction: "downlink", raw_bytes: 70 * GiB, billable_bytes: 105 * GiB },
   { user_name: "carol", direction: "uplink", raw_bytes: 2 * GiB, billable_bytes: 2 * GiB },
-  { user_name: "carol", direction: "downlink", raw_bytes: 9 * GiB, billable_bytes: 9 * GiB }
+  { user_name: "carol", direction: "downlink", raw_bytes: 9 * GiB, billable_bytes: 9 * GiB },
+  // Every fourth generated user has burned their whole quota, so the derived
+  // "quota_exceeded" status has rows to match.
+  ...users.slice(3).flatMap((user, index): TrafficRow[] => {
+    const quota = user.global_quota_bytes;
+    const billable = quota > 0 && index % 4 === 1 ? quota + 3 * GiB : (4 + index * 2) * GiB;
+    return [
+      { user_name: user.name, direction: "uplink", raw_bytes: Math.round(billable * 0.2), billable_bytes: Math.round(billable * 0.2) },
+      { user_name: user.name, direction: "downlink", raw_bytes: Math.round(billable * 0.8), billable_bytes: Math.round(billable * 0.8) }
+    ];
+  })
 ];
 
 const systemLogTemplates = [
@@ -980,8 +1013,8 @@ function markNodeChanged(nodeName: string) {
   });
 }
 
-function pageParams(query: URLSearchParams) {
-  const limit = Math.max(1, Math.min(Number(query.get("limit") ?? 50) || 50, 500));
+function pageParams(query: URLSearchParams, fallback = 50) {
+  const limit = Math.max(1, Math.min(Number(query.get("limit") ?? fallback) || fallback, 500));
   const offset = Math.max(0, Number(query.get("offset") ?? 0) || 0);
   return { limit, offset };
 }
@@ -1068,11 +1101,151 @@ function proxiesPage(query: URLSearchParams): AdminProxiesResponse {
   return { proxies: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
 }
 
+// pageRequested mirrors the server's adminPageRequested: any one of these keys
+// switches a list endpoint from its bare array to the page envelope.
+function pageRequested(query: URLSearchParams): boolean {
+  return ["limit", "offset", "search", "status", "enabled", "deleted", "node", "sort", "direction"]
+    .some((key) => (query.get(key) ?? "").trim() !== "");
+}
+
+function userTraffic(name: string): TrafficVolume {
+  const volume: TrafficVolume = {
+    uplink_raw_bytes: 0,
+    uplink_billable_bytes: 0,
+    downlink_raw_bytes: 0,
+    downlink_billable_bytes: 0
+  };
+  for (const row of traffic) {
+    if (row.user_name !== name) continue;
+    if (row.direction.includes("up")) {
+      volume.uplink_raw_bytes += row.raw_bytes;
+      volume.uplink_billable_bytes += row.billable_bytes;
+    } else {
+      volume.downlink_raw_bytes += row.raw_bytes;
+      volume.downlink_billable_bytes += row.billable_bytes;
+    }
+  }
+  return volume;
+}
+
+// Same precedence as userEffectiveStatusSQL on the server: deleted, disabled,
+// over quota, expired, then active.
+function effectiveStatus(user: AdminUser, volume: TrafficVolume): AdminUserEffectiveStatus {
+  const billable = volume.uplink_billable_bytes + volume.downlink_billable_bytes;
+  if (user.deleted_at) return "deleted";
+  if (user.status === "disabled") return "disabled";
+  if (user.status === "quota_exceeded" || (user.global_quota_bytes > 0 && billable >= user.global_quota_bytes)) {
+    return "quota_exceeded";
+  }
+  if (user.status === "expired" || (user.expire_at && new Date(user.expire_at).getTime() <= now)) return "expired";
+  return "active";
+}
+
+function usersPage(query: URLSearchParams): AdminUsersResponse {
+  const search = (query.get("search") ?? "").trim().toLowerCase();
+  const status = (query.get("status") ?? "").trim();
+  const sort = query.get("sort") ?? "name";
+  const direction = sortDirection(query);
+  const { limit, offset } = pageParams(query);
+  const deleted = query.get("deleted") === "true";
+  const rows: AdminUserRow[] = users.map((user) => {
+    const volume = userTraffic(user.name);
+    return { ...user, traffic: volume, effective_status: effectiveStatus(user, volume) };
+  });
+  const billable = (row: AdminUserRow) => row.traffic.uplink_billable_bytes + row.traffic.downlink_billable_bytes;
+  const filtered = rows
+    .filter((row) => (deleted ? Boolean(row.deleted_at) : !row.deleted_at))
+    .filter((row) => !status || row.effective_status === status)
+    .filter((row) => {
+      if (!search) return true;
+      return [row.name, row.display_name, row.status, row.effective_status]
+        .some((value) => value?.toLowerCase().includes(search));
+    })
+    .sort((a, b) => {
+      switch (sort) {
+        case "display_name":
+          return compareText(a.display_name, b.display_name, direction) || compareText(a.name, b.name, 1);
+        case "status":
+          return compareText(a.effective_status, b.effective_status, direction) || compareText(a.name, b.name, 1);
+        case "traffic":
+          return compareText(billable(a), billable(b), direction) || compareText(a.name, b.name, 1);
+        case "quota":
+          return compareText(a.global_quota_bytes, b.global_quota_bytes, direction) || compareText(a.name, b.name, 1);
+        case "proxy_count":
+          return compareText(a.proxy_count, b.proxy_count, direction) || compareText(a.name, b.name, 1);
+        case "expire_at":
+          // A missing expiry sorts last, matching the server's sentinel.
+          return compareText(a.expire_at || "9999-12-31T23:59:59Z", b.expire_at || "9999-12-31T23:59:59Z", direction)
+            || compareText(a.name, b.name, 1);
+        default:
+          return compareText(a.name, b.name, direction);
+      }
+    });
+  return { users: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
+}
+
+// Journal levels are free text, so a bucket is a substring test and "info" is
+// the residual bucket — the same rule the server applies.
+function matchesLevel(level: string, bucket: string): boolean {
+  const value = (level || "").toLowerCase();
+  switch (bucket) {
+    case "error":
+      return value.includes("err") || value.includes("fatal");
+    case "warn":
+      return value.includes("warn");
+    case "debug":
+      return value.includes("debug") || value.includes("trace");
+    case "info":
+      return !["err", "fatal", "warn", "debug", "trace"].some((token) => value.includes(token));
+    default:
+      return true;
+  }
+}
+
 function systemLogsResponse(query: URLSearchParams): SystemLogsResponse {
-  const { limit } = pageParams(query);
+  const { limit, offset } = pageParams(query, 100);
   const nodeName = (query.get("node") ?? "").trim();
-  const logs = systemLogs.filter((log) => !nodeName || log.node === nodeName).slice(0, limit);
-  return { logs, note: overview.system_log_note };
+  const service = (query.get("service") ?? "").trim();
+  const level = (query.get("level") ?? "").trim();
+  const search = (query.get("search") ?? "").trim().toLowerCase();
+  const sort = query.get("sort") ?? "observed_at";
+  // Reading a journal is newest-first, so an unspecified direction means DESC.
+  const direction = query.get("direction") === "asc" ? 1 : -1;
+  const filtered = systemLogs
+    .filter((log) => !nodeName || log.node === nodeName)
+    .filter((log) => !service || log.service === service)
+    .filter((log) => matchesLevel(log.level, level))
+    .filter((log) => {
+      if (!search) return true;
+      return [log.node, log.service, log.level, log.message].some((value) => value.toLowerCase().includes(search));
+    })
+    .sort((a, b) => {
+      switch (sort) {
+        case "node":
+          return compareText(a.node, b.node, direction) || compareText(b.observed_at, a.observed_at, 1);
+        case "service":
+          return compareText(a.service, b.service, direction) || compareText(b.observed_at, a.observed_at, 1);
+        case "level":
+          return compareText(a.level, b.level, direction) || compareText(b.observed_at, a.observed_at, 1);
+        case "message":
+          return compareText(a.message, b.message, direction) || compareText(b.observed_at, a.observed_at, 1);
+        case "ingested_at":
+          return compareText(a.ingested_at, b.ingested_at, direction) || compareText(b.observed_at, a.observed_at, 1);
+        default:
+          return compareText(a.observed_at, b.observed_at, direction);
+      }
+    });
+  return {
+    logs: filtered.slice(offset, offset + limit),
+    // Options come from the whole fixture, never from the visible page.
+    services: Array.from(new Set(systemLogs.map((log) => log.service))).sort(),
+    total: filtered.length,
+    limit,
+    offset,
+    // The server always sends an empty note; the fixture's own note belongs to
+    // the overview payload only.
+    note: ""
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1324,7 +1497,13 @@ const routes: Route[] = [
     }
   },
   { method: "GET", pattern: /^\/api\/admin\/nodes$/, handler: ({ query }) => query.has("limit") ? nodesPage(query) : nodes.filter((node) => !node.deleted_at) },
-  { method: "GET", pattern: /^\/api\/admin\/users$/, handler: ({ query }) => users.filter((user) => query.get("deleted") === "true" ? Boolean(user.deleted_at) : !user.deleted_at) },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/users$/,
+    handler: ({ query }) => pageRequested(query)
+      ? usersPage(query)
+      : users.filter((user) => !user.deleted_at)
+  },
   { method: "GET", pattern: /^\/api\/admin\/traffic\/users$/, handler: () => traffic },
   {
     method: "GET",

@@ -45,6 +45,23 @@ type adminProxiesPage struct {
 	Offset  int64        `json:"offset"`
 }
 
+type adminUsersPage struct {
+	Users  []adminUserRow `json:"users"`
+	Total  int64          `json:"total"`
+	Limit  int64          `json:"limit"`
+	Offset int64          `json:"offset"`
+}
+
+// adminUserRow embeds adminUser so a paged row stays a superset of the unpaged
+// list the overview renders, and adds only what a paged table cannot derive on
+// its own: the status the server filtered and sorted on, and the traffic totals
+// that would otherwise cost a full-inventory request alongside every page.
+type adminUserRow struct {
+	adminUser
+	EffectiveStatus string               `json:"effective_status"`
+	Traffic         adminTrafficDirected `json:"traffic"`
+}
+
 type adminRelease struct {
 	Repo            string `json:"repo"`
 	BoxFleetVersion string `json:"boxfleet_version"`
@@ -242,6 +259,20 @@ type adminSystemLog struct {
 	Message    string `json:"message"`
 	ObservedAt string `json:"observed_at"`
 	IngestedAt string `json:"ingested_at"`
+}
+
+// adminSystemLogsResponse is a strict superset of the pre-pagination payload:
+// `note` stays so existing readers keep working, and the page envelope matches
+// adminNetworkEventsResponse.
+type adminSystemLogsResponse struct {
+	Logs []adminSystemLog `json:"logs"`
+	// Services is the unfiltered option list for the page's service filter; a
+	// single page can no longer enumerate it.
+	Services []string `json:"services"`
+	Total    int64    `json:"total"`
+	Limit    int64    `json:"limit"`
+	Offset   int64    `json:"offset"`
+	Note     string   `json:"note"`
 }
 
 type adminNodePayload struct {
@@ -952,6 +983,28 @@ func adminRenderConfigHandler(store *db.DB) http.HandlerFunc {
 
 func adminUsersHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if adminPageRequested(r) {
+			page, err := store.ListUsersPage(r.Context(), db.UserFilter{
+				Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+				Status:    strings.TrimSpace(r.URL.Query().Get("status")),
+				Deleted:   deletedFilter(r),
+				Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+				Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
+				Limit:     queryLimit(r, 50),
+				Offset:    queryOffset(r),
+			})
+			if err != nil {
+				writeAdminError(w, err)
+				return
+			}
+			writeJSON(w, adminUsersPage{
+				Users:  adminUserRows(page.Users),
+				Total:  page.Total,
+				Limit:  page.Limit,
+				Offset: page.Offset,
+			})
+			return
+		}
 		users, err := listAdminUsers(r, store)
 		if err != nil {
 			writeAdminError(w, err)
@@ -1484,15 +1537,27 @@ func adminNodeRawNetworkLogsHandler(store *db.DB) http.HandlerFunc {
 
 func adminSystemLogsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		nodeName := strings.TrimSpace(r.URL.Query().Get("node"))
-		logs, err := store.ListRecentSystemLogs(r.Context(), nodeName, queryLimit(r, 100))
+		page, err := store.ListSystemLogsPage(r.Context(), db.SystemLogFilter{
+			NodeName:  strings.TrimSpace(r.URL.Query().Get("node")),
+			Service:   strings.TrimSpace(r.URL.Query().Get("service")),
+			Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+			Search:    strings.TrimSpace(r.URL.Query().Get("search")),
+			Sort:      strings.TrimSpace(r.URL.Query().Get("sort")),
+			Direction: strings.TrimSpace(r.URL.Query().Get("direction")),
+			Limit:     queryLimit(r, 100),
+			Offset:    queryOffset(r),
+		})
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"logs": adminSystemLogs(logs),
-			"note": "",
+		writeJSON(w, adminSystemLogsResponse{
+			Logs:     adminSystemLogs(page.Logs),
+			Services: page.Services,
+			Total:    page.Total,
+			Limit:    page.Limit,
+			Offset:   page.Offset,
+			Note:     "",
 		})
 	}
 }
@@ -1732,6 +1797,32 @@ func listAdminUsers(r *http.Request, store *db.DB) ([]adminUser, error) {
 		})
 	}
 	return out, nil
+}
+
+func adminUserRows(rows []db.ProxyUserPageRow) []adminUserRow {
+	out := make([]adminUserRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, adminUserRow{
+			adminUser: adminUser{
+				ID:               row.ID,
+				Name:             row.Name,
+				DisplayName:      row.DisplayName,
+				Status:           row.Status,
+				GlobalQuotaBytes: row.GlobalQuotaBytes,
+				ExpireAt:         nullString(row.ExpireAt),
+				ProxyCount:       int(row.ProxyCount),
+				DeletedAt:        nullString(row.DeletedAt),
+			},
+			EffectiveStatus: row.EffectiveStatus,
+			Traffic: adminTrafficDirected{
+				UplinkRawBytes:        row.UplinkRawBytes,
+				UplinkBillableBytes:   row.UplinkBillableBytes,
+				DownlinkRawBytes:      row.DownlinkRawBytes,
+				DownlinkBillableBytes: row.DownlinkBillableBytes,
+			},
+		})
+	}
+	return out
 }
 
 func listAdminTraffic(r *http.Request, store *db.DB) ([]adminUserTraffic, error) {

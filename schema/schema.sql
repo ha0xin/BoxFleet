@@ -484,6 +484,12 @@ CREATE TABLE IF NOT EXISTS system_logs (
 CREATE INDEX IF NOT EXISTS idx_system_logs_node_observed
   ON system_logs(node_id, observed_at);
 
+CREATE INDEX IF NOT EXISTS idx_system_logs_observed_id
+  ON system_logs(observed_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_system_logs_service
+  ON system_logs(service);
+
 CREATE TABLE IF NOT EXISTS log_events (
   id TEXT PRIMARY KEY,
   node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
