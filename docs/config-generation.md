@@ -71,6 +71,45 @@ user>>>AUTH_NAME>>>traffic>>>downlink
 
 The agent maps these names back to ProxyCredentials.
 
+## Connection telemetry service (optional)
+
+A node with an enabled `node_connection_telemetry` row also gets sing-box 1.14's
+`services` block:
+
+```json
+"services": [
+  {
+    "type": "api",
+    "tag": "boxfleet-telemetry",
+    "listen": "127.0.0.1",
+    "listen_port": 9091,
+    "secret": "<64 hex characters>"
+  }
+]
+```
+
+**No node has this by default, and it must stay that way.** The fleet runs
+sing-box 1.13, whose parser rejects the key outright
+(`services[0]: unknown inbound type: api`), so a node that has not opted in must
+render byte-identically to the pre-1.14 output. The field is `omitempty` and two
+renderer tests pin the invariant in both directions — the default shape, and the
+bytes after an opt-out.
+
+`RenderDisabledConfig` and the no-accesses config never carry the block: a node
+serving nothing has no connections to report.
+
+Rendering **fails** rather than degrades if the row's listen address is not a
+loopback IP literal or its secret is under 32 characters. The endpoint is a
+control plane, and upstream's `authenticate()` returns nil for an empty secret,
+so an under-specified row must abort the render rather than emit a config that
+silently exposes it. Because `GET /api/admin/config/changes` re-renders every
+node, one malformed row breaks the fleet-wide changes and bulk-publish views
+until it is fixed.
+
+`dashboard` and the TLS container are deliberately not emitted. See
+[connection telemetry](connection-telemetry.md) for the opt-in procedure and the
+secret's lifecycle.
+
 ## Publish and validation
 
 Publishing renders the node, stores an immutable config version and hash, and

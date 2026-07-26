@@ -88,11 +88,13 @@ Node lifecycle and disable semantics: a node is `pending` after bootstrap and be
 
 Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the client). Counter naming is `user>>><name>>>>traffic>>>{uplink,downlink}` — defined upstream in `refs/sing-box/experimental/v2rayapi/stats.go`. Per-connection metadata (source IP, host, etc.) is **not** exposed by v2ray API; current code scrapes journalctl log text from sing-box (`internal/server/db/log_events.go`) and is fragile by design — sing-box log format changes will break it. Golden fixtures (`log_events_parse_test.go`) are the guard. `with_clash_api` is compiled in but never configured; the Clash API cannot attribute a connection to a user and its byte totals are lossy — read `docs/adr/0001-network-event-telemetry-source.md` before proposing a switch.
 
+A second, richer network-event producer exists: sing-box 1.14's daemon gRPC connection stream (`internal/singboxapi`, `internal/agent/connections.go`, `connection_events`). **It is opt-in per node, off by default, and enabled nowhere — keep it that way.** The 1.14 `services` block it needs does not parse on the 1.13 the fleet runs, so never render it unconditionally and never gate it on anything but an enabled `node_connection_telemetry` row. The journalctl scraper stays fully working and is not deleted; the two coexist. Its bytes are a best-effort estimate qualified by coverage counters — per-user billing stays on the v2ray counters. See `docs/connection-telemetry.md`, `docs/adr/0002-opt-in-connection-telemetry.md`, and `internal/singboxapi/README.md` before touching any of it.
+
 ### Telemetry aggregation
 
 `internal/server/db/series_common.go` is the single source of bucket truth and `buildLogEventPredicates` (`log_events.go`) the single source of log-event filter truth — the paged table, the series, and the service breakdown must all go through them. **The server owns bucketing and zero-fill; clients never bucket.** Bucket on `window_start`/`observed_at`, never `created_at` (the upsert bumps it on every merge). Hour buckets are UTC; day buckets take an `offset_minutes` param.
 
-Two hard data-model limits: **bytes cannot be attributed to a destination host** (`log_events` has no byte columns, `traffic_usage_deltas` has no host column), so the service audit view is connections-only and must never be labelled traffic; and only `action="connect"` rows survive ingestion, so grouping by action returns one bucket. Traffic series exclude soft-deleted users and event series include them — each matches the pipeline it extends; do not unify. Host classification is read-time via `internal/servicecatalog` plus `domain_service_overrides`; do not add a `service` column to `log_events`.
+Two hard data-model limits: **bytes cannot be attributed to a destination host on the fleet-wide sources** (`log_events` has no byte columns, `traffic_usage_deltas` has no host column), so the service audit view is connections-only and must never be labelled traffic — only the opt-in `connection_events` table answers that, for opted-in nodes, and the audit does not read it; and only `action="connect"` rows survive ingestion, so grouping by action returns one bucket. Traffic series exclude soft-deleted users and event series include them — each matches the pipeline it extends; do not unify. Host classification is read-time via `internal/servicecatalog` plus `domain_service_overrides`; do not add a `service` column to `log_events`.
 
 ### Web UI
 
@@ -134,5 +136,7 @@ Most coverage lives in `internal/agent`, `internal/server/{api,db,render}`, `int
 - `docs/deployment.md` — artifact-based server and node deployment flow.
 - `docs/testing.md` — test boundaries and release checks.
 - `docs/architecture.md`, `docs/db-schema.md`, `docs/config-generation.md`, and `docs/web-ui.md` — implementation contracts.
-- `docs/adr/` — decision records. `0001-network-event-telemetry-source.md` explains why network events are still scraped from journal text and what would change that.
+- `docs/connection-telemetry.md` — the opt-in sing-box 1.14 connection stream: how to enable it, the secret, coverage, rollback.
+- `docs/singbox-preflight.md` — the off-fleet gate `SING_BOX_REVISION` passes before it moves.
+- `docs/adr/` — decision records. `0001-network-event-telemetry-source.md` explains why network events are still scraped from journal text and what would change that; `0002-opt-in-connection-telemetry.md` records why the 1.14 stream was built ahead of that trigger and why it is off.
 - `deploy/sing-box/README.md` — pinned sing-box build requirements.

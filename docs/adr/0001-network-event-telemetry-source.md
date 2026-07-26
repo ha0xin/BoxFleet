@@ -1,9 +1,18 @@
 # ADR 0001 — Network event telemetry source
 
-- Status: accepted; amended 2026-07-26 (see "Amendment")
+- Status: **accepted and current for the fleet default**; amended 2026-07-26 (see
+  "Amendment"); extended by
+  [ADR 0002](0002-opt-in-connection-telemetry.md) (2026-07-27)
 - Date: 2026-07-26
 - Applies to: `internal/server/db/log_events.go`, `internal/v2raystats`,
   `internal/agent`, `internal/server/render`
+
+> **Read this with [ADR 0002](0002-opt-in-connection-telemetry.md).** A third
+> telemetry source — the 1.14 daemon gRPC connection stream described under
+> "Trigger for revisiting" below — now exists in the tree as an **opt-in per
+> node, off by default** path. Everything this ADR decides about the *default*
+> path is still in force, and the trigger for actually switching the fleet is
+> unchanged. No node is opted in.
 
 ## Decision
 
@@ -124,14 +133,16 @@ a ledger.
 **Trigger, restated after the amendment below:** the `v1.14.0` **stable** tag is
 published *and* a build of it at BoxFleet's `SING_BOX_TAGS` passes the four
 off-fleet checks listed in the Amendment. Both conditions — "the beta looks
-quiet" is not one of them.
+quiet" is not one of them. **This trigger is unchanged by ADR 0002 and remains
+unmet.**
 
-When the trigger fires, the migration is a producer swap into the existing
-`model.LogEventInput` shape: delete `parseSingBoxLogEvent` and its three regexes
-and the `connectionSources` correlation map, and leave every aggregation, index,
-retention rule and UI intact. It also fixes the ingest drop described below,
-because `user` arrives on the event instead of being recovered from a preceding
-log line.
+This section originally predicted that the migration would be a producer swap
+into the existing `model.LogEventInput` shape, deleting `parseSingBoxLogEvent`.
+That prediction was wrong, and [ADR 0002](0002-opt-in-connection-telemetry.md)
+records why: the stream carries bytes, duration, rule, outbound and chain, none
+of which `log_events` has columns for, and it covers a different set of nodes.
+The implemented design is a separate table and a separate wire type alongside the
+scraper, which is deleted at no point.
 
 ## Consequences
 
@@ -153,12 +164,13 @@ log line.
   `invalid_connection` and `outbound_connect`, but neither carries an
   `auth_name`, so `RecordLogEvents` drops both. The admin action filter's other
   values are aspirational, and grouping a series by action returns one bucket.
-- **Bytes cannot be attributed to a destination host on the current sources.**
+- **Bytes cannot be attributed to a destination host on these two sources.**
   `traffic_usage_deltas` has no host column and `log_events` has no byte columns.
   The service audit view is a connections-per-service view and must never be
-  labelled traffic or bytes. This is a property of the two sources in use, not a
-  permanent law — the Amendment records what changes under 1.14, and what does
-  not.
+  labelled traffic or bytes. This remains true of every node in the fleet. It is
+  a property of the two sources in use, not a permanent law: the 1.14 stream
+  answers it, for opted-in nodes only, in a separate table
+  (`connection_events`) that the service audit does not read.
 
 ## Amendment (2026-07-26)
 
@@ -245,11 +257,14 @@ Build the candidate at BoxFleet's `SING_BOX_TAGS` on a throwaway host and assert
    zero. A golden diff here is a real regression: investigate, do not regenerate.
 4. `user>>>NAME>>>traffic>>>{uplink,downlink}` still increments.
 
-### The swap seam
+### Outcome
 
-`model.LogEventInput` (`internal/model/node_payloads.go`) is already the
-producer-agnostic ingest contract; `parseSingBoxLogEvent` is merely one producer
-feeding it. A gRPC collector is a *second* producer emitting the same struct.
-Aggregation, indexes, retention and the entire UI are source-agnostic and survive
-a swap intact. No further abstraction layer is needed or should be built
-speculatively.
+Everything in this amendment was implemented as an opt-in path in
+[ADR 0002](0002-opt-in-connection-telemetry.md), against this exact revision.
+Both gotchas above are enforced in code — `Connection.Domain` behind
+`singboxapi.Endpoint`, and fields 14/15 behind a `reserved` declaration that
+removes their Go accessors entirely.
+
+The amendment also proposed that the eventual migration would reuse
+`model.LogEventInput` as a producer-agnostic seam. It does not; see the
+correction under "Trigger for revisiting".

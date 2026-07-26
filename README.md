@@ -5,8 +5,8 @@ central server owns SQLite state, renders configuration, serves the admin UI,
 and receives telemetry. Edge nodes run only `boxfleet-agent`, `sing-box`, and
 systemd.
 
-The supported proxy path is VLESS-Reality over TCP with
-`xtls-rprx-vision`. Nodes pull versioned configuration and report heartbeats,
+The supported proxy paths are VLESS-Reality over TCP with `xtls-rprx-vision` and
+Shadowsocks 2022. Nodes pull versioned configuration and report heartbeats,
 traffic counters, apply results, and network logs.
 
 ## Components
@@ -69,7 +69,12 @@ bootstrap, and [azus runbook](docs/azus-runbook.md) for the production host.
 - [Database invariants](docs/db-schema.md)
 - [Configuration rendering](docs/config-generation.md)
 - [Node operations](docs/node-operations.md)
+- [Connection telemetry](docs/connection-telemetry.md) — the opt-in sing-box 1.14
+  stream, off by default
+- [sing-box preflight](docs/singbox-preflight.md) — the gate `SING_BOX_REVISION`
+  passes before it moves
 - [Mihomo subscriptions](docs/mihomo-subscriptions.md)
 - [Web UI](docs/web-ui.md)
 - [Testing](docs/testing.md)
 - [Performance targets](docs/performance.md)
+- [Decision records](docs/adr/)

@@ -154,8 +154,65 @@ lowercases it — so `Example.com` and `example.com` are distinct rows. Any host
 aggregation must `GROUP BY lower(target_host)`.
 
 `log_events` has no `proxy_id` and no byte columns, so proxy grouping is
-traffic-only and **bytes can never be attributed to a destination host**. The
-service audit is a connections-per-service view.
+traffic-only and **bytes are never attributable to a destination host on this
+table**. The service audit is a connections-per-service view and must never be
+labelled bytes. `connection_events` answers that question for opted-in nodes
+only; it is a separate table and the service audit does not read it.
+
+## Connection telemetry
+
+Three tables added by `migrations/026_connection_telemetry.sql`, all inert until
+a node opts in. Operation and rationale are in
+[connection telemetry](connection-telemetry.md).
+
+- `node_connection_telemetry` — the per-node opt-in, keyed by `node_id` with
+  `ON DELETE CASCADE`. **A missing row is the disabled state**, which is why the
+  fleet default is off structurally. `CHECK (length(secret) >= 32)` is
+  load-bearing, not cosmetic: sing-box's daemon `authenticate()` returns nil for
+  an empty secret, so an empty secret disables authentication on an endpoint that
+  also exposes `StopService` and `CloseAllConnections`. Deliberately a sidecar
+  table rather than columns on `nodes`, which is the hottest table in the schema.
+- `connection_reports` — one row per agent report window.
+  `UNIQUE (node_id, agent_boot_id, sequence)` mirrors `traffic_reports` and is
+  the entire idempotency mechanism. It matters more here than for traffic:
+  `UpsertConnectionEvent` *adds* into an existing row, so a partially applied
+  replay would inflate byte totals with no way to detect it afterwards. A
+  collision skips the whole batch before any bucket is applied. The eight
+  coverage counters live here.
+- `connection_events` — the aggregate rows, unique on `aggregate_key`
+  = `sha256(node_id || NUL || bucket.DimensionKey())`. The key is computed
+  server-side; a node-supplied key could collide onto another node's row.
+
+Schema choices that differ from `log_events`, each deliberate:
+
+- **`bucket_start` is a single sargable time axis.** Reads filter one column
+  instead of the `window_end >= ? AND window_start <= ?` straddle; the observed
+  extremes are kept in `window_start`/`window_end` and folded with `MIN()`/`MAX()`
+  on merge.
+- **Timestamps are fixed-width** (`model.ConnectionInstantLayout`,
+  millisecond precision). Those `MIN()`/`MAX()` folds compare TEXT, and
+  RFC3339Nano trims trailing zeros — `"…:11.482Z" < "…:11Z"`, so the later
+  instant would win a `MIN()`.
+- **Lowercasing is a CHECK constraint**, on both `target_host` and `domain`.
+  `log_events` skipped this, which is why `lower()` is scattered across every
+  read of it.
+- **Four secondary indexes and no more**, against `log_events`' twelve, on a
+  table that writes more. `idx_connection_events_bucket_host_bytes` serves the
+  unfiltered range read, the top-hosts ranking and the retention delete as a
+  covering index; the other three lead with `node_id`, `proxy_user_id`, or both.
+- **Unattributed rows are kept** with `proxy_user_id` NULL, where
+  `RecordLogEvents` would drop them. Single-user Shadowsocks never populates
+  `user`, and dropping those rows would understate every host total.
+
+Retention is `connection_event_retention_days` (default 14, bounds 1..3650),
+applied inline on ingest in the same transaction — there is no scheduler.
+`connection_events` prunes on `bucket_start`, `connection_reports` on
+`window_end`. The default is shorter than the network-event 90 because these rows
+are wider and at a finer dimension tuple.
+
+> `queries/*.sql` is sliced by byte offset from rune offsets by sqlc's SQLite
+> parser. **A single non-ASCII character in a comment silently corrupts every
+> query after it in the file** — an em dash is enough. Keep those files ASCII.
 
 ## Domain service classification
 

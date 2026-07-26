@@ -19,6 +19,16 @@ import type {
   MihomoProfileDocument,
   MihomoProfileSubscription,
   MihomoRewriteTemplate,
+  ConnectionCoverage,
+  ConnectionEvent,
+  ConnectionEventsResponse,
+  ConnectionHost,
+  ConnectionHostSort,
+  ConnectionHostsResponse,
+  ConnectionPoint,
+  ConnectionSeriesResponse,
+  ConnectionTelemetryNodesResponse,
+  ConnectionVolume,
   DomainServiceOverride,
   NetworkEvent,
   NetworkEventHost,
@@ -928,6 +938,180 @@ function networkEventServicesResponse(query: URLSearchParams): ServiceUsageRespo
   };
 }
 
+// --- Connection telemetry --------------------------------------------------
+// The sing-box 1.14 daemon stream. The fixture is deliberately a MIXED fleet:
+// exactly one node streams and the other four do not, because that is the state
+// the admin UI has to read correctly. Selecting a non-streaming node must show
+// an explanation, not an empty table.
+
+const connectionTelemetryNodes = [
+  { node_name: "tokyo", listen_address: "127.0.0.1", listen_port: 9091 }
+];
+
+const connectionStreamNodes = new Set(connectionTelemetryNodes.map((node) => node.node_name));
+
+const CONNECTION_BUCKET = 5 * MIN;
+
+/** Buckets are five-minute grid points, matching model.ConnectionBucketInterval. */
+const connectionBucketISO = (ms: number) => new Date(Math.floor(ms / CONNECTION_BUCKET) * CONNECTION_BUCKET).toISOString();
+
+const connectionShapes = [
+  { host: "www.youtube.com", user: "alice", auth: "vless-39090@alice", protocol: "tls", weight: 48 },
+  { host: "i.ytimg.com", user: "alice", auth: "vless-39090@alice", protocol: "tls", weight: 9 },
+  { host: "github.com", user: "bob", auth: "vless-39090@bob", protocol: "tls", weight: 6 },
+  { host: "registry.npmjs.org", user: "bob", auth: "vless-39090@bob", protocol: "tls", weight: 3 },
+  // Single-user Shadowsocks never populates Connection.user, so this row is
+  // stored against no user at all. Its bytes still count; dropping them would
+  // understate every per-host total.
+  { host: "speed.cloudflare.com", user: "", auth: "", protocol: "tcp", weight: 14 }
+];
+
+const connectionEvents: ConnectionEvent[] = Array.from({ length: 240 }, (_, i) => {
+  const shape = connectionShapes[i % connectionShapes.length];
+  const bucketMs = now - (i + 1) * 12 * MIN;
+  const seed = hashSeed(`${shape.host}:${bucketMs}`);
+  const opened = 1 + Math.round(seed * 6);
+  const uplink = Math.round((0.4 + seed) * shape.weight * 1024 ** 2);
+  return {
+    node_name: "tokyo",
+    user_name: shape.user,
+    auth_name: shape.auth,
+    source_ip: `100.64.${i % 12}.${((i + 1) * 7) % 254}`,
+    target_host: shape.host,
+    target_port: 443,
+    domain: "",
+    network: "tcp",
+    ip_version: 4,
+    protocol: shape.protocol,
+    inbound: shape.auth ? "vless-39090" : "ss-8388",
+    inbound_type: shape.auth ? "vless" : "shadowsocks",
+    rule: "final",
+    outbound: "direct",
+    outbound_type: "direct",
+    chain: `${shape.auth ? "vless-39090" : "ss-8388"}>direct`,
+    connections_opened: opened,
+    connections_closed: opened,
+    uplink_bytes: uplink,
+    downlink_bytes: Math.round(uplink * (2.5 + seed * 3)),
+    duration_ms_total: opened * Math.round(4000 + seed * 90_000),
+    bucket_start: connectionBucketISO(bucketMs),
+    window_start: connectionBucketISO(bucketMs),
+    window_end: new Date(bucketMs + 4 * MIN).toISOString()
+  };
+});
+
+function filterConnectionEvents(query: URLSearchParams): ConnectionEvent[] {
+  const nodeName = (query.get("node") ?? "").trim();
+  const userName = (query.get("user") ?? "").trim();
+  const host = (query.get("host") ?? "").trim().toLowerCase();
+  const start = Date.parse(query.get("start") ?? "");
+  const end = Date.parse(query.get("end") ?? "");
+  // A node that does not stream has no connection events at all — that is the
+  // whole point of the opt-in, so the mock enforces it rather than pretending.
+  if (nodeName && !connectionStreamNodes.has(nodeName)) return [];
+  return connectionEvents
+    .filter((event) => !userName || event.user_name === userName)
+    .filter((event) => !host || event.target_host === host)
+    .filter((event) => !Number.isFinite(start) || Date.parse(event.bucket_start) >= start)
+    .filter((event) => !Number.isFinite(end) || Date.parse(event.bucket_start) <= end);
+}
+
+function emptyConnectionVolume(): ConnectionVolume {
+  return {
+    connections_opened: 0,
+    connections_closed: 0,
+    uplink_bytes: 0,
+    downlink_bytes: 0,
+    total_bytes: 0,
+    duration_ms_total: 0
+  };
+}
+
+function addConnectionVolume(into: ConnectionVolume, event: ConnectionEvent): ConnectionVolume {
+  into.connections_opened += event.connections_opened;
+  into.connections_closed += event.connections_closed;
+  into.uplink_bytes += event.uplink_bytes;
+  into.downlink_bytes += event.downlink_bytes;
+  into.total_bytes += event.uplink_bytes + event.downlink_bytes;
+  into.duration_ms_total += event.duration_ms_total;
+  return into;
+}
+
+// Coverage is derived from the same filtered rows so the loss figure the UI
+// prints next to an estimate always belongs to the window on screen. Attributed
+// bytes exclude the unattributed Shadowsocks rows, which is exactly the gap the
+// real collector reports.
+function connectionCoverage(events: ConnectionEvent[]): ConnectionCoverage {
+  const observed = events.reduce((sum, event) => sum + event.connections_opened, 0);
+  const attributed = events
+    .filter((event) => event.auth_name !== "")
+    .reduce((sum, event) => sum + event.connections_opened, 0);
+  const bytesObserved = events.reduce((sum, event) => sum + event.uplink_bytes + event.downlink_bytes, 0);
+  const bytesAttributed = events
+    .filter((event) => event.auth_name !== "")
+    .reduce((sum, event) => sum + event.uplink_bytes + event.downlink_bytes, 0);
+  return {
+    connections_observed: observed,
+    connections_attributed: attributed,
+    connections_unattributed: observed - attributed,
+    connections_orphaned: Math.round(observed * 0.01),
+    stream_resets: events.length > 0 ? 2 : 0,
+    dropped_buckets: events.length > 120 ? 4 : 0,
+    bytes_observed: bytesObserved,
+    bytes_attributed: bytesAttributed,
+    attribution_ratio: bytesObserved > 0 ? bytesAttributed / bytesObserved : 1,
+    reports: Math.ceil(events.length / 12)
+  };
+}
+
+function connectionSeriesResponse(query: URLSearchParams): ConnectionSeriesResponse {
+  const window = seriesWindow(query);
+  const events = filterConnectionEvents(query);
+  const buckets = new Map<number, ConnectionVolume>();
+  for (const event of events) {
+    const key = bucketFloor(Date.parse(event.bucket_start), window);
+    buckets.set(key, addConnectionVolume(buckets.get(key) ?? emptyConnectionVolume(), event));
+  }
+  const points: ConnectionPoint[] = bucketStarts(window).map((bucketStart) => ({
+    bucket_start: bucketISO(bucketStart),
+    ...(buckets.get(bucketStart) ?? emptyConnectionVolume())
+  }));
+  return {
+    bucket: window.bucket,
+    offset_minutes: window.offsetMinutes,
+    start: new Date(window.start).toISOString(),
+    end: new Date(window.end).toISOString(),
+    points,
+    totals: events.reduce(addConnectionVolume, emptyConnectionVolume()),
+    coverage: connectionCoverage(events)
+  };
+}
+
+function connectionHostsResponse(query: URLSearchParams): ConnectionHostsResponse {
+  const sort: ConnectionHostSort = query.get("group") === "connections" ? "connections" : "bytes";
+  const limit = seriesLimit(query, 20, 100);
+  const events = filterConnectionEvents(query);
+  const grouped = new Map<string, ConnectionVolume>();
+  for (const event of events) {
+    grouped.set(event.target_host, addConnectionVolume(grouped.get(event.target_host) ?? emptyConnectionVolume(), event));
+  }
+  const hosts: ConnectionHost[] = [...grouped.entries()]
+    .map(([host, volume]) => ({ host, ...volume }))
+    .sort((left, right) =>
+      sort === "connections"
+        ? right.connections_opened - left.connections_opened || compareText(left.host, right.host, 1)
+        : right.total_bytes - left.total_bytes || compareText(left.host, right.host, 1)
+    );
+  return {
+    sort,
+    hosts: hosts.slice(0, limit),
+    totals: events.reduce(addConnectionVolume, emptyConnectionVolume()),
+    distinct_hosts: hosts.length,
+    limit: Math.min(hosts.length, limit),
+    truncated: hosts.length > limit,
+    coverage: connectionCoverage(events)
+  };
+}
 
 const basicMihomoYAML = `mixed-port: 7890
 mode: rule
@@ -1518,6 +1702,22 @@ const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/admin\/network-events\/series$/, handler: ({ query }) => networkEventSeriesResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/network-events\/services$/, handler: ({ query }) => networkEventServicesResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/network-events\/hosts$/, handler: ({ query }) => networkEventHostsResponse(query) },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/connection-events$/,
+    handler: ({ query }): ConnectionEventsResponse => {
+      const { limit, offset } = pageParams(query);
+      const filtered = filterConnectionEvents(query);
+      return { events: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
+    }
+  },
+  { method: "GET", pattern: /^\/api\/admin\/connection-events\/series$/, handler: ({ query }) => connectionSeriesResponse(query) },
+  { method: "GET", pattern: /^\/api\/admin\/connection-events\/hosts$/, handler: ({ query }) => connectionHostsResponse(query) },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/connection-events\/nodes$/,
+    handler: (): ConnectionTelemetryNodesResponse => ({ nodes: connectionTelemetryNodes })
+  },
   {
     method: "GET",
     pattern: /^\/api\/admin\/service-overrides$/,

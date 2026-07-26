@@ -1,0 +1,127 @@
+// Trimmed vendored copy of sing-box's daemon gRPC contract.
+//
+// Upstream:  github.com/SagerNet/sing-box
+// File:      daemon/started_service.proto
+// Tag:       v1.14.0-beta.2
+// Commit:    03c3bf4c01e7b1fd165d0c46ff376828fa878aab
+//
+// Only the connection-subscription surface is vendored. See README.md for the
+// trimming rationale, the regeneration commands, and the re-verification
+// procedure for a new upstream tag.
+//
+// Wire compatibility is preserved by keeping the proto package (`daemon`), the
+// service name (`StartedService`), the method name, and every field number and
+// type exactly as upstream declares them. gRPC routes on the fully-qualified
+// method name `/daemon.StartedService/SubscribeConnections`, and proto3 binary
+// encoding carries field numbers rather than names, so omitting the other RPCs
+// is invisible to the server.
+
+syntax = "proto3";
+
+package daemon;
+
+option go_package = "github.com/haoxin/boxfleet/internal/singboxapi/daemonpb";
+
+// StartedService is deliberately declared with one RPC. Upstream's service has
+// 34, including a control plane BoxFleet must never reach: StopService,
+// ReloadService, CloseConnection, CloseAllConnections, SelectOutbound and
+// TriggerDebugCrash. They are omitted from the descriptor so no generated
+// client method exists for them and no BoxFleet code can call one by accident.
+service StartedService {
+  // SubscribeConnections streams connection lifecycle events.
+  //
+  // The first message always carries reset=true and the full current state:
+  // every live connection plus every entry still held in the closed-connection
+  // ring, all as CONNECTION_EVENT_NEW (see buildInitialConnectionState,
+  // daemon/started_service.go:790-820). Closed replays are distinguishable by a
+  // non-zero Connection.closedAt.
+  //
+  // The server waits for the box instance to reach STARTED before the first
+  // send, and fails with Unimplemented when connection tracking is off.
+  rpc SubscribeConnections(SubscribeConnectionsRequest) returns (stream ConnectionEvents) {}
+}
+
+message SubscribeConnectionsRequest {
+  // Traffic-update tick, in NANOSECONDS. The server evaluates this as
+  // `time.Duration(request.Interval)` (daemon/started_service.go:736), not as
+  // seconds or milliseconds. Values <= 0 fall back to one second server-side.
+  int64 interval = 1;
+}
+
+enum ConnectionEventType {
+  CONNECTION_EVENT_NEW = 0;
+  CONNECTION_EVENT_UPDATE = 1;
+  CONNECTION_EVENT_CLOSED = 2;
+}
+
+message ConnectionEvent {
+  ConnectionEventType type = 1;
+  string id = 2;
+  // Populated on NEW, never on UPDATE, and best-effort on CLOSED: the server
+  // can only attach it while the connection is still in the closed ring
+  // (daemon/started_service.go:938-948). Consumers must retain identity from
+  // the NEW event rather than expect it on every message.
+  Connection connection = 3;
+  // Byte deltas since the previous UPDATE for this id. These are populated
+  // (unlike Connection.uplink/downlink), and are reported as zero when the
+  // underlying counter goes backwards, which is how a sing-box restart shows up.
+  int64 uplinkDelta = 4;
+  int64 downlinkDelta = 5;
+  int64 closedAt = 6;
+}
+
+message ConnectionEvents {
+  repeated ConnectionEvent events = 1;
+  // Set on the first message of a subscription. State accumulated before it
+  // must be discarded.
+  bool reset = 2;
+}
+
+message Connection {
+  string id = 1;
+  string inbound = 2;
+  string inboundType = 3;
+  int32 ipVersion = 4;
+  string network = 5;
+  string source = 6;
+  // Carries the destination host for BoxFleet's rendered configs. See the note
+  // on `domain` below.
+  string destination = 7;
+  // Empty on BoxFleet's rendered configs: buildConnectionProto copies
+  // metadata.Metadata.Domain with no fallback to Destination.Fqdn, and BoxFleet
+  // renders no sniff action, so nothing ever sets it. Read `destination`.
+  string domain = 8;
+  string protocol = 9;
+  // Populated for VLESS and multi-user Shadowsocks. Single-user Shadowsocks
+  // never attributes.
+  string user = 10;
+  string fromOutbound = 11;
+  // Unix milliseconds.
+  int64 createdAt = 12;
+  int64 closedAt = 13;
+
+  // Fields 14 and 15 upstream are `int64 uplink` and `int64 downlink`. They are
+  // never assigned by buildConnectionProto (daemon/started_service.go:977-997)
+  // and would decode as a constant zero, so they are reserved here rather than
+  // vendored: the numbers stay claimed against a future upstream reuse, and no
+  // Go accessor exists to build on. Per-connection byte totals come from
+  // uplinkTotal/downlinkTotal; per-tick deltas come from
+  // ConnectionEvent.uplinkDelta/downlinkDelta.
+  reserved 14, 15;
+
+  int64 uplinkTotal = 16;
+  int64 downlinkTotal = 17;
+  string rule = 18;
+  string outbound = 19;
+  string outboundType = 20;
+  repeated string chainList = 21;
+  ProcessInfo processInfo = 22;
+}
+
+message ProcessInfo {
+  uint32 processId = 1;
+  int32 userId = 2;
+  string userName = 3;
+  string processPath = 4;
+  repeated string packageNames = 5;
+}

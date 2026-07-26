@@ -21,9 +21,16 @@ import (
 // reports are the only legitimately large payloads (the agent caps a journal
 // batch at 100 entries / 256 KiB of message content, so 1 MiB leaves room for
 // JSON framing and escaping).
+// Connection reports are the largest legitimate node payload and get their own
+// bound: RecordConnectionReport accepts at most 2000 aggregation buckets, and a
+// fully populated bucket (IPv6 source, long hostname, chain, both window
+// bounds) serialises to roughly 600 bytes, so the largest batch the server will
+// act on is about 1.2 MiB. 2 MiB admits that with framing headroom and rejects
+// anything a conforming agent would never send.
 const (
-	maxNodeReportBytes     = 64 * 1024
-	maxNodeBulkReportBytes = 1024 * 1024
+	maxNodeReportBytes           = 64 * 1024
+	maxNodeBulkReportBytes       = 1024 * 1024
+	maxNodeConnectionReportBytes = 2 * 1024 * 1024
 )
 
 type Options struct {
@@ -55,6 +62,7 @@ func NewRouter(options Options) http.Handler {
 	router.Post("/api/node/heartbeat", nodeHeartbeatHandler(options.DB))
 	router.Post("/api/node/traffic", nodeTrafficHandler(options.DB))
 	router.Post("/api/node/logs", nodeLogsHandler(options.DB))
+	router.Post("/api/node/connections", nodeConnectionEventsHandler(options.DB))
 	router.Post("/api/node/system-logs", nodeSystemLogsHandler(options.DB))
 	router.Post("/api/node/operations/claim", nodeOperationClaimHandler(options.DB, operationNotifier))
 	router.Post("/api/node/operations/{operation}/lease", nodeOperationLeaseHandler(options.DB))

@@ -496,6 +496,118 @@ export type NetworkEventHostsResponse = {
   truncated: boolean;
 };
 
+// Connection telemetry — the second network-event producer, sing-box 1.14's
+// daemon gRPC stream. It is opt-in per node and off by default: the production
+// fleet runs 1.13, where the `service.api` config block does not parse at all.
+// A node that streams produces these rows *instead of nothing*, not instead of
+// log_events, so the two sources are surfaced separately and never merged.
+//
+// Every byte figure below is an ESTIMATE. sing-box drops events silently when a
+// subscriber buffer fills, evicts its closed-connection ring at 1000 entries,
+// and resets connection ids on restart. Render them with `ConnectionCoverage`
+// alongside, and never label them "traffic" — billing reads the V2Ray counters
+// behind `/traffic/series`.
+export type ConnectionVolume = {
+  /** Sessions that opened in the bucket. Sum this, never `connections_closed`. */
+  connections_opened: number;
+  connections_closed: number;
+  uplink_bytes: number;
+  downlink_bytes: number;
+  /** Precomputed uplink + downlink so no client re-derives the ranked figure. */
+  total_bytes: number;
+  duration_ms_total: number;
+};
+
+// The collector's own loss telemetry, carried on every response with bytes.
+export type ConnectionCoverage = {
+  connections_observed: number;
+  connections_attributed: number;
+  connections_unattributed: number;
+  connections_orphaned: number;
+  stream_resets: number;
+  dropped_buckets: number;
+  bytes_observed: number;
+  bytes_attributed: number;
+  /** Attributed / observed bytes in [0,1]; an empty window reports 1. */
+  attribution_ratio: number;
+  reports: number;
+};
+
+export type ConnectionEvent = {
+  node_name: string;
+  user_name: string;
+  auth_name: string;
+  source_ip: string;
+  target_host: string;
+  target_port: number;
+  /** Sniffed name. Empty on BoxFleet's rendered config; the host is target_host. */
+  domain: string;
+  network: string;
+  ip_version: number;
+  protocol: string;
+  inbound: string;
+  inbound_type: string;
+  rule: string;
+  outbound: string;
+  outbound_type: string;
+  /** Outbound chain flattened with ">". */
+  chain: string;
+  connections_opened: number;
+  connections_closed: number;
+  uplink_bytes: number;
+  downlink_bytes: number;
+  duration_ms_total: number;
+  bucket_start: string;
+  window_start: string;
+  window_end: string;
+};
+
+export type ConnectionEventsResponse = {
+  events: ConnectionEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ConnectionPoint = ConnectionVolume & { bucket_start: string };
+
+export type ConnectionSeriesResponse = {
+  bucket: SeriesBucket;
+  offset_minutes: number;
+  start: string;
+  end: string;
+  points: ConnectionPoint[];
+  totals: ConnectionVolume;
+  coverage: ConnectionCoverage;
+};
+
+export type ConnectionHostSort = "bytes" | "connections";
+
+export type ConnectionHost = ConnectionVolume & { host: string };
+
+export type ConnectionHostsResponse = {
+  sort: ConnectionHostSort;
+  hosts: ConnectionHost[];
+  /** Unclipped window totals; the share denominator, independent of `limit`. */
+  totals: ConnectionVolume;
+  distinct_hosts: number;
+  limit: number;
+  truncated: boolean;
+  coverage: ConnectionCoverage;
+};
+
+// Which nodes actually stream. The secret is a full control-plane credential
+// for sing-box's daemon API and is deliberately absent from this shape.
+export type ConnectionTelemetryNode = {
+  node_name: string;
+  listen_address: string;
+  listen_port: number;
+};
+
+export type ConnectionTelemetryNodesResponse = {
+  nodes: ConnectionTelemetryNode[];
+};
+
 export type DomainServiceOverride = {
   suffix: string;
   service: string;

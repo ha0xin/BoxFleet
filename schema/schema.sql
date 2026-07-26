@@ -795,3 +795,99 @@ CREATE TABLE IF NOT EXISTS domain_service_overrides (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS node_connection_telemetry (
+  node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+  listen_address TEXT NOT NULL DEFAULT '127.0.0.1' CHECK (listen_address <> ''),
+  listen_port INTEGER NOT NULL DEFAULT 9091 CHECK (listen_port > 0 AND listen_port <= 65535),
+  secret TEXT NOT NULL CHECK (length(secret) >= 32),
+  rotated_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS connection_reports (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  agent_boot_id TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  window_end TEXT NOT NULL,
+  connections_observed INTEGER NOT NULL DEFAULT 0 CHECK (connections_observed >= 0),
+  connections_attributed INTEGER NOT NULL DEFAULT 0 CHECK (connections_attributed >= 0),
+  connections_unattributed INTEGER NOT NULL DEFAULT 0 CHECK (connections_unattributed >= 0),
+  connections_orphaned INTEGER NOT NULL DEFAULT 0 CHECK (connections_orphaned >= 0),
+  stream_resets INTEGER NOT NULL DEFAULT 0 CHECK (stream_resets >= 0),
+  dropped_buckets INTEGER NOT NULL DEFAULT 0 CHECK (dropped_buckets >= 0),
+  bytes_observed INTEGER NOT NULL DEFAULT 0 CHECK (bytes_observed >= 0),
+  bytes_attributed INTEGER NOT NULL DEFAULT 0 CHECK (bytes_attributed >= 0),
+  reported_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (node_id, agent_boot_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_connection_reports_node_window
+  ON connection_reports(node_id, window_end);
+
+CREATE INDEX IF NOT EXISTS idx_connection_reports_window_coverage
+  ON connection_reports(
+    window_end,
+    window_start,
+    connections_observed,
+    connections_attributed,
+    bytes_observed,
+    bytes_attributed
+  );
+
+CREATE TABLE IF NOT EXISTS connection_events (
+  id TEXT PRIMARY KEY,
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  proxy_user_id TEXT REFERENCES proxy_users(id) ON DELETE SET NULL,
+  auth_name TEXT NOT NULL DEFAULT '',
+  source_ip TEXT NOT NULL DEFAULT '',
+  target_host TEXT NOT NULL DEFAULT '' CHECK (target_host = lower(target_host)),
+  target_port INTEGER NOT NULL DEFAULT 0 CHECK (target_port >= 0 AND target_port <= 65535),
+  domain TEXT NOT NULL DEFAULT '' CHECK (domain = lower(domain)),
+  network TEXT NOT NULL DEFAULT '',
+  ip_version INTEGER NOT NULL DEFAULT 0 CHECK (ip_version IN (0, 4, 6)),
+  protocol TEXT NOT NULL DEFAULT '',
+  inbound TEXT NOT NULL DEFAULT '',
+  inbound_type TEXT NOT NULL DEFAULT '',
+  rule TEXT NOT NULL DEFAULT '',
+  outbound TEXT NOT NULL DEFAULT '',
+  outbound_type TEXT NOT NULL DEFAULT '',
+  chain TEXT NOT NULL DEFAULT '',
+  connections_opened INTEGER NOT NULL DEFAULT 0 CHECK (connections_opened >= 0),
+  connections_closed INTEGER NOT NULL DEFAULT 0 CHECK (connections_closed >= 0),
+  uplink_bytes INTEGER NOT NULL DEFAULT 0 CHECK (uplink_bytes >= 0),
+  downlink_bytes INTEGER NOT NULL DEFAULT 0 CHECK (downlink_bytes >= 0),
+  duration_ms_total INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms_total >= 0),
+  aggregate_key TEXT NOT NULL,
+  bucket_start TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  window_end TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_events_aggregate_key
+  ON connection_events(aggregate_key);
+
+CREATE INDEX IF NOT EXISTS idx_connection_events_bucket_host_bytes
+  ON connection_events(
+    bucket_start,
+    target_host,
+    uplink_bytes,
+    downlink_bytes,
+    connections_opened
+  );
+
+CREATE INDEX IF NOT EXISTS idx_connection_events_node_bucket
+  ON connection_events(node_id, bucket_start);
+
+CREATE INDEX IF NOT EXISTS idx_connection_events_user_bucket
+  ON connection_events(proxy_user_id, bucket_start);
+
+CREATE INDEX IF NOT EXISTS idx_connection_events_node_user_bucket
+  ON connection_events(node_id, proxy_user_id, bucket_start);

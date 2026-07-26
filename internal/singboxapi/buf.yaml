@@ -1,0 +1,14 @@
+# buf module for the vendored sing-box daemon contract.
+#
+# Lint and breaking-change rules are deliberately absent. The vendored proto is
+# not BoxFleet's to style: it is a verbatim-shaped subset of upstream's
+# daemon/started_service.proto, and every deviation buf would flag (the `daemon`
+# package name, lowerCamelCase field names, the non-`Request`/`Response` message
+# names) is load-bearing for wire compatibility. Renaming any of them to satisfy
+# a linter would break the client against a real sing-box.
+#
+# Compatibility is verified by diffing against upstream, not by buf breaking —
+# see README.md, "Re-verifying against a new sing-box tag".
+version: v2
+modules:
+  - path: .

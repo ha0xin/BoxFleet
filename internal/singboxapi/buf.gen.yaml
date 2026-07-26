@@ -1,0 +1,19 @@
+# Codegen for the vendored sing-box daemon contract. Run from this directory:
+#
+#   buf generate
+#
+# Plugin versions are pinned in README.md and must match the module's
+# google.golang.org/protobuf and google.golang.org/grpc versions in go.mod.
+#
+# Managed mode is off: the proto carries its own go_package, and letting buf
+# rewrite options would put a second source of truth in the loop.
+version: v2
+managed:
+  enabled: false
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: .
+    opt: paths=source_relative
