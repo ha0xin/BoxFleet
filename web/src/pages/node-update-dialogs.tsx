@@ -32,7 +32,7 @@ function idempotencyKey(prefix: string) {
   return `${prefix}:${suffix}`;
 }
 
-function phaseLabel(value: string) {
+export function phaseLabel(value: string) {
   const labels: Record<string, string> = {
     queued: "Queued",
     claimed: "Claimed",
@@ -168,15 +168,23 @@ export function NodeUpdateDialog({
           idempotency_key: idempotencyKey(`node-update:${node.name}`)
         })
       }),
-    { onSuccess: (operation) => setOperationID(operation.id) }
+    { onSuccess: (operation) => setOperationID(operation.id), toastError: false }
   );
-  const cancelMutation = useAdminMutation<void, NodeOperation>(request, (req) =>
-    req(`/api/admin/nodes/${encodeURIComponent(node.name)}/operations/${encodeURIComponent(operationID)}/cancel`, {
-      method: "POST"
-    })
+  const cancelMutation = useAdminMutation<void, NodeOperation>(
+    request,
+    (req) =>
+      req(`/api/admin/nodes/${encodeURIComponent(node.name)}/operations/${encodeURIComponent(operationID)}/cancel`, {
+        method: "POST"
+      }),
+    { toastError: false }
   );
 
+  // The first poll has not returned right after a successful submit. Fall back
+  // to the mutation's own response so the form (and its enabled submit button)
+  // never reappears in that gap — idempotencyKey() mints a fresh UUID per call,
+  // so a second click would enqueue a second operation instead of deduplicating.
   const detail = operationQuery.data ??
+    (mutation.data && mutation.data.id === operationID ? { operation: mutation.data, events: [] } : null) ??
     (initialOperation && operationID === initialOperation.id ? { operation: initialOperation, events: [] } : null);
   const terminal = detail ? terminalOperationStatuses.has(detail.operation.status) : false;
   const canSubmit = components.length > 0 && !mutation.isPending;
@@ -189,9 +197,9 @@ export function NodeUpdateDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:w-[32rem] sm:p-6 lg:w-[40rem]">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Update {node.name}</Dialog.Title>
-        <Dialog.Description className="mb-5 text-kumo-subtle">
+        <Dialog.Description className="mb-4 text-kumo-subtle">
           The agent will claim this operation over HTTPS. No SSH session is used.
         </Dialog.Description>
 
@@ -266,6 +274,7 @@ export function NodeUpdateDialog({
             <Button
               icon={DownloadSimpleIcon}
               loading={mutation.isPending}
+              disabled={!canSubmit}
               onClick={() => {
                 setOperationID("");
                 mutation.mutate(components);
@@ -312,15 +321,25 @@ export function UpdateAllDialog({
           idempotency_key: idempotencyKey("update-all")
         })
       }),
-    { onSuccess: (detail) => setCampaignID(detail.campaign.id) }
+    { onSuccess: (detail) => setCampaignID(detail.campaign.id), toastError: false }
   );
-  const cancelMutation = useAdminMutation<void, NodeUpdateCampaignDetail>(request, (req) =>
-    req(`/api/admin/node-update-campaigns/${encodeURIComponent(campaignID)}/cancel`, { method: "POST" })
+  const cancelMutation = useAdminMutation<void, NodeUpdateCampaignDetail>(
+    request,
+    (req) => req(`/api/admin/node-update-campaigns/${encodeURIComponent(campaignID)}/cancel`, { method: "POST" }),
+    { toastError: false }
   );
-  const resumeMutation = useAdminMutation<void, NodeUpdateCampaignDetail>(request, (req) =>
-    req(`/api/admin/node-update-campaigns/${encodeURIComponent(campaignID)}/resume`, { method: "POST" })
+  const resumeMutation = useAdminMutation<void, NodeUpdateCampaignDetail>(
+    request,
+    (req) => req(`/api/admin/node-update-campaigns/${encodeURIComponent(campaignID)}/resume`, { method: "POST" }),
+    { toastError: false }
   );
-  const detail = campaignQuery.data ?? initialCampaign ?? null;
+  // As in NodeUpdateDialog: the mutation response covers the gap before the
+  // first poll returns, so the rollout cannot be started twice.
+  const detail =
+    campaignQuery.data ??
+    (mutation.data && mutation.data.campaign.id === campaignID ? mutation.data : null) ??
+    initialCampaign ??
+    null;
   const completed = detail?.members.filter((member) => member.status === "succeeded" || member.status === "skipped").length ?? 0;
   const terminal = detail ? terminalCampaignStatuses.has(detail.campaign.status) : false;
   const grouped = useMemo(() => {
@@ -341,9 +360,9 @@ export function UpdateAllDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:w-[36rem] sm:p-6 lg:w-[48rem]">
+      <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Update all nodes</Dialog.Title>
-        <Dialog.Description className="mb-5 text-kumo-subtle">
+        <Dialog.Description className="mb-4 text-kumo-subtle">
           One online node is updated as canary, then the remaining nodes advance in bounded batches.
         </Dialog.Description>
 

@@ -1,0 +1,4 @@
+line 04 tracked-source conn=0 source=198.51.100.24
+line 05 parsed action=connect auth=alice source=198.51.100.24 host=dns.google port=853 window_start=2026-05-16T03:24:09.997Z window_end=2026-05-16T03:24:10Z
+line 08 parsed action=invalid_connection auth=- source=67.230.167.42 host=- port=0 window_start=2026-05-15T18:08:46.945Z window_end=2026-05-15T18:08:47Z
+line 11 parsed action=invalid_connection auth=- source=- host=- port=0 window_start=2026-05-15T18:08:48.949Z window_end=2026-05-15T18:08:49Z

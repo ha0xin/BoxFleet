@@ -50,6 +50,7 @@ UPDATE proxy_accesses
 SET
   enabled = 1,
   deleted_at = NULL,
+  credential_json = sqlc.arg(credential_json),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE proxy_user_id = sqlc.arg(proxy_user_id)
   AND proxy_id = sqlc.arg(proxy_id);

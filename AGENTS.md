@@ -84,9 +84,15 @@ Node lifecycle and disable semantics: a node is `pending` after bootstrap and be
 
 ### Renderer and sing-box
 
-`internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. VLESS-Reality and Shadowsocks 2022 are rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client and Mihomo output.
+`internal/server/render` produces the full sing-box config JSON. `refs/sing-box/` is a checkout of the upstream sing-box source used for reference only — do not import from it. **It drifts from production:** `refs/` is at v1.14.0-alpha.24 while `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` pins v1.13.13, so whole packages there (`daemon/`, `service/api`) do not exist on any node. Check `git -C refs/sing-box describe --tags` against `SING_BOX_REVISION` before relying on anything you read there. VLESS-Reality and Shadowsocks 2022 are rendered today; adding a protocol means adding a new branch in `RenderNodeConfig` plus matching client and Mihomo output.
 
-Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the client). Counter naming is `user>>><name>>>>traffic>>>{uplink,downlink}` — defined upstream in `refs/sing-box/experimental/v2rayapi/stats.go`. Per-connection metadata (source IP, host, etc.) is **not** exposed by v2ray API; current code scrapes journalctl log text from sing-box (`internal/server/db/log_events.go`) and is fragile by design — sing-box log format changes will break it.
+Traffic counters use sing-box's v2ray API gRPC (`internal/v2raystats` is the client). Counter naming is `user>>><name>>>>traffic>>>{uplink,downlink}` — defined upstream in `refs/sing-box/experimental/v2rayapi/stats.go`. Per-connection metadata (source IP, host, etc.) is **not** exposed by v2ray API; current code scrapes journalctl log text from sing-box (`internal/server/db/log_events.go`) and is fragile by design — sing-box log format changes will break it. Golden fixtures (`log_events_parse_test.go`) are the guard. `with_clash_api` is compiled in but never configured; the Clash API cannot attribute a connection to a user and its byte totals are lossy — read `docs/adr/0001-network-event-telemetry-source.md` before proposing a switch.
+
+### Telemetry aggregation
+
+`internal/server/db/series_common.go` is the single source of bucket truth and `buildLogEventPredicates` (`log_events.go`) the single source of log-event filter truth — the paged table, the series, and the service breakdown must all go through them. **The server owns bucketing and zero-fill; clients never bucket.** Bucket on `window_start`/`observed_at`, never `created_at` (the upsert bumps it on every merge). Hour buckets are UTC; day buckets take an `offset_minutes` param.
+
+Two hard data-model limits: **bytes cannot be attributed to a destination host** (`log_events` has no byte columns, `traffic_usage_deltas` has no host column), so the service audit view is connections-only and must never be labelled traffic; and only `action="connect"` rows survive ingestion, so grouping by action returns one bucket. Traffic series exclude soft-deleted users and event series include them — each matches the pipeline it extends; do not unify. Host classification is read-time via `internal/servicecatalog` plus `domain_service_overrides`; do not add a `service` column to `log_events`.
 
 ### Web UI
 
@@ -96,7 +102,8 @@ Use the established frontend stack instead of hand-rolling UI behavior. See `doc
 
 - Cloudflare Kumo for all app UI: dialogs, dropdowns, popovers, selects, switches, tables, labels, buttons, inputs, banners, badges, surfaces, grids, and other interactive controls. Import native components from `@cloudflare/kumo` directly; use Base UI primitives re-exported by `@cloudflare/kumo/primitives/*` only when a styled Kumo component is not available.
 - **Semantic tokens only** — `bg-kumo-base`, `text-kumo-default`, `bg-kumo-canvas`, `kumo-hairline`, etc. Never raw Tailwind colors and never `dark:` variants (Kumo handles light/dark via `light-dark()`).
-- Kumo's CLI is the source of truth and the vendoring mechanism. When unfamiliar with a component or pattern, first run commands from the `web/` directory: `npx kumo ai` for the usage guide, `npx kumo docs <Component>` (or `npx kumo doc <Component>`) for component props/examples, `npx kumo ls` for the catalog, and `npx kumo add <Block>` to copy a block (e.g. `PageHeader`) into `blocksDir` from `kumo.json`. Do not guess Kumo APIs from memory.
+- Kumo's CLI is the source of truth and the vendoring mechanism. When unfamiliar with a component or pattern, first run commands from the `web/` directory: `npx kumo ai` for the usage guide, `npx kumo docs <Component>` (or `npx kumo doc <Component>`) for component props/examples, `npx kumo ls` for the catalog, and `npx kumo add <Block>` to copy a block (e.g. `PageHeader`) into `blocksDir` from `kumo.json`. Do not guess Kumo APIs from memory. **The CLI is incomplete:** it omits Kumo's chart system entirely, which the root barrel does export (`Chart`, `ChartPalette`, `TimeseriesChart`, `ChartLegend`, `SankeyChart`). For charts, read `node_modules/@cloudflare/kumo/dist/src/components/chart/*.d.ts`.
+- Charts use Kumo's chart components on `echarts` (Kumo's own optional peer), registered once in `web/src/components/chart/echarts.ts`. `recharts` is removed. Series colours are pinned to palette slots 0 and 5 — see `docs/web-ui.md` for why the others fail validation. Sparklines are the hand-rolled inline SVG in `web/src/components/sparkline.tsx`; Kumo has no sparkline.
 - Tailwind v4 is wired through `@tailwindcss/vite`; `web/src/styles/globals.css` keeps `@source` then `@cloudflare/kumo/styles` then `tailwindcss` in that order.
 - TanStack Query for API request state, caching, refresh, and invalidation.
 - TanStack Table for non-trivial tables, especially paginated/filterable admin data.
@@ -127,4 +134,5 @@ Most coverage lives in `internal/agent`, `internal/server/{api,db,render}`, `int
 - `docs/deployment.md` — artifact-based server and node deployment flow.
 - `docs/testing.md` — test boundaries and release checks.
 - `docs/architecture.md`, `docs/db-schema.md`, `docs/config-generation.md`, and `docs/web-ui.md` — implementation contracts.
+- `docs/adr/` — decision records. `0001-network-event-telemetry-source.md` explains why network events are still scraped from journal text and what would change that.
 - `deploy/sing-box/README.md` — pinned sing-box build requirements.

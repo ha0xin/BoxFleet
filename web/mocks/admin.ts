@@ -16,15 +16,28 @@ import type {
   MihomoProfileDocument,
   MihomoProfileSubscription,
   MihomoRewriteTemplate,
+  DomainServiceOverride,
   NetworkEvent,
+  NetworkEventHost,
+  NetworkEventHostsResponse,
+  NetworkEventSeriesGroup,
+  NetworkEventSeriesResponse,
   NetworkEventsResponse,
   NodeOperation,
   NodeOperationDetail,
   NodeUpdateCampaignDetail,
   Overview,
+  SeriesBucket,
+  ServiceClassificationSource,
+  ServiceUsageGroup,
+  ServiceUsageResponse,
+  ServiceUsageRow,
   SystemLog,
   SystemLogsResponse,
+  TrafficPoint,
   TrafficRow,
+  TrafficSeriesGroup,
+  TrafficSeriesResponse,
   UserConnectionInfo
 } from "../src/types";
 
@@ -538,6 +551,350 @@ const networkEvents: NetworkEvent[] = Array.from({ length: 96 }, (_, i) => {
   };
 });
 
+// --- Telemetry series ------------------------------------------------------
+// The real server owns bucketing and zero-fill, so the mock does too: handlers
+// return one point per bucket across the whole requested window, including
+// empty ones. Buckets are keyed on window_start, never created_at.
+
+type SeriesWindow = { start: number; end: number; bucket: SeriesBucket; offsetMinutes: number };
+
+function timeWindow(query: URLSearchParams): { start: number; end: number } {
+  const parsedEnd = Date.parse(query.get("end") ?? "");
+  const end = Number.isFinite(parsedEnd) ? parsedEnd : now;
+  const parsedStart = Date.parse(query.get("start") ?? "");
+  const start = Number.isFinite(parsedStart) ? parsedStart : end - DAY;
+  return { start, end };
+}
+
+// The service and host breakdowns leave start/end optional and echo them back
+// normalized, exactly as the server does.
+function normalizedTime(raw: string | null): string {
+  const parsed = Date.parse(raw ?? "");
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
+}
+
+function seriesWindow(query: URLSearchParams): SeriesWindow {
+  const { start, end } = timeWindow(query);
+  const requested = query.get("bucket");
+  const bucket: SeriesBucket =
+    requested === "hour" || requested === "day" ? requested : end - start <= 48 * HOUR ? "hour" : "day";
+  return { start, end, bucket, offsetMinutes: Number(query.get("offset_minutes") ?? 0) || 0 };
+}
+
+// Hour buckets are UTC; day buckets are local midnight expressed as the UTC
+// instant, which is what offset_minutes shifts.
+function bucketFloor(ms: number, window: Pick<SeriesWindow, "bucket" | "offsetMinutes">): number {
+  if (window.bucket === "hour") return Math.floor(ms / HOUR) * HOUR;
+  const shifted = ms + window.offsetMinutes * MIN;
+  return Math.floor(shifted / DAY) * DAY - window.offsetMinutes * MIN;
+}
+
+// Go renders a whole-second time.Time without a fractional part; match it so
+// fixtures and the real server are byte-comparable.
+const bucketISO = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+function bucketStarts(window: SeriesWindow): number[] {
+  const step = window.bucket === "hour" ? HOUR : DAY;
+  const starts: number[] = [];
+  for (let cursor = bucketFloor(window.start, window); cursor <= window.end; cursor += step) starts.push(cursor);
+  return starts;
+}
+
+// FNV-1a so a given series/bucket pair always renders the same number and the
+// dev UI stops flickering on every refetch.
+function hashSeed(text: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 2 ** 32;
+}
+
+function seriesLimit(query: URLSearchParams, fallback: number, max: number): number {
+  return Math.max(1, Math.min(Number(query.get("limit") ?? fallback) || fallback, max));
+}
+
+function trafficPoint(key: string, bucketStart: number, window: SeriesWindow): TrafficPoint {
+  const seed = hashSeed(`${key}:${bucketStart}`);
+  const hourOfDay = new Date(bucketStart).getUTCHours();
+  const diurnal = 0.3 + 0.7 * (0.5 - 0.5 * Math.cos(((hourOfDay + 2) / 24) * 2 * Math.PI));
+  const shape = window.bucket === "hour" ? diurnal : 14 * (0.6 + 0.4 * seed);
+  const multiplier = hashSeed(key) > 0.6 ? 1.5 : 1;
+  const uplink = Math.round((0.35 + seed) * shape * 160 * 1024 ** 2);
+  const downlink = Math.round(uplink * (3.5 + seed * 2));
+  return {
+    bucket_start: bucketISO(bucketStart),
+    uplink_raw_bytes: uplink,
+    uplink_billable_bytes: Math.round(uplink * multiplier),
+    downlink_raw_bytes: downlink,
+    downlink_billable_bytes: Math.round(downlink * multiplier)
+  };
+}
+
+function trafficSeriesResponse(query: URLSearchParams): TrafficSeriesResponse {
+  const window = seriesWindow(query);
+  const requestedGroup = query.get("group");
+  const group: TrafficSeriesGroup =
+    requestedGroup === "user" || requestedGroup === "node" ? requestedGroup : "total";
+  const userName = (query.get("user") ?? "").trim();
+  const nodeName = (query.get("node") ?? "").trim();
+  const limit = seriesLimit(query, 25, 100);
+
+  let keys: Array<{ key: string; label: string }>;
+  if (group === "user") {
+    keys = users
+      .filter((user) => !userName || user.name === userName)
+      .map((user) => ({ key: user.name, label: user.display_name || user.name }));
+  } else if (group === "node") {
+    keys = nodes
+      .filter((node) => !nodeName || node.name === nodeName)
+      .map((node) => ({ key: node.name, label: node.name }));
+  } else {
+    keys = [{ key: "total", label: "All traffic" }];
+  }
+  const truncated = keys.length > limit;
+  const starts = bucketStarts(window);
+
+  return {
+    bucket: window.bucket,
+    offset_minutes: window.offsetMinutes,
+    start: new Date(window.start).toISOString(),
+    end: new Date(window.end).toISOString(),
+    group,
+    series: keys.slice(0, limit).map(({ key, label }) => {
+      const points = starts.map((bucketStart) => trafficPoint(key, bucketStart, window));
+      return {
+        key,
+        label,
+        points,
+        totals: points.reduce(
+          (sum, point) => ({
+            uplink_raw_bytes: sum.uplink_raw_bytes + point.uplink_raw_bytes,
+            uplink_billable_bytes: sum.uplink_billable_bytes + point.uplink_billable_bytes,
+            downlink_raw_bytes: sum.downlink_raw_bytes + point.downlink_raw_bytes,
+            downlink_billable_bytes: sum.downlink_billable_bytes + point.downlink_billable_bytes
+          }),
+          { uplink_raw_bytes: 0, uplink_billable_bytes: 0, downlink_raw_bytes: 0, downlink_billable_bytes: 0 }
+        )
+      };
+    }),
+    truncated
+  };
+}
+
+// The table endpoint and every aggregation over it must apply identical
+// predicates, otherwise the chart and the rows below it disagree.
+function filterNetworkEvents(query: URLSearchParams): NetworkEvent[] {
+  const search = (query.get("search") ?? "").trim().toLowerCase();
+  const action = (query.get("action") ?? "").trim().toLowerCase();
+  const nodeName = (query.get("node") ?? "").trim();
+  const userName = (query.get("user") ?? "").trim();
+  const start = Date.parse(query.get("start") ?? "");
+  const end = Date.parse(query.get("end") ?? "");
+  return networkEvents
+    .filter((event) => !nodeName || event.node_name === nodeName)
+    .filter((event) => !userName || event.user_name === userName)
+    .filter((event) => !action || event.action.toLowerCase() === action)
+    .filter((event) => !Number.isFinite(start) || Date.parse(event.window_end) >= start)
+    .filter((event) => !Number.isFinite(end) || Date.parse(event.window_start) <= end)
+    .filter((event) => {
+      if (!search) return true;
+      return [
+        event.node_name,
+        event.user_name,
+        event.auth_name,
+        event.source_ip,
+        event.target_host,
+        String(event.target_port),
+        event.action,
+        event.raw_message
+      ].some((value) => value.toLowerCase().includes(search));
+    });
+}
+
+function networkEventSeriesResponse(query: URLSearchParams): NetworkEventSeriesResponse {
+  const window = seriesWindow(query);
+  const requestedGroup = query.get("group");
+  const group: NetworkEventSeriesGroup =
+    requestedGroup === "action" || requestedGroup === "node" || requestedGroup === "user" ? requestedGroup : "total";
+  const limit = seriesLimit(query, 25, 100);
+  const events = filterNetworkEvents(query);
+  const starts = bucketStarts(window);
+
+  const buckets = new Map<string, Map<number, number>>();
+  const actions = new Map<string, number>();
+  for (const event of events) {
+    actions.set(event.action, (actions.get(event.action) ?? 0) + event.count);
+    const key =
+      group === "action" ? event.action : group === "node" ? event.node_name : group === "user" ? event.user_name : "total";
+    const bucketStart = bucketFloor(Date.parse(event.window_start), window);
+    const counts = buckets.get(key) ?? new Map<number, number>();
+    counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + event.count);
+    buckets.set(key, counts);
+  }
+  if (group === "total" && !buckets.has("total")) buckets.set("total", new Map());
+
+  const series = [...buckets.entries()]
+    .map(([key, counts]) => ({
+      key,
+      label: group === "total" ? "All events" : key,
+      points: starts.map((bucketStart) => ({
+        bucket_start: bucketISO(bucketStart),
+        count: counts.get(bucketStart) ?? 0
+      })),
+      total: [...counts.values()].reduce((sum, count) => sum + count, 0)
+    }))
+    .sort((left, right) => right.total - left.total || compareText(left.key, right.key, 1));
+
+  return {
+    bucket: window.bucket,
+    offset_minutes: window.offsetMinutes,
+    start: new Date(window.start).toISOString(),
+    end: new Date(window.end).toISOString(),
+    group,
+    series: series.slice(0, limit),
+    actions: [...actions.entries()]
+      .map(([action, count]) => ({ action, count }))
+      .sort((left, right) => right.count - left.count || compareText(left.action, right.action, 1)),
+    truncated: series.length > limit
+  };
+}
+
+// --- Service classification ------------------------------------------------
+
+const SERVICE_CATALOG_VERSION = "2026-07-01";
+
+const mockServiceCatalog: Record<string, { service: string; label: string; category: string }> = {
+  "github.com": { service: "github", label: "GitHub", category: "development" },
+  "npmjs.org": { service: "npm", label: "npm Registry", category: "development" },
+  "youtube.com": { service: "youtube", label: "YouTube", category: "media" },
+  "x.com": { service: "x", label: "X", category: "social" },
+  "cloudflare.com": { service: "cloudflare", label: "Cloudflare", category: "infrastructure" },
+  "apple.com": { service: "apple", label: "Apple", category: "technology" }
+};
+
+const domainServiceOverrides = new Map<string, DomainServiceOverride>([
+  [
+    "internal.example.net",
+    {
+      suffix: "internal.example.net",
+      service: "intranet",
+      label: "Corporate intranet",
+      category: "internal",
+      created_at: iso(9 * DAY),
+      updated_at: iso(9 * DAY)
+    }
+  ]
+]);
+
+type Classification = { service: string; label: string; category: string; source: ServiceClassificationSource };
+
+function matchSuffix<T>(host: string, entries: Array<[string, T]>): T | undefined {
+  let best: [string, T] | undefined;
+  for (const entry of entries) {
+    const [suffix] = entry;
+    if (host !== suffix && !host.endsWith(`.${suffix}`)) continue;
+    if (!best || suffix.length > best[0].length) best = entry;
+  }
+  return best?.[1];
+}
+
+function classifyHost(host: string): Classification {
+  const lower = host.trim().toLowerCase();
+  if (!lower) return { service: "unknown", label: "Unknown", category: "unknown", source: "unknown" };
+  if (lower.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(lower)) {
+    return { service: lower, label: lower, category: "direct-ip", source: "ip" };
+  }
+  const override = matchSuffix(lower, [...domainServiceOverrides.entries()]);
+  if (override) {
+    return {
+      service: override.service,
+      label: override.label || override.service,
+      category: override.category,
+      source: "override"
+    };
+  }
+  const catalog = matchSuffix(lower, Object.entries(mockServiceCatalog));
+  if (catalog) return { ...catalog, source: "catalog" };
+  const registrable = lower.split(".").slice(-2).join(".");
+  return { service: registrable, label: registrable, category: "unclassified", source: "publicsuffix" };
+}
+
+function networkEventHosts(query: URLSearchParams): NetworkEventHost[] {
+  const counts = new Map<string, { connections: number; last_seen: string }>();
+  for (const event of filterNetworkEvents(query)) {
+    // target_host keeps its original casing in SQLite, so aggregation lowercases.
+    const host = event.target_host.toLowerCase();
+    const entry = counts.get(host) ?? { connections: 0, last_seen: "" };
+    entry.connections += event.count;
+    if (event.window_end > entry.last_seen) entry.last_seen = event.window_end;
+    counts.set(host, entry);
+  }
+  return [...counts.entries()]
+    .map(([host, entry]) => {
+      const classification = classifyHost(host);
+      return {
+        host,
+        service: classification.service,
+        service_label: classification.label,
+        category: classification.category,
+        source: classification.source,
+        connections: entry.connections,
+        last_seen: entry.last_seen
+      };
+    })
+    .sort((left, right) => right.connections - left.connections || compareText(left.host, right.host, 1));
+}
+
+function networkEventHostsResponse(query: URLSearchParams): NetworkEventHostsResponse {
+  const service = (query.get("service") ?? "").trim();
+  const limit = seriesLimit(query, 50, 500);
+  const offset = Math.max(0, Number(query.get("offset") ?? 0) || 0);
+  const hosts = networkEventHosts(query).filter((host) => !service || host.service === service);
+  return { hosts: hosts.slice(offset, offset + limit), total: hosts.length, limit, offset, truncated: false };
+}
+
+function networkEventServicesResponse(query: URLSearchParams): ServiceUsageResponse {
+  const group: ServiceUsageGroup = query.get("group") === "category" ? "category" : "service";
+  const limit = seriesLimit(query, 20, 100);
+  const hosts = networkEventHosts(query);
+
+  const grouped = new Map<string, ServiceUsageRow>();
+  for (const host of hosts) {
+    const key = group === "category" ? host.category : host.service;
+    const row = grouped.get(key) ?? {
+      key,
+      label: group === "category" ? host.category : host.service_label,
+      category: group === "category" ? "" : host.category,
+      connections: 0,
+      hosts: 0
+    };
+    row.connections += host.connections;
+    row.hosts += 1;
+    grouped.set(key, row);
+  }
+  const rows = [...grouped.values()].sort(
+    (left, right) => right.connections - left.connections || compareText(left.key, right.key, 1)
+  );
+  const other = rows.slice(limit).reduce(
+    (sum, row) => ({ ...sum, connections: sum.connections + row.connections, hosts: sum.hosts + row.hosts }),
+    { key: "other", label: "Other", category: "", connections: 0, hosts: 0 } as ServiceUsageRow
+  );
+
+  return {
+    start: normalizedTime(query.get("start")),
+    end: normalizedTime(query.get("end")),
+    group,
+    rows: rows.slice(0, limit),
+    other,
+    total_connections: hosts.reduce((sum, host) => sum + host.connections, 0),
+    total_hosts: hosts.length,
+    truncated: false,
+    catalog_version: SERVICE_CATALOG_VERSION
+  };
+}
+
 
 const basicMihomoYAML = `mixed-port: 7890
 mode: rule
@@ -974,32 +1331,43 @@ const routes: Route[] = [
     pattern: /^\/api\/admin\/network-events$/,
     handler: ({ query }): NetworkEventsResponse => {
       const { limit, offset } = pageParams(query);
-      const search = (query.get("search") ?? "").trim().toLowerCase();
-      const action = (query.get("action") ?? "").trim().toLowerCase();
-      const nodeName = (query.get("node") ?? "").trim();
-      const userName = (query.get("user") ?? "").trim();
-      const start = Date.parse(query.get("start") ?? "");
-      const end = Date.parse(query.get("end") ?? "");
-      const filtered = networkEvents
-        .filter((event) => !nodeName || event.node_name === nodeName)
-        .filter((event) => !userName || event.user_name === userName)
-        .filter((event) => !action || event.action.toLowerCase() === action)
-        .filter((event) => !Number.isFinite(start) || Date.parse(event.window_end) >= start)
-        .filter((event) => !Number.isFinite(end) || Date.parse(event.window_start) <= end)
-        .filter((event) => {
-          if (!search) return true;
-          return [
-            event.node_name,
-            event.user_name,
-            event.auth_name,
-            event.source_ip,
-            event.target_host,
-            String(event.target_port),
-            event.action,
-            event.raw_message
-          ].some((value) => value.toLowerCase().includes(search));
-        });
+      const filtered = filterNetworkEvents(query);
       return { events: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset };
+    }
+  },
+  { method: "GET", pattern: /^\/api\/admin\/traffic\/series$/, handler: ({ query }) => trafficSeriesResponse(query) },
+  { method: "GET", pattern: /^\/api\/admin\/network-events\/series$/, handler: ({ query }) => networkEventSeriesResponse(query) },
+  { method: "GET", pattern: /^\/api\/admin\/network-events\/services$/, handler: ({ query }) => networkEventServicesResponse(query) },
+  { method: "GET", pattern: /^\/api\/admin\/network-events\/hosts$/, handler: ({ query }) => networkEventHostsResponse(query) },
+  {
+    method: "GET",
+    pattern: /^\/api\/admin\/service-overrides$/,
+    handler: () => [...domainServiceOverrides.values()].sort((left, right) => compareText(left.suffix, right.suffix, 1))
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/admin\/service-overrides$/,
+    handler: ({ body }): DomainServiceOverride => {
+      const suffix = String(body?.suffix ?? "").trim().toLowerCase().replace(/^\.+/, "");
+      const timestamp = new Date().toISOString();
+      const override: DomainServiceOverride = {
+        suffix,
+        service: String(body?.service ?? ""),
+        label: String(body?.label ?? ""),
+        category: String(body?.category ?? ""),
+        created_at: domainServiceOverrides.get(suffix)?.created_at ?? timestamp,
+        updated_at: timestamp
+      };
+      domainServiceOverrides.set(suffix, override);
+      return override;
+    }
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/admin\/service-overrides\/([^/]+)$/,
+    handler: ({ match }) => {
+      domainServiceOverrides.delete(decodeURIComponent(match?.[1] ?? "").toLowerCase());
+      return { ok: true };
     }
   },
   {

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/haoxin/boxfleet/internal/id"
 	store "github.com/haoxin/boxfleet/internal/server/store/sqlc"
@@ -32,6 +34,10 @@ func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams)
 	if err := validateNameForAuth(name, "user"); err != nil {
 		return ProxyUser{}, err
 	}
+	expireAt, err := normalizeExpireAt(params.ExpireAt)
+	if err != nil {
+		return ProxyUser{}, err
+	}
 	userID, err := id.New("usr")
 	if err != nil {
 		return ProxyUser{}, err
@@ -41,7 +47,7 @@ func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams)
 		Name:             name,
 		DisplayName:      params.DisplayName,
 		GlobalQuotaBytes: params.GlobalQuotaBytes,
-		ExpireAt:         nullableTrimmedString(params.ExpireAt),
+		ExpireAt:         expireAt,
 	})
 	if err != nil {
 		return ProxyUser{}, err
@@ -187,6 +193,14 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 	if params.Status != nil && *params.Status != "active" && *params.Status != "disabled" {
 		return ProxyUser{}, fmt.Errorf("unsupported user status %q", *params.Status)
 	}
+	expireAt := sql.NullString{}
+	if params.ExpireAt != nil {
+		parsed, err := normalizeExpireAt(*params.ExpireAt)
+		if err != nil {
+			return ProxyUser{}, err
+		}
+		expireAt = parsed
+	}
 	err := db.withTx(ctx, func(q *store.Queries) error {
 		if params.DisplayName != nil {
 			affected, err := q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{DisplayName: *params.DisplayName, Name: normalized})
@@ -207,7 +221,7 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 			}
 		}
 		if params.ExpireAt != nil {
-			affected, err := q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{ExpireAt: nullableTrimmedString(*params.ExpireAt), Name: normalized})
+			affected, err := q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{ExpireAt: expireAt, Name: normalized})
 			if err != nil {
 				return err
 			}
@@ -244,12 +258,30 @@ func (db *DB) SetProxyUserQuota(ctx context.Context, name string, quotaBytes int
 }
 
 func (db *DB) SetProxyUserExpire(ctx context.Context, name, expireAt string) error {
+	expires, err := normalizeExpireAt(expireAt)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{
-		ExpireAt: nullableTrimmedString(expireAt),
+		ExpireAt: expires,
 		Name:     normalizeName(name),
 	})
 	if err != nil {
 		return err
 	}
 	return requireAffected(affected, "proxy user", name)
+}
+
+// normalizeExpireAt stores expiries as UTC RFC3339. Empty means "no expiry";
+// anything else must parse, because expire_at is compared and sorted as text.
+func normalizeExpireAt(value string) (sql.NullString, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return sql.NullString{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("expire_at must be an RFC3339 timestamp: %q", value)
+	}
+	return sql.NullString{String: parsed.UTC().Format(time.RFC3339), Valid: true}, nil
 }

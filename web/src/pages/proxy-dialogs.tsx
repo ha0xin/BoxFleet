@@ -67,20 +67,26 @@ function parseShortID(proxy: AdminProxy): string {
   }
 }
 
+// Malformed stored settings must not throw out of the mutation and make the
+// proxy uneditable; fall back to an empty object instead.
+function parseSettings(settingsJSON: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(settingsJSON || "{}");
+    // typeof [] === "object", so guard against arrays: assigning fields to an
+    // array would be dropped by JSON.stringify and silently lose them.
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to the empty object.
+  }
+  return {};
+}
+
 // Preserve the existing settings (Reality keys, short_id, handshake) and only
 // override server_name. Returns a JSON string for the PATCH payload.
 function mergeServerName(settingsJSON: string, serverName: string): string {
-  let settings: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(settingsJSON || "{}");
-    // typeof [] === "object", so guard against arrays: assigning server_name to
-    // an array would be dropped by JSON.stringify and silently lose the SNI.
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      settings = parsed as Record<string, unknown>;
-    }
-  } catch {
-    settings = {};
-  }
+  const settings = parseSettings(settingsJSON);
   if (serverName) {
     settings.server_name = serverName;
   } else {
@@ -101,6 +107,7 @@ function defaults(state: Exclude<ProxyDialogState, null>): ProxyFormValues {
       ss_method: parseSSMethod(p.settings_json),
       short_id: parseShortID(p),
       traffic_multiplier: p.traffic_multiplier,
+      // Not sent on PATCH, but the form schema requires the field.
       direct_publish: true,
       enabled: p.enabled
     };
@@ -184,10 +191,7 @@ export function ProxyFormDialog({
       // current Reality key pair / short_id instead of regenerating them.
       const settings_json = values.protocol === "vless_reality"
         ? mergeServerName(state.proxy.settings_json, sni)
-        : JSON.stringify({
-            ...(JSON.parse(state.proxy.settings_json || "{}") as Record<string, unknown>),
-            method: values.ss_method
-          });
+        : JSON.stringify({ ...parseSettings(state.proxy.settings_json), method: values.ss_method });
       return req(
         `/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies/${encodeURIComponent(state.proxy.name)}`,
         {
@@ -203,7 +207,7 @@ export function ProxyFormDialog({
         }
       );
     },
-    { onSuccess: onClose }
+    { onSuccess: onClose, toastError: false }
   );
 
   const enabled = form.watch("enabled");
@@ -212,15 +216,24 @@ export function ProxyFormDialog({
   const errors = form.formState.errors;
 
   return (
-    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+    <Dialog.Root open onOpenChange={(open) => (open || mutation.isPending ? undefined : onClose())}>
       <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">
           {isEdit ? `Edit ${state.proxy.name}` : "Create proxy"}
         </Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Create a VLESS-Reality or Shadowsocks 2022 inbound. Secret keys are generated server-side.
+          {isEdit
+            ? "Update the inbound. Reality keys and Shadowsocks secrets are preserved."
+            : "Create a VLESS-Reality or Shadowsocks 2022 inbound. Secret keys are generated server-side."}
         </Dialog.Description>
 
+        {!isEdit && nodesQuery.error ? (
+          <Banner
+            variant="error"
+            title={nodesQuery.error instanceof Error ? nodesQuery.error.message : "Failed to load nodes."}
+            className="mb-4"
+          />
+        ) : null}
         {mutation.isError ? (
           <Banner variant="error" title={mutation.error.message} className="mb-4" />
         ) : null}
@@ -235,6 +248,7 @@ export function ProxyFormDialog({
             <Select
               label="Node"
               value={nodeName || null}
+              loading={nodesQuery.isLoading}
               onValueChange={(value) => form.setValue("node_name", (value as string) ?? "", { shouldValidate: true })}
               items={nodeItems}
               error={errors.node_name?.message}
@@ -263,6 +277,8 @@ export function ProxyFormDialog({
             <Input
               label="Listen port"
               type="number"
+              min={1}
+              max={65535}
               error={errors.listen_port?.message}
               {...form.register("listen_port", { valueAsNumber: true })}
             />
@@ -328,7 +344,7 @@ export function ProxyFormDialog({
           />
 
           <div className="mt-2 flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" loading={mutation.isPending}>

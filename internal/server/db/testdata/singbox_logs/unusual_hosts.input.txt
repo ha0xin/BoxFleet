@@ -1,0 +1,11 @@
+# Unusual but valid destinations. Nothing normalizes target_host on the way in,
+# so mixed case and trailing dots reach the column verbatim and any aggregation
+# over hosts has to lower() and fold them itself.
++0000 2026-05-16 04:00:00 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 0ms] inbound/vless[vless-39090]: inbound connection from 192.0.2.55:40001
++0000 2026-05-16 04:00:00 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 5ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to Example.COM:443
++0000 2026-05-16 04:00:01 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 6ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to www.example.com.:443
++0000 2026-05-16 04:00:02 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 7ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to xn--fiqs8s.example:443
++0000 2026-05-16 04:00:03 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 8ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to _dns.resolver.arpa:853
++0000 2026-05-16 04:00:04 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 9ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to localhost:1
++0000 2026-05-16 04:00:05 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 10ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to a.very.long.chain.of.labels.cdn.edge.provider.example.net:8443
++0000 2026-05-16 04:00:06 \x1b[36mINFO\x1b[0m [\x1b[38;5;140m7000000001\x1b[0m 11ms] inbound/vless[vless-39090]: [vless-39090@alice] inbound connection to example.com:65535

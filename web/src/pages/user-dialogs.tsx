@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   ArrowsClockwiseIcon,
   CopyIcon,
-  DownloadSimpleIcon,
   LinkSimpleIcon,
   PlusIcon,
   TrashIcon
@@ -25,6 +24,7 @@ import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useSubscription } from "@/admin/use-subscription";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { copyText as writeClipboard, formatDateTime } from "@/utils";
+import { SoftDeleteDialog } from "./soft-delete-dialog";
 
 export type UserDialogState =
   | { mode: "create" }
@@ -142,7 +142,7 @@ export function UserFormDialog({
         })
       });
     },
-    { onSuccess: onClose }
+    { onSuccess: onClose, toastError: false }
   );
 
   const status = form.watch("status");
@@ -209,7 +209,7 @@ export function UserFormDialog({
           ) : null}
 
           <div className="mt-2 flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" loading={mutation.isPending}>
@@ -233,18 +233,13 @@ function AccessRow({
   access: AdminPathAccess;
   path?: AdminPath;
 }) {
-  const revoke = useAdminMutation<void, unknown>(request, (req) =>
-    req(`/api/admin/users/${encodeURIComponent(user.name)}/paths/${encodeURIComponent(access.path_id)}`, {
-      method: "DELETE"
-    })
-  );
+  const [confirming, setConfirming] = useState(false);
+  const label = path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id;
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-2 last:border-b-0">
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium text-kumo-default">
-          {path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id}
-        </div>
+        <div className="truncate text-sm font-medium text-kumo-default">{label}</div>
         <div className="truncate text-xs text-kumo-subtle">
           {path ? `${path.proxy_name} @ ${path.host_tag || path.host}` : "Path"}
         </div>
@@ -253,12 +248,27 @@ function AccessRow({
         variant="ghost"
         size="sm"
         shape="square"
-        aria-label={`Revoke ${path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id}`}
-        loading={revoke.isPending}
-        onClick={() => revoke.mutate()}
+        aria-label={`Revoke ${label}`}
+        onClick={() => setConfirming(true)}
       >
         <TrashIcon className="size-4 text-kumo-danger" />
       </Button>
+      {confirming ? (
+        <SoftDeleteDialog
+          request={request}
+          title="Revoke access"
+          confirmLabel="Revoke"
+          description={
+            <>
+              Revoke access to <span className="font-medium text-kumo-default">{label}</span> for{" "}
+              <span className="font-medium text-kumo-default">{user.name}</span>? Credentials for this Path are removed
+              on the next publish.
+            </>
+          }
+          endpoint={`/api/admin/users/${encodeURIComponent(user.name)}/paths/${encodeURIComponent(access.path_id)}`}
+          onClose={() => setConfirming(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -327,11 +337,16 @@ export function ManageAccessDialog({
             `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
           );
         }
-      }
+      },
+      toastError: false
     }
   );
 
   const loading = accessQuery.isLoading || pathsQuery.isLoading;
+  // A failed query leaves `accesses` / `available` empty, which reads as "fully
+  // granted" or "nothing granted". Never present either list until both loaded:
+  // granting against a stale access list would also re-grant existing Paths.
+  const loadError = accessQuery.error ?? pathsQuery.error;
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -342,6 +357,13 @@ export function ManageAccessDialog({
           Changes alter the rendered config on the next publish.
         </Dialog.Description>
 
+        {loadError ? (
+          <Banner
+            variant="error"
+            title={loadError instanceof Error ? loadError.message : "Failed to load Paths and current access."}
+            className="mb-4"
+          />
+        ) : null}
         {issueError ? <Banner variant="error" title={issueError} className="mb-4" /> : null}
 
         <section>
@@ -366,6 +388,10 @@ export function ManageAccessDialog({
           {loading ? (
             <div className="flex min-h-24 items-center justify-center">
               <Loader size={20} />
+            </div>
+          ) : loadError ? (
+            <div className="flex min-h-20 items-center justify-center text-sm text-kumo-subtle">
+              Selectable Paths could not be loaded.
             </div>
           ) : available.length > 0 ? (
             <div className="max-h-56 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
@@ -426,6 +452,10 @@ export function ManageAccessDialog({
               <div className="flex min-h-24 items-center justify-center">
                 <Loader size={20} />
               </div>
+            ) : accessQuery.error ? (
+              <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">
+                Current access could not be loaded.
+              </div>
             ) : accesses.length > 0 ? (
               accesses.map((access) => (
                 <AccessRow key={access.id} request={request} user={user} access={access} path={pathsQuery.data?.find((path) => path.id === access.path_id)} />
@@ -438,7 +468,7 @@ export function ManageAccessDialog({
           </div>
         </section>
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-2 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Done
           </Button>
@@ -451,7 +481,10 @@ export function ManageAccessDialog({
 type ConnectionProxy = UserConnectionInfo["nodes"][number]["proxies"][number];
 type ConfirmationAction = "rotate" | "revoke";
 
-function proxyDetails(node: string, proxy: ConnectionProxy): string {
+// Credential fields differ per protocol, so emit only the ones the server
+// actually populated. A VLESS-shaped payload for a Shadowsocks 2022 Path would
+// be empty and unusable as a client profile.
+export function proxyDetails(node: string, proxy: ConnectionProxy): string {
   return JSON.stringify(
     {
       name: proxy.name,
@@ -461,15 +494,25 @@ function proxyDetails(node: string, proxy: ConnectionProxy): string {
       type: proxy.type,
       server: proxy.server,
       port: proxy.server_port,
-      uuid: proxy.uuid,
-      flow: proxy.flow,
-      server_name: proxy.server_name,
-      reality_public_key: proxy.public_key,
-      reality_short_id: proxy.short_id
+      ...(proxy.type === "shadowsocks_2022"
+        ? { cipher: proxy.cipher ?? "", password: proxy.password ?? "" }
+        : {
+            uuid: proxy.uuid,
+            flow: proxy.flow,
+            server_name: proxy.server_name,
+            reality_public_key: proxy.public_key,
+            reality_short_id: proxy.short_id
+          }),
+      ...(proxy.dialer_proxy ? { dialer_proxy: proxy.dialer_proxy } : {})
     },
     null,
     2
   );
+}
+
+export function proxySummary(proxy: ConnectionProxy): string {
+  const credential = proxy.type === "shadowsocks_2022" ? proxy.cipher : proxy.flow;
+  return [`${proxy.server}:${proxy.server_port}`, proxy.type, credential].filter(Boolean).join(" · ");
 }
 
 export function ConnectionInfoDialog({
@@ -484,7 +527,14 @@ export function ConnectionInfoDialog({
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationAction | null>(null);
+  const copiedResetTimer = useRef<number | null>(null);
   const encodedUser = encodeURIComponent(user.name);
+
+  useEffect(() => {
+    return () => {
+      if (copiedResetTimer.current !== null) window.clearTimeout(copiedResetTimer.current);
+    };
+  }, []);
 
   const connectionQuery = useQuery({
     queryKey: adminKeys.userConnection(user.name),
@@ -503,6 +553,8 @@ export function ConnectionInfoDialog({
       await writeClipboard(value);
       setCopyError("");
       setCopied(key);
+      if (copiedResetTimer.current !== null) window.clearTimeout(copiedResetTimer.current);
+      copiedResetTimer.current = window.setTimeout(() => setCopied(""), 2000);
     } catch (error) {
       setCopyError(error instanceof Error ? error.message : "Unable to copy to the clipboard.");
     }
@@ -556,7 +608,7 @@ export function ConnectionInfoDialog({
               <Button
                 variant="secondary"
                 size="sm"
-                icon={DownloadSimpleIcon}
+                icon={CopyIcon}
                 loading={copyProvider.isPending}
                 onClick={() => copyProvider.mutate()}
               >
@@ -576,6 +628,7 @@ export function ConnectionInfoDialog({
                   </div>
                   <Button
                     variant="secondary"
+                    size="sm"
                     icon={CopyIcon}
                     onClick={() =>
                       void copyText(subscription.mihomo_url || subscription.url, "mihomo-url")
@@ -590,6 +643,7 @@ export function ConnectionInfoDialog({
                   </div>
                   <Button
                     variant="secondary"
+                    size="sm"
                     icon={CopyIcon}
                     onClick={() =>
                       void copyText(subscription.provider_url || subscription.url, "provider-url")
@@ -679,11 +733,11 @@ export function ConnectionInfoDialog({
                                   {proxy.name}
                                 </div>
                                 <div className="truncate font-mono text-xs text-kumo-subtle">
-                                  {proxy.server}:{proxy.server_port} · {proxy.type} · {proxy.flow}
+                                  {proxySummary(proxy)}
                                 </div>
                               </div>
                               <Button
-                                variant="ghost"
+                                variant="secondary"
                                 size="sm"
                                 icon={CopyIcon}
                                 onClick={() =>
@@ -714,7 +768,7 @@ export function ConnectionInfoDialog({
             className="mt-4"
           />
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-2 flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose}>
               Done
             </Button>
@@ -731,13 +785,17 @@ export function ConnectionInfoDialog({
           <Dialog.Title className="text-xl font-semibold text-kumo-default">
             {confirmation === "rotate" ? "Rotate subscription link?" : "Revoke subscription link?"}
           </Dialog.Title>
-          <Dialog.Description className="mt-2 text-kumo-subtle">
+          <Dialog.Description className="mb-4 text-kumo-subtle">
             {confirmation === "rotate"
               ? "The current URL will stop working immediately. Clients must be updated to use the new URL."
               : "The current URL will stop working immediately. This does not remove credentials already cached by clients."}
           </Dialog.Description>
-          <div className="mt-6 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setConfirmation(null)}>
+          <div className="mt-2 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              disabled={rotate.isPending || revoke.isPending}
+              onClick={() => setConfirmation(null)}
+            >
               Cancel
             </Button>
             <Button

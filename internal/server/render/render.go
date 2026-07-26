@@ -182,6 +182,15 @@ type vlessOutbound struct {
 	TLS        outboundTLS `json:"tls"`
 }
 
+type shadowsocksOutbound struct {
+	Type       string `json:"type"`
+	Tag        string `json:"tag"`
+	Server     string `json:"server"`
+	ServerPort int    `json:"server_port"`
+	Method     string `json:"method"`
+	Password   string `json:"password"`
+}
+
 type outboundTLS struct {
 	Enabled    bool            `json:"enabled"`
 	ServerName string          `json:"server_name"`
@@ -383,31 +392,47 @@ func RenderClientConfig(ctx context.Context, store *db.DB, params ClientConfigPa
 	if fingerprint == "" {
 		fingerprint = "chrome"
 	}
+	var proxyOutbound any
+	switch selected.Type {
+	case db.ProtocolVLESSReality:
+		proxyOutbound = vlessOutbound{
+			Type:       "vless",
+			Tag:        outboundTag,
+			Server:     selected.Server,
+			ServerPort: selected.ServerPort,
+			UUID:       selected.UUID,
+			Flow:       selected.Flow,
+			Network:    "tcp",
+			TLS: outboundTLS{
+				Enabled:    true,
+				ServerName: selected.ServerName,
+				UTLS:       utlsConfig{Enabled: true, Fingerprint: fingerprint},
+				Reality: outboundReality{
+					Enabled:   true,
+					PublicKey: selected.PublicKey,
+					ShortID:   selected.ShortID,
+				},
+			},
+		}
+	case db.ProtocolShadowsocks2022:
+		proxyOutbound = shadowsocksOutbound{
+			Type:       "shadowsocks",
+			Tag:        outboundTag,
+			Server:     selected.Server,
+			ServerPort: selected.ServerPort,
+			Method:     selected.Cipher,
+			Password:   selected.Password,
+		}
+	default:
+		return nil, fmt.Errorf("client renderer does not support protocol %s on %s", selected.Type, selected.ProxyName)
+	}
 	cfg := singBoxConfig{
 		Log: &logConfig{Level: "info", Timestamp: true},
 		Inbounds: []any{
 			mixedInbound{Type: "mixed", Tag: "mixed-in", Listen: mixedListen, ListenPort: mixedPort},
 		},
 		Outbounds: []any{
-			vlessOutbound{
-				Type:       "vless",
-				Tag:        outboundTag,
-				Server:     selected.Server,
-				ServerPort: selected.ServerPort,
-				UUID:       selected.UUID,
-				Flow:       selected.Flow,
-				Network:    "tcp",
-				TLS: outboundTLS{
-					Enabled:    true,
-					ServerName: selected.ServerName,
-					UTLS:       utlsConfig{Enabled: true, Fingerprint: fingerprint},
-					Reality: outboundReality{
-						Enabled:   true,
-						PublicKey: selected.PublicKey,
-						ShortID:   selected.ShortID,
-					},
-				},
-			},
+			proxyOutbound,
 			outbound{Type: "direct", Tag: "direct"},
 		},
 		Route: &routeConfig{Final: outboundTag},
@@ -433,29 +458,24 @@ func nodeInfoFromAccesses(ctx context.Context, store *db.DB, userName, nodeName 
 	hosts := selectedNodeHosts(ctx, store, nodeName, accesses[0].NodePublicHost)
 	info := NodeInfo{User: accesses[0].ProxyUserName, Node: accesses[0].NodeName}
 	for _, access := range accesses {
-		if access.Protocol != db.ProtocolVLESSReality {
-			continue
+		profile := NodeInfoProxy{
+			ProxyName:  access.ProxyName,
+			Type:       access.Protocol,
+			ServerPort: access.ListenPort,
 		}
-		settings, userCredential, err := parseVLESSReality(access)
-		if err != nil {
+		if err := applyClientCredential(&profile, access); err != nil {
+			if errors.Is(err, errUnsupportedClientProtocol) {
+				continue
+			}
 			return NodeInfo{}, err
 		}
 		for _, host := range hosts {
-			name := mihomoProfileName(access.ProxyName, host)
-			info.Proxies = append(info.Proxies, NodeInfoProxy{
-				Name:          name,
-				ProxyName:     access.ProxyName,
-				HostTag:       host.Tag,
-				Type:          access.Protocol,
-				Server:        host.Host,
-				ServerPort:    access.ListenPort,
-				UUID:          userCredential.UUID,
-				Flow:          userCredential.Flow,
-				ServerName:    settings.ServerName,
-				PublicKey:     settings.RealityPublicKey,
-				ShortID:       settings.ShortID,
-				isPrimaryHost: host.Primary,
-			})
+			hostProfile := profile
+			hostProfile.Name = mihomoProfileName(access.ProxyName, host)
+			hostProfile.HostTag = host.Tag
+			hostProfile.Server = host.Host
+			hostProfile.isPrimaryHost = host.Primary
+			info.Proxies = append(info.Proxies, hostProfile)
 		}
 	}
 	if len(info.Proxies) == 0 {
@@ -489,23 +509,11 @@ func ConnectionInfoForUser(ctx context.Context, store *db.DB, userName string) (
 		if path.Dialer != nil {
 			proxyInfo.DialerProxy = path.Dialer.Name
 		}
-		switch path.Proxy.Protocol {
-		case db.ProtocolVLESSReality:
-			settings, credential, err := parseVLESSReality(path.Credential)
-			if err != nil {
-				return ConnectionInfo{}, err
+		if err := applyClientCredential(&proxyInfo, path.Credential); err != nil {
+			if errors.Is(err, errUnsupportedClientProtocol) {
+				continue
 			}
-			proxyInfo.UUID, proxyInfo.Flow = credential.UUID, credential.Flow
-			proxyInfo.ServerName, proxyInfo.PublicKey, proxyInfo.ShortID = settings.ServerName, settings.RealityPublicKey, settings.ShortID
-		case db.ProtocolShadowsocks2022:
-			settings, credential, err := parseShadowsocks2022(path.Credential)
-			if err != nil {
-				return ConnectionInfo{}, err
-			}
-			proxyInfo.Cipher = settings.Method
-			proxyInfo.Password = settings.ServerPassword + ":" + credential.Password
-		default:
-			continue
+			return ConnectionInfo{}, err
 		}
 		index, ok := nodeIndexes[path.Proxy.NodeName]
 		if !ok {
@@ -523,6 +531,37 @@ func ConnectionInfoForUser(ctx context.Context, store *db.DB, userName string) (
 		return ConnectionInfo{}, err
 	}
 	return info, nil
+}
+
+// errUnsupportedClientProtocol marks a credential the client renderers cannot
+// express; callers skip those profiles instead of failing the whole document.
+var errUnsupportedClientProtocol = errors.New("unsupported client protocol")
+
+// applyClientCredential fills the protocol-specific client fields on profile.
+// Only client-safe material is copied: for VLESS-Reality the public key and
+// short id (never reality_private_key), and for Shadowsocks 2022 the
+// protocol-required iPSK:uPSK password built from the proxy's server password
+// and this user's own key.
+func applyClientCredential(profile *NodeInfoProxy, credential db.ProxyCredential) error {
+	switch credential.Protocol {
+	case db.ProtocolVLESSReality:
+		settings, userCredential, err := parseVLESSReality(credential)
+		if err != nil {
+			return err
+		}
+		profile.UUID, profile.Flow = userCredential.UUID, userCredential.Flow
+		profile.ServerName, profile.PublicKey, profile.ShortID = settings.ServerName, settings.RealityPublicKey, settings.ShortID
+	case db.ProtocolShadowsocks2022:
+		settings, userCredential, err := parseShadowsocks2022(credential)
+		if err != nil {
+			return err
+		}
+		profile.Cipher = settings.Method
+		profile.Password = settings.ServerPassword + ":" + userCredential.Password
+	default:
+		return errUnsupportedClientProtocol
+	}
+	return nil
 }
 
 type selectedNodeHost struct {

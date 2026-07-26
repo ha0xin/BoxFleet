@@ -1,0 +1,15 @@
+line 04 ignored
+line 05 ignored
+line 06 ignored
+line 07 ignored
+line 08 ignored
+line 09 parsed action=connect auth=vless-39090@alice source=- host=example.com port=443 window_start=2026-05-16T05:00:06Z window_end=2026-05-16T05:00:06Z
+line 10 ignored
+line 11 ignored
+line 12 ignored
+line 13 parsed action=connect auth=vless-39090@alice source=- host=example.com port=443 window_start=- window_end=-
+line 14 ignored
+line 17 parsed action=connect auth=vless-39090@alice source=- host=example.com port=443 window_start=- window_end=-
+line 20 parsed action=connect auth=vless-39090@alice source=- host=example.com port=443 window_start=- window_end=-
+line 22 ignored
+line 24 ignored

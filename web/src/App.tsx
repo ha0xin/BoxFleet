@@ -2,14 +2,14 @@ import { GearSixIcon } from "@phosphor-icons/react";
 import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Banner, Button, Loader, Sidebar, Text } from "@cloudflare/kumo";
+import { Banner, Button, Loader, Sidebar, Text, Toasty } from "@cloudflare/kumo";
 
-import { AppPageHeader } from "@/components/app-page-header";
 import { AdminApiProvider, useAdminApi } from "@/admin/api";
+import { adminToastManager } from "@/admin/toast";
 import { adminKeys } from "@/admin/query";
 import { PublishStatusProvider } from "@/publish/publish-status";
 import { PublishDiffDialog } from "@/publish/publish-diff-dialog";
-import { navGroups, pages, settingsNav } from "./navigation";
+import { navGroups, settingsNav } from "./navigation";
 import type { NavItem } from "./navigation";
 import type { Overview } from "./types";
 
@@ -21,6 +21,7 @@ const loadProxiesPage = () => import("./pages/proxies");
 const loadPathsPage = () => import("./pages/paths");
 const loadSettingsPage = () => import("./pages/settings");
 const loadSystemLogsPage = () => import("./pages/system-logs");
+const loadTrafficPage = () => import("./pages/traffic");
 const loadUsersPage = () => import("./pages/users");
 
 const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
@@ -30,6 +31,7 @@ const routePreloaders: Partial<Record<string, () => Promise<unknown>>> = {
   "/paths": loadPathsPage,
   "/users": loadUsersPage,
   "/mihomo-profiles": loadMihomoProfilesPage,
+  "/traffic": loadTrafficPage,
   "/network-events": loadNetworkEventsPage,
   "/system-logs": loadSystemLogsPage,
   "/settings": loadSettingsPage
@@ -52,6 +54,7 @@ const SettingsPage = lazy(() => loadSettingsPage().then((module) => ({ default: 
 const SystemLogsPage = lazy(() =>
   loadSystemLogsPage().then((module) => ({ default: module.SystemLogsPage }))
 );
+const TrafficPage = lazy(() => loadTrafficPage().then((module) => ({ default: module.TrafficPage })));
 const UsersPage = lazy(() => loadUsersPage().then((module) => ({ default: module.UsersPage })));
 
 function App() {
@@ -132,6 +135,7 @@ function AdminApp({
   refresh: () => void;
   authRequired: boolean;
 }) {
+  const navigate = useNavigate();
   return (
     <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
       <AppSidebar />
@@ -139,13 +143,19 @@ function AdminApp({
       <main className="min-w-0 flex-1 overflow-y-auto">
         <PublishStatusProvider>
           {authRequired ? (
-            <div className="px-4 pt-4 md:px-8">
+            <div className="px-6 pt-6 md:px-8 lg:px-10">
               <Banner
                 variant="error"
                 title="Admin authentication required"
                 description="The saved token was rejected. Enter a valid admin token in Settings to reconnect."
                 action={
-                  <Button variant="secondary" onClick={() => document.getElementById("admin-token-input")?.focus()}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      navigate("/settings");
+                      requestAnimationFrame(() => document.getElementById("admin-token-input")?.focus());
+                    }}
+                  >
                     Enter token
                   </Button>
                 }
@@ -162,7 +172,7 @@ function AdminApp({
               <Route path="/mihomo-profiles" element={<MihomoProfilesPage />} />
               <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage />} />
               <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage />} />
-              <Route path="/traffic" element={<ComingSoon />} />
+              <Route path="/traffic" element={<TrafficPage />} />
               <Route path="/network-events" element={<NetworkEventsPage />} />
               <Route path="/system-logs" element={<SystemLogsPage />} />
               <Route
@@ -183,6 +193,7 @@ function AdminApp({
           </Suspense>
 
           <PublishDiffDialog />
+          <Toasty toastManager={adminToastManager}>{null}</Toasty>
         </PublishStatusProvider>
       </main>
     </Sidebar.Provider>
@@ -200,7 +211,7 @@ function OverviewRoute({ authVersion }: { authVersion: number }) {
 
   if (overviewQuery.error) {
     return (
-      <div className="px-6 pt-6">
+      <div className="px-6 pt-6 md:px-8 lg:px-10">
         <Banner
           variant="error"
           title={overviewQuery.error instanceof Error ? overviewQuery.error.message : "Request failed"}
@@ -278,16 +289,6 @@ function AppSidebar() {
         <Sidebar.Trigger />
       </Sidebar.Footer>
     </Sidebar>
-  );
-}
-
-function ComingSoon() {
-  const location = useLocation();
-  const page = pages.find((item) => item.path === location.pathname);
-  return (
-    <AppPageHeader title={page?.label ?? "Page"} description="This page is being rewritten on native Kumo.">
-      <Text variant="secondary">Coming soon.</Text>
-    </AppPageHeader>
   );
 }
 

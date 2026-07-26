@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -174,6 +175,100 @@ func TestNodeReportEndpointsPersistState(t *testing.T) {
 	}
 	if len(logs) != 1 || logs[0].TargetHost != "speed.cloudflare.com" {
 		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestNodeReportEndpointsBoundBodySize(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	issued, err := store.IssueNodeToken(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store})
+
+	post := func(path, body string) int {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("X-BoxFleet-Node", "azus")
+		req.Header.Set("Authorization", "Bearer "+issued.Token)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	oversizedHeartbeat := `{"agent_version":"` + strings.Repeat("x", maxNodeReportBytes) + `"}`
+	if code := post("/api/node/heartbeat", oversizedHeartbeat); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized heartbeat status = %d, want 413", code)
+	}
+	oversizedApply := `{"status":"` + strings.Repeat("x", maxNodeReportBytes) + `"}`
+	if code := post("/api/node/apply-result", oversizedApply); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized apply-result status = %d, want 413", code)
+	}
+	oversizedLogs := `{"events":[{"raw_message":"` + strings.Repeat("x", maxNodeBulkReportBytes) + `"}]}`
+	if code := post("/api/node/logs", oversizedLogs); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized logs status = %d, want 413", code)
+	}
+	if code := post("/api/node/traffic", oversizedLogs); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized traffic status = %d, want 413", code)
+	}
+	if code := post("/api/node/system-logs", oversizedLogs); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized system-logs status = %d, want 413", code)
+	}
+
+	// A full journal batch (the agent caps content at 256 KiB) still fits.
+	fullBatch := `{"events":[{"action":"sing-box","raw_message":"` + strings.Repeat("x", 256*1024) + `"}]}`
+	if code := post("/api/node/logs", fullBatch); code != http.StatusOK {
+		t.Fatalf("full journal batch status = %d, want 200", code)
+	}
+}
+
+func TestNodeConfigEndpointFailsClosedOnStoreError(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "boxfleet.db")
+	store, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedAPITestNode(t, ctx, store)
+	issued, err := store.IssueNodeToken(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store})
+	// Break the publish-state lookup while leaving node auth intact. A lookup
+	// failure must not fall back to live rendering, which would bypass the
+	// publish/review workflow.
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, "DROP TABLE node_config_status"); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/node/config", nil)
+	req.Header.Set("X-BoxFleet-Node", "azus")
+	req.Header.Set("Authorization", "Bearer "+issued.Token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-BoxFleet-Config-Mode") != "" {
+		t.Fatalf("config mode = %q, want none", rec.Header().Get("X-BoxFleet-Config-Mode"))
 	}
 }
 
@@ -1470,7 +1565,8 @@ func TestNodeSystemLogsEndpointAndAdminQuery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"logs":[]`) {
+	if !strings.Contains(rec.Body.String(), `"service":"boxfleet-agent.service"`) ||
+		!strings.Contains(rec.Body.String(), `"message":"agent started"`) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }

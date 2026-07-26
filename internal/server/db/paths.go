@@ -586,32 +586,45 @@ func (db *DB) DeletePath(ctx context.Context, pathID string) error {
 	if err != nil {
 		return err
 	}
-	affected, err := db.q.DeletePath(ctx, strings.TrimSpace(pathID))
-	if err != nil {
-		return fmt.Errorf("delete path %q: %w", pathID, err)
-	}
-	if err := requireAffected(affected, "path", pathID); err != nil {
-		return err
-	}
-	count, err := db.q.CountPathsByEndpointID(ctx, path.EndpointID)
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		if err := db.DeleteEndpoint(ctx, path.EndpointID); err != nil {
-			return err
-		}
-	}
+	users := make([]ProxyUser, 0, len(userNames))
 	for _, userName := range userNames {
 		user, err := db.GetProxyUser(ctx, userName)
 		if err != nil {
 			return err
 		}
-		if err := db.disableUnusedProxyCredentials(ctx, user); err != nil {
+		users = append(users, user)
+	}
+	// Deleting the path and dropping the credentials it was the last consumer of
+	// must commit together; otherwise a partial failure leaves those credentials
+	// enabled and still rendered into node configs.
+	return db.withTx(ctx, func(q *store.Queries) error {
+		affected, err := q.DeletePath(ctx, strings.TrimSpace(pathID))
+		if err != nil {
+			return fmt.Errorf("delete path %q: %w", pathID, err)
+		}
+		if err := requireAffected(affected, "path", pathID); err != nil {
 			return err
 		}
-	}
-	return nil
+		count, err := q.CountPathsByEndpointID(ctx, path.EndpointID)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			affected, err := q.DeleteEndpoint(ctx, path.EndpointID)
+			if err != nil {
+				return fmt.Errorf("delete endpoint %q: %w", path.EndpointID, err)
+			}
+			if err := requireAffected(affected, "endpoint", path.EndpointID); err != nil {
+				return err
+			}
+		}
+		for _, user := range users {
+			if err := disableUnusedProxyCredentialsTx(ctx, q, user); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (db *DB) validatePathGraph(ctx context.Context, candidate Path) error {
@@ -760,25 +773,32 @@ func (db *DB) RevokePathAccess(ctx context.Context, userName, pathID string) (Pa
 		return PathAccess{}, err
 	}
 	params := store.SoftDeletePathAccessParams{PathID: pathID, ProxyUserID: user.ID}
-	affected, err := db.q.SoftDeletePathAccess(ctx, params)
+	var row store.PathAccess
+	// The soft delete and the credential teardown it triggers must commit
+	// together; otherwise a partial failure leaves the user's proxy credentials
+	// enabled and still rendered into node configs.
+	err = db.withTx(ctx, func(q *store.Queries) error {
+		affected, err := q.SoftDeletePathAccess(ctx, params)
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "path access", userName+"@"+pathID); err != nil {
+			return err
+		}
+		row, err = q.GetPathAccessByIDs(ctx, store.GetPathAccessByIDsParams(params))
+		if err != nil {
+			return err
+		}
+		return disableUnusedProxyCredentialsTx(ctx, q, user)
+	})
 	if err != nil {
-		return PathAccess{}, err
-	}
-	if err := requireAffected(affected, "path access", userName+"@"+pathID); err != nil {
-		return PathAccess{}, err
-	}
-	row, err := db.q.GetPathAccessByIDs(ctx, store.GetPathAccessByIDsParams(params))
-	if err != nil {
-		return PathAccess{}, err
-	}
-	if err := db.disableUnusedProxyCredentials(ctx, user); err != nil {
 		return PathAccess{}, err
 	}
 	return pathAccessFromRow(row), nil
 }
 
-func (db *DB) disableUnusedProxyCredentials(ctx context.Context, user ProxyUser) error {
-	accesses, err := db.ListActivePathAccessesByUser(ctx, user.Name)
+func disableUnusedProxyCredentialsTx(ctx context.Context, q *store.Queries, user ProxyUser) error {
+	accesses, err := q.ListActivePathAccessesByUserID(ctx, user.ID)
 	if err != nil {
 		return err
 	}
@@ -790,11 +810,11 @@ func (db *DB) disableUnusedProxyCredentials(ctx context.Context, user ProxyUser)
 			return nil
 		}
 		visitedPaths[pathID] = true
-		path, err := db.GetPath(ctx, pathID)
+		path, err := q.GetPathByID(ctx, pathID)
 		if err != nil {
 			return err
 		}
-		endpoint, err := db.GetEndpoint(ctx, path.EndpointID)
+		endpoint, err := q.GetEndpointByID(ctx, path.EndpointID)
 		if err != nil {
 			return err
 		}
@@ -809,15 +829,23 @@ func (db *DB) disableUnusedProxyCredentials(ctx context.Context, user ProxyUser)
 			return err
 		}
 	}
-	credentials, err := db.ListProxyCredentialsByUser(ctx, user.Name)
+	credentials, err := q.ListProxyAccessesByUserName(ctx, user.Name)
 	if err != nil {
 		return err
 	}
 	for _, credential := range credentials {
-		if !credential.Enabled || credential.DeletedAt.Valid || requiredProxyIDs[credential.ProxyID] {
+		if !int64ToBool(credential.Enabled) || credential.DeletedAt.Valid || requiredProxyIDs[credential.ProxyID] {
 			continue
 		}
-		if err := db.setProxyCredentialEnabledByIDs(ctx, user.ID, credential.ProxyID, false); err != nil {
+		affected, err := q.SetProxyAccessEnabled(ctx, store.SetProxyAccessEnabledParams{
+			Enabled:     boolToInt64(false),
+			ProxyUserID: user.ID,
+			ProxyID:     credential.ProxyID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "proxy credential", user.ID+"@"+credential.ProxyID); err != nil {
 			return err
 		}
 	}

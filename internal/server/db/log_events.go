@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/haoxin/boxfleet/internal/id"
 	"github.com/haoxin/boxfleet/internal/model"
@@ -60,15 +61,23 @@ type LogEventDetail struct {
 	CreatedAt    string
 }
 
-type logEventsPageParams struct {
+// logEventScope is LogEventFilter with node and user names already resolved to
+// IDs. Every read over log_events — the paged table, the bucketed series, the
+// service breakdown — filters through this one shape so they cannot drift; a
+// chart that filters differently from the table beneath it reads as a data bug.
+type logEventScope struct {
 	NodeID    string
 	UserID    string
 	Action    string
 	Search    string
 	StartTime string
 	EndTime   string
-	Limit     int64
-	Offset    int64
+}
+
+type logEventsPageParams struct {
+	logEventScope
+	Limit  int64
+	Offset int64
 }
 
 type parsedLogEvent struct {
@@ -81,14 +90,27 @@ type parsedLogEvent struct {
 	WindowEnd   string
 }
 
+const (
+	// Nodes are not trusted to bound their own reports: the agent batches at
+	// most journalBatchMaxEntries lines, so anything beyond this is dropped.
+	maxLogEventsPerReport = 500
+	// One journal line collapses into one event, so a count this large can only
+	// come from a broken or hostile node.
+	maxLogEventCount = 10000
+)
+
 func (db *DB) RecordLogEvents(ctx context.Context, report LogEventReport) error {
 	node, err := db.GetNode(ctx, report.NodeName)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	events := report.Events
+	if len(events) > maxLogEventsPerReport {
+		events = events[:maxLogEventsPerReport]
+	}
 	connectionSources := make(map[string]string)
-	for _, event := range report.Events {
+	for _, event := range events {
 		if parsed, ok := parseSingBoxLogEvent(event.RawMessage, connectionSources); ok {
 			if event.AuthName == "" {
 				event.AuthName = parsed.AuthName
@@ -99,7 +121,7 @@ func (db *DB) RecordLogEvents(ctx context.Context, report LogEventReport) error 
 			if event.TargetHost == "" {
 				event.TargetHost = parsed.TargetHost
 			}
-			if event.TargetPort == 0 {
+			if event.TargetPort <= 0 {
 				event.TargetPort = parsed.TargetPort
 			}
 			if event.Action == "" || event.Action == "sing-box" {
@@ -112,12 +134,18 @@ func (db *DB) RecordLogEvents(ctx context.Context, report LogEventReport) error 
 				event.WindowEnd = parsed.WindowEnd
 			}
 		}
-		if event.AuthName == "" || event.TargetHost == "" || event.TargetPort == 0 {
+		if event.AuthName == "" || event.TargetHost == "" {
+			continue
+		}
+		if event.TargetPort <= 0 || event.TargetPort > 65535 {
 			continue
 		}
 		count := event.Count
-		if count == 0 {
+		if count <= 0 {
 			count = 1
+		}
+		if count > maxLogEventCount {
+			count = maxLogEventCount
 		}
 		windowStart := event.WindowStart
 		if windowStart == "" {
@@ -216,7 +244,14 @@ func compactRawSample(message string) string {
 	if len(message) <= maxRawSampleBytes {
 		return message
 	}
-	return message[:maxRawSampleBytes]
+	truncated := message[:maxRawSampleBytes]
+	for len(truncated) > 0 {
+		if r, size := utf8.DecodeLastRuneInString(truncated); r != utf8.RuneError || size > 1 {
+			break
+		}
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated
 }
 
 func rawLogMessageHash(cursor, message string) string {
@@ -228,22 +263,72 @@ func (db *DB) ListRecentLogEvents(ctx context.Context, limit int64) ([]LogEvent,
 	return db.q.ListRecentLogEvents(ctx, limit)
 }
 
-func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (LogEventPage, error) {
-	nodeID := ""
+// resolveLogEventScope translates filter names to IDs, surfacing an unknown
+// node or user as an error rather than as a silently empty result.
+func (db *DB) resolveLogEventScope(ctx context.Context, filter LogEventFilter) (logEventScope, error) {
+	scope := logEventScope{
+		Action:    strings.TrimSpace(filter.Action),
+		Search:    strings.TrimSpace(filter.Search),
+		StartTime: strings.TrimSpace(filter.Start),
+		EndTime:   strings.TrimSpace(filter.End),
+	}
 	if strings.TrimSpace(filter.NodeName) != "" {
 		node, err := db.GetNode(ctx, filter.NodeName)
 		if err != nil {
-			return LogEventPage{}, err
+			return logEventScope{}, err
 		}
-		nodeID = node.ID
+		scope.NodeID = node.ID
 	}
-	userID := ""
 	if strings.TrimSpace(filter.UserName) != "" {
 		user, err := db.GetProxyUser(ctx, filter.UserName)
 		if err != nil {
-			return LogEventPage{}, err
+			return logEventScope{}, err
 		}
-		userID = user.ID
+		scope.UserID = user.ID
+	}
+	return scope, nil
+}
+
+// buildLogEventPredicates renders the shared FROM/WHERE fragments for a scope.
+// The returned args are ordered to match the emitted clauses, so a caller
+// appends its own trailing arguments after these.
+func buildLogEventPredicates(scope logEventScope) (searchJoin string, where []string, args []any) {
+	where = []string{"e.proxy_user_id IS NOT NULL"}
+	args = make([]any, 0, 4)
+	if scope.NodeID != "" {
+		where = append(where, "e.node_id = ?")
+		args = append(args, scope.NodeID)
+	}
+	if scope.UserID != "" {
+		where = append(where, "e.proxy_user_id = ?")
+		args = append(args, scope.UserID)
+	}
+	if scope.Action != "" {
+		where = append(where, "e.action = ? COLLATE NOCASE")
+		args = append(args, scope.Action)
+	}
+	if scope.Search != "" {
+		where = append(where, "log_events_search MATCH ?")
+		args = append(args, networkEventSearchQuery(scope.Search))
+		searchJoin = `
+JOIN log_event_search_documents search_document ON search_document.event_id = e.id
+JOIN log_events_search ON log_events_search.docid = search_document.id`
+	}
+	if scope.StartTime != "" {
+		where = append(where, "e.window_end >= ?")
+		args = append(args, scope.StartTime)
+	}
+	if scope.EndTime != "" {
+		where = append(where, "e.window_start <= ?")
+		args = append(args, scope.EndTime)
+	}
+	return searchJoin, where, args
+}
+
+func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (LogEventPage, error) {
+	scope, err := db.resolveLogEventScope(ctx, filter)
+	if err != nil {
+		return LogEventPage{}, err
 	}
 	limit := filter.Limit
 	if limit <= 0 {
@@ -257,14 +342,9 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 		offset = 0
 	}
 	params := logEventsPageParams{
-		NodeID:    nodeID,
-		UserID:    userID,
-		Action:    strings.TrimSpace(filter.Action),
-		Search:    strings.TrimSpace(filter.Search),
-		StartTime: strings.TrimSpace(filter.Start),
-		EndTime:   strings.TrimSpace(filter.End),
-		Offset:    offset,
-		Limit:     limit,
+		logEventScope: scope,
+		Offset:        offset,
+		Limit:         limit,
 	}
 	total, rows, err := db.queryLogEventsPage(ctx, params)
 	if err != nil {
@@ -300,39 +380,8 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 }
 
 func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams) (int64, []store.ListLogEventsPageRow, error) {
-	where := []string{"e.proxy_user_id IS NOT NULL"}
-	args := make([]any, 0, 4)
-	if params.NodeID != "" {
-		where = append(where, "e.node_id = ?")
-		args = append(args, params.NodeID)
-	}
-	if params.UserID != "" {
-		where = append(where, "e.proxy_user_id = ?")
-		args = append(args, params.UserID)
-	}
-	if params.Action != "" {
-		where = append(where, "e.action = ? COLLATE NOCASE")
-		args = append(args, params.Action)
-	}
-	if params.Search != "" {
-		where = append(where, "log_events_search MATCH ?")
-		args = append(args, networkEventSearchQuery(params.Search))
-	}
-	if params.StartTime != "" {
-		where = append(where, "e.window_end >= ?")
-		args = append(args, params.StartTime)
-	}
-	if params.EndTime != "" {
-		where = append(where, "e.window_start <= ?")
-		args = append(args, params.EndTime)
-	}
+	searchJoin, where, args := buildLogEventPredicates(params.logEventScope)
 	whereSQL := strings.Join(where, " AND ")
-	searchJoin := ""
-	if params.Search != "" {
-		searchJoin = `
-JOIN log_event_search_documents search_document ON search_document.event_id = e.id
-JOIN log_events_search ON log_events_search.docid = search_document.id`
-	}
 	countQuery := `
 SELECT COUNT(*)
 FROM log_events e` + searchJoin + `
@@ -422,7 +471,7 @@ func networkEventSearchQuery(value string) string {
 }
 
 var (
-	ansiEscapePattern              = regexp.MustCompile(`(?:\x1b)?\[[0-9;]*m`)
+	ansiEscapePattern              = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	singBoxConnectionPattern       = regexp.MustCompile(`(?:^|\s)(\[[+-]\d{4}\])?\s*([+-]\d{4})?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})?\s*\S+\s+\[(\d+)\s+([^\]]+)\]\s+([^:]+):\s+(.*)$`)
 	authInboundConnectionToPattern = regexp.MustCompile(`^\[([^\]]+)\]\s+inbound connection to (.+)$`)
 )

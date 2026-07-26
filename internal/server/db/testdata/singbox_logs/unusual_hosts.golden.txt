@@ -1,0 +1,8 @@
+line 04 tracked-source conn=7000000001 source=192.0.2.55
+line 05 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=Example.COM port=443 window_start=2026-05-16T03:59:59.995Z window_end=2026-05-16T04:00:00Z
+line 06 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=www.example.com. port=443 window_start=2026-05-16T04:00:00.994Z window_end=2026-05-16T04:00:01Z
+line 07 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=xn--fiqs8s.example port=443 window_start=2026-05-16T04:00:01.993Z window_end=2026-05-16T04:00:02Z
+line 08 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=_dns.resolver.arpa port=853 window_start=2026-05-16T04:00:02.992Z window_end=2026-05-16T04:00:03Z
+line 09 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=localhost port=1 window_start=2026-05-16T04:00:03.991Z window_end=2026-05-16T04:00:04Z
+line 10 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=a.very.long.chain.of.labels.cdn.edge.provider.example.net port=8443 window_start=2026-05-16T04:00:04.99Z window_end=2026-05-16T04:00:05Z
+line 11 parsed action=connect auth=vless-39090@alice source=192.0.2.55 host=example.com port=65535 window_start=2026-05-16T04:00:05.989Z window_end=2026-05-16T04:00:06Z

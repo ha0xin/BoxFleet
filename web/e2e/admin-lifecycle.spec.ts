@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 test("admin UI creates, grants, revokes, and deletes resources", async ({ page }) => {
   await page.goto(".");
-  await expect(page.getByRole("heading", { name: "BoxFleet Admin", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
   await page.getByRole("button", { name: "Enroll", exact: true }).click();
@@ -34,6 +34,8 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await page.getByRole("button", { name: "Grant access (1)" }).click();
   await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
   await page.getByRole("button", { name: "Revoke vless-ui" }).click();
+  await expect(page.getByRole("heading", { name: "Revoke access" })).toBeVisible();
+  await page.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toHaveCount(0);
   await page.getByRole("button", { name: "Done", exact: true }).click();
 
@@ -82,7 +84,8 @@ test("Mihomo configurations use tables, templates, and a two-column processor pi
   await page.getByText("Rewrite templates", { exact: true }).click();
   await expect(page.locator("header").getByRole("button", { name: "New rewrite" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Rewrite inventory" })).toBeVisible();
-  await expect(page.getByText("Built in · read only", { exact: true })).toBeVisible();
+  await expect(page.getByText("Built in", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("read only", { exact: true }).first()).toBeVisible();
   await page.getByText("Mihomo configurations", { exact: true }).click();
   await page.getByRole("button", { name: "New configuration" }).click();
   await expect(page).toHaveURL(/\/admin\/mihomo-profiles\/new$/);

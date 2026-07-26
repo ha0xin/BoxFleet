@@ -27,12 +27,15 @@ func ConfigFromBootstrap(config model.BootstrapConfig) Config {
 	}
 }
 
-func Bootstrap(ctx context.Context, value string) error {
+// Bootstrap enrolls the node. allowInsecureTransport is the development-only
+// opt-out from the https requirement on the server and sing-box URLs.
+func Bootstrap(ctx context.Context, value string, allowInsecureTransport bool) error {
 	bootstrapConfig, err := model.DecodeBootstrap(value)
 	if err != nil {
 		return fmt.Errorf("decode bootstrap string: %w", err)
 	}
 	config := ConfigFromBootstrap(bootstrapConfig)
+	config.AllowInsecureTransport = allowInsecureTransport
 	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {
 		return err

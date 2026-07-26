@@ -36,7 +36,21 @@ func TestIssueAndVerifyNodeToken(t *testing.T) {
 	if ok {
 		t.Fatal("wrong token verified")
 	}
-	if _, err := store.DisableNode(ctx, "azus"); err != nil {
+	// Pause keeps the token valid; only decommission revokes it.
+	if err := store.SetNodeStatus(ctx, "azus", "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = store.VerifyNodeToken(ctx, "azus", issued.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("token stopped verifying after node was paused")
+	}
+	if _, err := store.IssueNodeToken(ctx, "azus"); err == nil {
+		t.Fatal("disabled node accepted a new token")
+	}
+	if _, err := store.SoftDeleteNode(ctx, "azus"); err != nil {
 		t.Fatal(err)
 	}
 	ok, err = store.VerifyNodeToken(ctx, "azus", issued.Token)
@@ -44,9 +58,6 @@ func TestIssueAndVerifyNodeToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ok {
-		t.Fatal("token verified after node was disabled")
-	}
-	if _, err := store.IssueNodeToken(ctx, "azus"); err == nil {
-		t.Fatal("disabled node accepted a new token")
+		t.Fatal("token verified after node was decommissioned")
 	}
 }

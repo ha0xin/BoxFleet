@@ -39,6 +39,29 @@ func TestOperationExecutionErrorUsesExistingCancellationCause(t *testing.T) {
 	}
 }
 
+func TestFinalLeaseErrorKeepsCommittedUpdateSuccessful(t *testing.T) {
+	t.Parallel()
+	committed := map[string]any{"committed": true}
+	renewErr := errors.New("renew lease: connection refused")
+
+	if err := finalLeaseError(committed, false, renewErr); err != nil {
+		t.Fatalf("committed update reported as failed: %v", err)
+	}
+	if err := finalLeaseError(committed, true, nil); err != nil {
+		t.Fatalf("committed update reported as cancelled: %v", err)
+	}
+	uncommitted := map[string]any{"committed": false}
+	if err := finalLeaseError(uncommitted, false, renewErr); !errors.Is(err, renewErr) {
+		t.Fatalf("uncommitted renewal failure = %v, want %v", err, renewErr)
+	}
+	if err := finalLeaseError(uncommitted, true, nil); !errors.Is(err, errOperationCancelled) {
+		t.Fatalf("uncommitted cancellation = %v, want %v", err, errOperationCancelled)
+	}
+	if err := finalLeaseError(uncommitted, false, nil); err != nil {
+		t.Fatalf("clean renewal = %v", err)
+	}
+}
+
 func TestOperationEventOutboxRetriesExactPayload(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex

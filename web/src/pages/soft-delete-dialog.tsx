@@ -9,32 +9,34 @@ export function SoftDeleteDialog({
   title,
   description,
   endpoint,
+  confirmLabel = "Delete",
   onClose
 }: {
   request: AdminRequest;
   title: string;
   description: ReactNode;
   endpoint: string;
+  confirmLabel?: string;
   onClose: () => void;
 }) {
   const mutation = useAdminMutation<void, unknown>(
     request,
     (req) => req(endpoint, { method: "DELETE" }),
-    { onSuccess: onClose }
+    { onSuccess: onClose, toastError: false }
   );
 
   return (
-    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+    <Dialog.Root open onOpenChange={(open) => (open || mutation.isPending ? undefined : onClose())}>
       <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">{title}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">{description}</Dialog.Description>
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" disabled={mutation.isPending} onClick={onClose}>
             Cancel
           </Button>
           <Button variant="destructive" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-            Delete
+            {confirmLabel}
           </Button>
         </div>
       </Dialog>

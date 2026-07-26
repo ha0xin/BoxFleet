@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,10 @@ const (
 	journalBatchMaxEntries = 100
 	journalBatchMaxBytes   = 256 * 1024
 	journalMaxBatches      = 8
+	journalReadBufferBytes = 64 * 1024
+	journalMaxLineBytes    = 1024 * 1024
 	stderrCaptureLimit     = 4096
+	journalSinceLayout     = "2006-01-02 15:04:05"
 )
 
 type Config struct {
@@ -51,6 +55,7 @@ type Config struct {
 	Token               string `json:"token"`
 	ServerURL           string `json:"server_url"`
 	SingBoxURL          string `json:"sing_box_url"`
+	SingBoxSHA256       string `json:"sing_box_sha256,omitempty"`
 	InstallDir          string `json:"install_dir"`
 	SingBoxPath         string `json:"sing_box_path"`
 	SingBoxConfig       string `json:"sing_box_config"`
@@ -64,14 +69,24 @@ type Config struct {
 	StatePath           string `json:"state_path"`
 	OperationStatePath  string `json:"operation_state_path"`
 	V2RayAPIAddress     string `json:"v2ray_api_address"`
+	// AllowInsecureTransport permits plaintext http server_url/sing_box_url. It
+	// leaks the node token and installs unverified binaries, so it exists only
+	// for local development.
+	AllowInsecureTransport bool `json:"allow_insecure_transport,omitempty"`
 }
 
 type Agent struct {
-	Config          Config
-	Runner          Runner
-	Client          *http.Client
-	TrafficReporter func(context.Context) error
-	maintenanceMu   sync.Mutex
+	Config Config
+	Runner Runner
+	Client *http.Client
+	// ServiceReadyWait bounds how long a restarted unit is polled for an active
+	// state. Zero uses defaultServiceReadyWait.
+	ServiceReadyWait time.Duration
+	TrafficReporter  func(context.Context) error
+	maintenanceMu    sync.Mutex
+	// configMu guards the mutable parts of Config. Only the canonical node name
+	// changes at runtime, and it is read by every request goroutine.
+	configMu sync.RWMutex
 }
 
 type ConfigResponse struct {
@@ -157,28 +172,53 @@ func (ExecRunner) StreamLines(ctx context.Context, name string, args []string, h
 		}
 		stderrDone <- strings.TrimSpace(buf.String())
 	}()
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	stopped := false
-	for scanner.Scan() {
-		if !handle(scanner.Text()) {
-			stopped = true
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			break
-		}
+	stopped, readErr := readLines(stdout, handle)
+	if (stopped || readErr != nil) && cmd.Process != nil {
+		_ = cmd.Process.Kill()
 	}
-	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	stderrText := <-stderrDone
-	if scanErr != nil {
-		return fmt.Errorf("%s %s: read stdout: %w", name, strings.Join(args, " "), scanErr)
+	if readErr != nil {
+		return fmt.Errorf("%s %s: read stdout: %w", name, strings.Join(args, " "), readErr)
 	}
 	if waitErr != nil && !stopped {
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), waitErr, stderrText)
 	}
 	return nil
+}
+
+// readLines feeds newline-delimited output to handle without buffering unbounded
+// input. A line longer than journalMaxLineBytes is discarded instead of aborting
+// the stream: a single oversized journal entry would otherwise fail every cycle
+// forever, because the log cursor only advances past entries that were read.
+func readLines(input io.Reader, handle func(line string) bool) (bool, error) {
+	reader := bufio.NewReaderSize(input, journalReadBufferBytes)
+	var line []byte
+	oversized := false
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			if oversized || len(line)+len(chunk) > journalMaxLineBytes {
+				oversized, line = true, line[:0]
+			} else {
+				line = append(line, chunk...)
+			}
+			continue
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return false, err
+		}
+		if !oversized && len(line)+len(chunk) <= journalMaxLineBytes {
+			line = append(line, chunk...)
+			if text := strings.TrimRight(string(line), "\r\n"); text != "" && !handle(text) {
+				return true, nil
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		line, oversized = line[:0], false
+	}
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -264,11 +304,41 @@ func (c Config) Validate() error {
 	if c.ServerURL == "" {
 		return errors.New("server_url is required")
 	}
+	if err := validateTransportURL("server_url", c.ServerURL, c.AllowInsecureTransport); err != nil {
+		return err
+	}
+	if c.SingBoxURL != "" {
+		if err := validateTransportURL("sing_box_url", c.SingBoxURL, c.AllowInsecureTransport); err != nil {
+			return err
+		}
+	}
+	if c.SingBoxSHA256 != "" {
+		if raw, err := hex.DecodeString(c.SingBoxSHA256); err != nil || len(raw) != sha256.Size {
+			return errors.New("sing_box_sha256 must be a hex-encoded SHA256 digest")
+		}
+	}
 	return nil
+}
+
+// validateTransportURL keeps the node token and the bootstrap sing-box binary on
+// https. Plaintext http is accepted only behind the explicit development-only
+// allow_insecure_transport opt-out.
+func validateTransportURL(field, raw string, allowInsecure bool) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("%s is not a valid URL", field)
+	}
+	if parsed.Scheme == "https" || (parsed.Scheme == "http" && allowInsecure) {
+		return nil
+	}
+	return fmt.Errorf("%s must use https (set allow_insecure_transport for local development)", field)
 }
 
 func New(config Config) *Agent {
 	config.ApplyDefaults()
+	if config.AllowInsecureTransport {
+		fmt.Fprintln(os.Stderr, "boxfleet-agent: WARN allow_insecure_transport is enabled; the node token travels in cleartext and bootstrap binaries are unauthenticated — development only")
+	}
 	return &Agent{
 		Config: config,
 		Runner: ExecRunner{},
@@ -342,7 +412,10 @@ func (a *Agent) CheckSingBoxV2RayAPI(ctx context.Context) error {
 }
 
 func (a *Agent) DownloadSingBox(ctx context.Context) error {
-	return a.streamUnverifiedBinary(ctx, a.Config.SingBoxURL, a.Config.SingBoxPath)
+	if err := validateTransportURL("sing_box_url", a.Config.SingBoxURL, a.Config.AllowInsecureTransport); err != nil {
+		return err
+	}
+	return a.streamBootstrapBinary(ctx, a.Config.SingBoxURL, a.Config.SingBoxPath, a.Config.SingBoxSHA256)
 }
 
 func (a *Agent) Once(ctx context.Context) error {
@@ -369,7 +442,8 @@ func (a *Agent) once(ctx context.Context) error {
 		configHash = bytesSHA256Hex(config)
 		response.Hash = configHash
 	}
-	if current, err := os.ReadFile(a.Config.SingBoxConfig); err == nil && bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(config)) {
+	current, currentErr := os.ReadFile(a.Config.SingBoxConfig)
+	if currentErr == nil && bytes.Equal(bytes.TrimSpace(current), bytes.TrimSpace(config)) {
 		// Take the "nothing to do" early return only when sing-box is *confirmed*
 		// running. A re-enabled node has matching applied hash and unchanged
 		// bytes, so a probe error (or inactive/transitional state) must not be
@@ -379,43 +453,104 @@ func (a *Agent) once(ctx context.Context) error {
 			a.reportRuntimeState(ctx, response)
 			return nil
 		}
-		if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.SingBoxService); err != nil {
+		// The bytes on disk are already the desired config, so there is nothing to
+		// roll back to — but a unit that stays down must still be reported as
+		// failed instead of being recorded as applied on every later poll.
+		if err := a.restartSingBoxVerified(ctx); err != nil {
 			_ = a.ReportApplyResult(ctx, response, "failed", err.Error())
 			return err
 		}
 		a.reportRuntimeState(ctx, response)
 		return nil
 	}
-	tmp := a.Config.SingBoxConfig + ".candidate"
-	if err := atomicWrite(tmp, config, defaultRuntimeFilePerm); err != nil {
+	candidatePath := a.Config.SingBoxConfig + ".candidate"
+	if err := atomicWrite(candidatePath, config, defaultRuntimeFilePerm); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, a.Config.SingBoxPath, "check", "-c", tmp); err != nil {
-		_ = a.ReportApplyResult(ctx, response, "failed", err.Error())
-		return err
+	checkErr := a.Runner.Run(ctx, a.Config.SingBoxPath, "check", "-c", candidatePath)
+	_ = os.Remove(candidatePath)
+	if checkErr != nil {
+		_ = a.ReportApplyResult(ctx, response, "failed", checkErr.Error())
+		return checkErr
+	}
+	if currentErr == nil {
+		if err := atomicWrite(a.lastGoodConfigPath(), current, defaultRuntimeFilePerm); err != nil {
+			return err
+		}
 	}
 	if err := atomicWrite(a.Config.SingBoxConfig, config, defaultRuntimeFilePerm); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.SingBoxService); err != nil {
-		_ = a.ReportApplyResult(ctx, response, "failed", err.Error())
-		return err
+	if err := a.restartSingBoxVerified(ctx); err != nil {
+		applyErr := a.rollbackToLastGoodConfig(ctx, err, currentErr == nil)
+		_ = a.ReportApplyResult(ctx, response, "failed", applyErr.Error())
+		return applyErr
 	}
 	a.reportRuntimeState(ctx, response)
 	return nil
 }
 
-// singBoxConfirmedDown reports whether sing-box is known to be stopped. It reads
-// ActiveState via `systemctl show` (which succeeds for any unit state), so an
-// inactive/failed unit is distinguished from an unknown probe result: a D-Bus or
-// other probe failure returns false. Callers therefore never treat an unknown or
-// transitional (activating) state as proof the service is down.
-func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
+func (a *Agent) lastGoodConfigPath() string {
+	return a.Config.SingBoxConfig + ".last-good"
+}
+
+// restartSingBoxVerified restarts sing-box and waits for the unit to report
+// active. The unit is Type=simple, so `systemctl restart` returns as soon as the
+// process execs: a config that passes `sing-box check` but fails at runtime (a
+// bound port, a missing certificate) would otherwise look applied. An unreadable
+// probe stays "unknown" and is never treated as proof of failure, so a D-Bus
+// hiccup cannot trigger a rollback of a healthy config.
+func (a *Agent) restartSingBoxVerified(ctx context.Context) error {
+	if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.SingBoxService); err != nil {
+		return err
+	}
+	activeErr := a.waitServiceActive(ctx, a.Config.SingBoxService)
+	if activeErr == nil {
+		return nil
+	}
+	if _, err := a.singBoxActiveState(ctx); err != nil {
+		return nil
+	}
+	return fmt.Errorf("sing-box did not become active after applying the config: %w", activeErr)
+}
+
+// rollbackToLastGoodConfig restores the configuration sing-box was last running
+// and reports what really happened, so a runtime-fatal config cannot be recorded
+// as applied while the service crash-loops.
+func (a *Agent) rollbackToLastGoodConfig(ctx context.Context, applyErr error, haveLastGood bool) error {
+	if !haveLastGood {
+		return fmt.Errorf("%w; no previous config to roll back to", applyErr)
+	}
+	lastGood, err := os.ReadFile(a.lastGoodConfigPath())
+	if err != nil {
+		return fmt.Errorf("%w; reading the last-good config failed: %v", applyErr, err)
+	}
+	if err := atomicWrite(a.Config.SingBoxConfig, lastGood, defaultRuntimeFilePerm); err != nil {
+		return fmt.Errorf("%w; restoring the last-good config failed: %v", applyErr, err)
+	}
+	if err := a.restartSingBoxVerified(ctx); err != nil {
+		return fmt.Errorf("%w; restarting with the last-good config also failed: %v", applyErr, err)
+	}
+	return fmt.Errorf("%w; rolled back to the last-good config", applyErr)
+}
+
+// singBoxActiveState returns the unit's ActiveState. `systemctl show` succeeds
+// for any unit state, so an error means the probe itself failed — an unknown
+// state, not a state named "unknown".
+func (a *Agent) singBoxActiveState(ctx context.Context) (string, error) {
 	out, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", a.Config.SingBoxService)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
+	state, err := a.singBoxActiveState(ctx)
 	if err != nil {
 		return false
 	}
-	switch strings.TrimSpace(string(out)) {
+	switch state {
 	case "inactive", "failed":
 		return true
 	default:
@@ -429,11 +564,8 @@ func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
 // error or any non-"active" state returns false, so callers treat "unknown" as
 // "not confirmed up" and act (restart) rather than assuming the service is fine.
 func (a *Agent) singBoxConfirmedActive(ctx context.Context) bool {
-	out, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", a.Config.SingBoxService)
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) == "active"
+	state, err := a.singBoxActiveState(ctx)
+	return err == nil && state == "active"
 }
 
 // applyDisabled stops sing-box for an administratively disabled node and keeps
@@ -502,11 +634,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if interval <= 0 {
 		interval = DefaultPollInterval
 	}
-	if err := a.Once(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
-	} else if err := a.ConfirmAgentUpdateGuard(); err != nil {
-		fmt.Fprintf(os.Stderr, "boxfleet-agent confirm update guard failed: %v\n", err)
-	}
+	a.poll(ctx)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errorsOut := make(chan error, 2)
@@ -519,9 +647,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				errorsOut <- context.Cause(runCtx)
 				return
 			case <-ticker.C:
-				if err := a.Once(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-					fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
-				}
+				a.poll(runCtx)
 			}
 		}
 	}()
@@ -532,6 +658,22 @@ func (a *Agent) Run(ctx context.Context) error {
 		return context.Cause(runCtx)
 	}
 	return err
+}
+
+// poll runs one config cycle and confirms a pending agent update guard. The
+// confirmation is retried on every successful cycle: a server that is briefly
+// unreachable right after an update must not leave the guard pending, or the
+// next service start would silently roll the agent back to the old version.
+func (a *Agent) poll(ctx context.Context) {
+	if err := a.Once(ctx); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
+		}
+		return
+	}
+	if err := a.ConfirmAgentUpdateGuard(); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent confirm update guard failed: %v\n", err)
+	}
 }
 
 func (a *Agent) ReportTraffic(ctx context.Context) error {
@@ -613,7 +755,7 @@ func (a *Agent) ReportLogs(ctx context.Context) error {
 	} else if state.LastLogSince == "" {
 		args = append(args, "-n", "50")
 	} else {
-		args = append(args, "--since", state.LastLogSince)
+		args = append(args, "--since", journalSinceArg(state.LastLogSince))
 	}
 	lastCursor := state.LastLogCursor
 	batch := newJournalBatch[model.LogEventInput](journalBatchMaxEntries, journalBatchMaxBytes)
@@ -698,7 +840,7 @@ func (a *Agent) ReportSystemLogs(ctx context.Context) error {
 		if cursor := state.LastSystemLogCursor[service]; cursor != "" {
 			args = append(args, "--after-cursor", cursor)
 		} else if since := state.LastSystemLogSince[service]; since != "" {
-			args = append(args, "--since", since)
+			args = append(args, "--since", journalSinceArg(since))
 		} else {
 			args = append(args, "-n", "50")
 		}
@@ -801,6 +943,19 @@ func (b *journalBatch[T]) len() int {
 func (b *journalBatch[T]) reset() {
 	b.items = b.items[:0]
 	b.bytes = 0
+}
+
+// journalSinceArg renders a stored RFC3339 timestamp as the local
+// "YYYY-MM-DD HH:MM:SS" form journalctl accepts on every systemd version. The
+// RFC3339 T/Z form is rejected before systemd v247, which would make every log
+// cycle fail on a node whose cursor was never set. Truncating to whole seconds
+// only ever re-reads entries; it never skips them.
+func journalSinceArg(value string) string {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return value
+	}
+	return parsed.Local().Format(journalSinceLayout)
 }
 
 type journalEntry struct {
@@ -935,7 +1090,7 @@ func (a *Agent) FetchConfigVersioned(ctx context.Context) (ConfigResponse, error
 		return ConfigResponse{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+a.Config.Token)
-	req.Header.Set("X-BoxFleet-Node", a.Config.NodeName)
+	req.Header.Set("X-BoxFleet-Node", a.nodeName())
 	resp, err := a.client().Do(req)
 	if err != nil {
 		return ConfigResponse{}, err
@@ -1006,7 +1161,7 @@ func (a *Agent) postJSON(ctx context.Context, path string, payload any) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+a.Config.Token)
-	req.Header.Set("X-BoxFleet-Node", a.Config.NodeName)
+	req.Header.Set("X-BoxFleet-Node", a.nodeName())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.client().Do(req)
 	if err != nil {
@@ -1023,9 +1178,23 @@ func (a *Agent) postJSON(ctx context.Context, path string, payload any) error {
 	return nil
 }
 
+// nodeName reads the canonical node name, which the server may rename while
+// other goroutines (poll loop, operation executor, lease monitor) are issuing
+// requests.
+func (a *Agent) nodeName() string {
+	a.configMu.RLock()
+	defer a.configMu.RUnlock()
+	return a.Config.NodeName
+}
+
 func (a *Agent) adoptCanonicalNodeName(name string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || name == a.Config.NodeName {
+	if name == "" || name == a.nodeName() {
+		return nil
+	}
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	if name == a.Config.NodeName {
 		return nil
 	}
 	next := a.Config
@@ -1033,7 +1202,7 @@ func (a *Agent) adoptCanonicalNodeName(name string) error {
 	if err := WriteConfig(next.AgentConfigPath, next); err != nil {
 		return fmt.Errorf("persist canonical node name %q: %w", name, err)
 	}
-	a.Config = next
+	a.Config.NodeName = name
 	return nil
 }
 

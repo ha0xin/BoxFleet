@@ -17,18 +17,22 @@ export function useSubscription<Subscription extends SubscriptionRecord>(
   onDestructiveSuccess?: () => void
 ) {
   const query = useQuery({ queryKey, queryFn: () => request<Subscription>(endpoint) });
-  const generate = useAdminMutation<void, Subscription>(request, (req) =>
-    req(endpoint, { method: "POST" })
+  // Consumers render these mutation errors in an inline Banner, so skip the
+  // global error toast.
+  const generate = useAdminMutation<void, Subscription>(
+    request,
+    (req) => req(endpoint, { method: "POST" }),
+    { toastError: false }
   );
   const rotate = useAdminMutation<void, Subscription>(
     request,
     (req) => req(`${endpoint}/rotate`, { method: "POST" }),
-    { onSuccess: onDestructiveSuccess }
+    { onSuccess: onDestructiveSuccess, toastError: false }
   );
   const revoke = useAdminMutation<void, Subscription>(
     request,
     (req) => req(endpoint, { method: "DELETE" }),
-    { onSuccess: onDestructiveSuccess }
+    { onSuccess: onDestructiveSuccess, toastError: false }
   );
   return { query, generate, rotate, revoke };
 }

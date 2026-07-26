@@ -113,7 +113,19 @@ func (db *DB) issueProxyCredential(
 		if existing.Enabled && !existing.DeletedAt.Valid {
 			return existing, nil
 		}
-		if _, err := db.q.RestoreProxyAccess(ctx, store.RestoreProxyAccessParams{ProxyUserID: user.ID, ProxyID: proxy.ID}); err != nil {
+		// A disabled or soft-deleted access may have been revoked because its
+		// secret leaked, and nothing in the schema separates that from a routine
+		// unused-credential disable. Restoring always mints a fresh secret so a
+		// revoked UUID/password can never be reinstated.
+		credentialJSON, err := generate(proxy)
+		if err != nil {
+			return ProxyCredential{}, err
+		}
+		if _, err := db.q.RestoreProxyAccess(ctx, store.RestoreProxyAccessParams{
+			CredentialJson: credentialJSON,
+			ProxyUserID:    user.ID,
+			ProxyID:        proxy.ID,
+		}); err != nil {
 			return ProxyCredential{}, err
 		}
 		return db.GetProxyCredential(ctx, user.Name, proxy.NodeName, proxy.Name)

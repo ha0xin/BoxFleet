@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/renameio/v2"
+
 	"github.com/haoxin/boxfleet/internal/model"
 )
 
@@ -23,7 +26,7 @@ func TestWriteLoadConfigDefaults(t *testing.T) {
 	config := Config{
 		NodeName:  "azus",
 		Token:     "secret",
-		ServerURL: "http://100.72.18.128:18081",
+		ServerURL: "https://100.72.18.128:18081",
 	}
 	if err := WriteConfig(path, config); err != nil {
 		t.Fatal(err)
@@ -37,6 +40,34 @@ func TestWriteLoadConfigDefaults(t *testing.T) {
 	}
 	if loaded.AgentConfigPath != DefaultConfigPath {
 		t.Fatalf("AgentConfigPath = %q", loaded.AgentConfigPath)
+	}
+}
+
+func TestConfigRejectsPlaintextURLsWithoutOptOut(t *testing.T) {
+	t.Parallel()
+	config := Config{
+		NodeName:   "azus",
+		Token:      "secret",
+		ServerURL:  "http://100.72.18.128:18081",
+		SingBoxURL: "https://example.test/sing-box",
+	}
+	if err := config.Validate(); err == nil {
+		t.Fatal("plaintext server_url was accepted")
+	}
+	config.AllowInsecureTransport = true
+	if err := config.Validate(); err != nil {
+		t.Fatalf("development opt-out rejected: %v", err)
+	}
+	config.AllowInsecureTransport = false
+	config.ServerURL = "https://100.72.18.128:18081"
+	config.SingBoxURL = "http://example.test/sing-box"
+	if err := config.Validate(); err == nil {
+		t.Fatal("plaintext sing_box_url was accepted")
+	}
+	config.SingBoxURL = "https://example.test/sing-box"
+	config.SingBoxSHA256 = "not-a-digest"
+	if err := config.Validate(); err == nil {
+		t.Fatal("invalid sing_box_sha256 was accepted")
 	}
 }
 
@@ -75,10 +106,11 @@ func TestFetchConfigAdoptsCanonicalNodeName(t *testing.T) {
 	defer server.Close()
 
 	a := New(Config{
-		NodeName:        "old-name",
-		Token:           "secret",
-		ServerURL:       server.URL,
-		AgentConfigPath: configPath,
+		NodeName:               "old-name",
+		Token:                  "secret",
+		ServerURL:              server.URL,
+		AgentConfigPath:        configPath,
+		AllowInsecureTransport: true,
 	})
 	if _, err := a.FetchConfigVersioned(context.Background()); err != nil {
 		t.Fatal(err)
@@ -386,6 +418,7 @@ func TestOnceRestartsWhenServiceNotConfirmedActive(t *testing.T) {
 		V2RayAPIAddress: "127.0.0.1:1",
 	})
 	a.Runner = runner
+	a.ServiceReadyWait = 10 * time.Millisecond
 	// Config bytes and applied hash already match, so the only thing that would
 	// skip the restart is a *confirmed-active* probe. The probe errors here, so
 	// the agent must restart rather than assume the re-enabled node is up.
@@ -419,6 +452,331 @@ func (r *probeErrorRunner) Output(_ context.Context, name string, args ...string
 
 func (r *probeErrorRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
 	return nil
+}
+
+func TestOnceReportsFailureWhenMatchingConfigStaysDown(t *testing.T) {
+	t.Parallel()
+	config := []byte(`{"inbounds":[]}`)
+	hash := bytesSHA256Hex(config)
+	var applyStatus string
+	var heartbeats int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/node/config":
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_1")
+			w.Header().Set("X-BoxFleet-Config-SHA256", hash)
+			_, _ = w.Write(config)
+		case "/api/node/apply-result":
+			var payload model.ApplyResult
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Error(err)
+			}
+			applyStatus = payload.Status
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/node/heartbeat":
+			heartbeats++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "sing-box.json")
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The unit is restarted but never reaches "active": a crash-looping sing-box
+	// must not be recorded as applied just because the bytes on disk match.
+	runner := &deadServiceRunner{}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(tmp, "state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = runner
+	a.ServiceReadyWait = 10 * time.Millisecond
+	if err := a.SaveState(State{AppliedConfigHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.Once(context.Background()); err == nil {
+		t.Fatal("Once succeeded while sing-box stayed down")
+	}
+	if runner.restarts != 1 {
+		t.Fatalf("restarts = %d, want 1", runner.restarts)
+	}
+	if applyStatus != "failed" {
+		t.Fatalf("apply status = %q, want failed", applyStatus)
+	}
+	if heartbeats != 0 {
+		t.Fatalf("heartbeats = %d, want 0 (the node is not healthy)", heartbeats)
+	}
+}
+
+// deadServiceRunner accepts every command but never reports an active unit.
+type deadServiceRunner struct{ restarts int }
+
+func (r *deadServiceRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 && args[0] == "restart" {
+		r.restarts++
+	}
+	return nil
+}
+
+func (r *deadServiceRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	if name == "systemctl" && len(args) >= 1 && args[0] == "show" {
+		return []byte("failed\n"), nil
+	}
+	return []byte("sing-box test"), nil
+}
+
+func (r *deadServiceRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
+	return nil
+}
+
+func TestOnceRollsBackConfigThatFailsAtRuntime(t *testing.T) {
+	t.Parallel()
+	good := []byte(`{"inbounds":[]}`)
+	broken := []byte(`{"inbounds":[{"listen_port":443}]}`)
+	brokenHash := bytesSHA256Hex(broken)
+	var applyStatus, applyError string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/node/config":
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_2")
+			w.Header().Set("X-BoxFleet-Config-SHA256", brokenHash)
+			_, _ = w.Write(broken)
+		case "/api/node/apply-result":
+			var payload model.ApplyResult
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Error(err)
+			}
+			applyStatus, applyError = payload.Status, payload.Error
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "sing-box.json")
+	if err := os.WriteFile(configPath, good, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The unit only stays active while the good config is on disk, which is what a
+	// config that passes `sing-box check` but fails at runtime looks like.
+	runner := &configStateRunner{configPath: configPath, good: good}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(tmp, "state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = runner
+	a.ServiceReadyWait = 10 * time.Millisecond
+
+	err := a.Once(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "rolled back to the last-good config") {
+		t.Fatalf("Once error = %v", err)
+	}
+	live, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(live, good) {
+		t.Fatalf("live config = %s, want the last-good config", live)
+	}
+	if runner.restarts != 2 {
+		t.Fatalf("restarts = %d, want 2 (candidate then rollback)", runner.restarts)
+	}
+	if applyStatus != "failed" || !strings.Contains(applyError, "did not become active") {
+		t.Fatalf("apply result = %q / %q", applyStatus, applyError)
+	}
+	state, err := a.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.AppliedConfigHash == brokenHash {
+		t.Fatal("the rolled-back config was recorded as applied")
+	}
+	if _, err := os.Stat(configPath + ".candidate"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("candidate config was left behind: %v", err)
+	}
+}
+
+// configStateRunner reports the sing-box unit as active only while the known-good
+// config is installed.
+type configStateRunner struct {
+	configPath string
+	good       []byte
+	restarts   int
+}
+
+func (r *configStateRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 && args[0] == "restart" {
+		r.restarts++
+	}
+	return nil
+}
+
+func (r *configStateRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	if name == "systemctl" && len(args) >= 1 && args[0] == "show" {
+		live, err := os.ReadFile(r.configPath)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(bytes.TrimSpace(live), bytes.TrimSpace(r.good)) {
+			return []byte("active\n"), nil
+		}
+		return []byte("failed\n"), nil
+	}
+	return []byte("sing-box test"), nil
+}
+
+func (r *configStateRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
+	return nil
+}
+
+func TestPollRetriesAgentUpdateGuardConfirmation(t *testing.T) {
+	previousVersion := Version
+	Version = "v2.0.0"
+	t.Cleanup(func() { Version = previousVersion })
+
+	config := []byte(`{"inbounds":[]}`)
+	hash := bytesSHA256Hex(config)
+	var configRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/node/config" {
+			configRequests++
+			if configRequests == 1 {
+				http.Error(w, "server restarting", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("X-BoxFleet-Config-Version-ID", "cfg_1")
+			w.Header().Set("X-BoxFleet-Config-SHA256", hash)
+			_, _ = w.Write(config)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	installDir := t.TempDir()
+	previous := filepath.Join(installDir, "releases", "boxfleet-agent", "1.0.0", "boxfleet-agent")
+	candidate := filepath.Join(installDir, "releases", "boxfleet-agent", "2.0.0", "boxfleet-agent")
+	for _, path := range []string{previous, candidate} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agentPath := filepath.Join(installDir, "bin", "boxfleet-agent")
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameio.Symlink(candidate, agentPath); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(installDir, "etc", "sing-box.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, config, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New(Config{
+		NodeName:        "azus",
+		Token:           "secret",
+		ServerURL:       server.URL,
+		InstallDir:      installDir,
+		AgentPath:       agentPath,
+		SingBoxPath:     "sing-box",
+		SingBoxConfig:   configPath,
+		SingBoxService:  "sing-box.service",
+		StatePath:       filepath.Join(installDir, "state", "agent-state.json"),
+		V2RayAPIAddress: "127.0.0.1:1",
+	})
+	a.Runner = &recordingRunner{running: true}
+	if err := a.SaveState(State{AppliedConfigHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.writeAgentUpdateGuard(AgentUpdateGuardState{
+		OperationID: "op_guard", ExpectedVersion: Version, PreviousTarget: previous, CandidateTarget: candidate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The first cycle fails before the guard can be confirmed. Leaving the guard
+	// pending would roll the agent back on the next service start, so every later
+	// successful cycle must retry the confirmation.
+	a.poll(context.Background())
+	guard, err := a.loadAgentUpdateGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guard == nil || guard.Status != "pending" {
+		t.Fatalf("guard after failed cycle = %+v", guard)
+	}
+
+	a.poll(context.Background())
+	guard, err = a.loadAgentUpdateGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guard != nil {
+		t.Fatalf("guard was not confirmed on the second cycle: %+v", guard)
+	}
+	if _, err := os.Stat(a.Config.AgentGuardPath); err != nil {
+		t.Fatalf("confirmed guard binary: %v", err)
+	}
+}
+
+func TestReadLinesSkipsOversizedLines(t *testing.T) {
+	t.Parallel()
+	input := "first\n" + strings.Repeat("x", journalMaxLineBytes+1) + "\nlast\n"
+	var lines []string
+	stopped, err := readLines(strings.NewReader(input), func(line string) bool {
+		lines = append(lines, line)
+		return true
+	})
+	if err != nil || stopped {
+		t.Fatalf("readLines stopped=%v err=%v", stopped, err)
+	}
+	if got := strings.Join(lines, ","); got != "first,last" {
+		t.Fatalf("lines = %q, want the oversized entry skipped", got)
+	}
+}
+
+func TestJournalSinceArgUsesSystemdAcceptedFormat(t *testing.T) {
+	t.Parallel()
+	arg := journalSinceArg("2026-07-26T05:00:00.123456789Z")
+	if strings.ContainsAny(arg, "TZ.") {
+		t.Fatalf("--since %q is not the plain systemd timestamp form", arg)
+	}
+	parsed, err := time.ParseInLocation(journalSinceLayout, arg, time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 7, 26, 5, 0, 0, 0, time.UTC); !parsed.Equal(want) {
+		t.Fatalf("--since %q = %s, want %s", arg, parsed.UTC(), want)
+	}
+	if got := journalSinceArg("not-a-timestamp"); got != "not-a-timestamp" {
+		t.Fatalf("unparseable value = %q", got)
+	}
 }
 
 func TestHelperProcess(t *testing.T) {

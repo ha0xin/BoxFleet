@@ -1,26 +1,20 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MouseEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowRightIcon,
-  ListChecksIcon,
   PlusIcon,
   WarningCircleIcon,
   XCircleIcon,
   CheckCircleIcon
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
-import { Area, AreaChart, ResponsiveContainer } from "recharts";
-import { Badge, Breadcrumbs, LayerCard, Link, LinkButton, Sidebar } from "@cloudflare/kumo";
+import { Badge, LayerCard, Link, LinkButton } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
-import { usePublishStatus } from "@/publish/publish-status";
-import { PublishStrip, publishBarToneClass } from "@/publish/publish-strip";
 import type { AdminNode } from "../types";
 
-export type SparklinePoint = { index: number; value: number };
 export type Tone = "default" | "subtle" | "success" | "warning" | "danger";
-export type BadgeTone = "success" | "warning" | "error" | "neutral" | "info" | "secondary";
-
-const SPARKLINE_COLOR = "var(--color-kumo-info)";
+export type BadgeTone = "success" | "warning" | "error" | "neutral" | "info";
 
 export const rowLinkClassName =
   "min-w-0 text-base font-medium text-kumo-default !no-underline !decoration-[0.1em] hover:!underline group-hover/row:!underline";
@@ -51,10 +45,6 @@ export function formatRelativeTime(value: string): string {
 
 export function rowDelay(index: number, step = 50): CSSProperties {
   return { "--row-delay": `${index * step}ms` } as CSSProperties;
-}
-
-export function toSparkline(values: readonly number[]): SparklinePoint[] {
-  return values.map((value, index) => ({ index, value }));
 }
 
 export function toneClass(tone: Tone = "default"): string {
@@ -109,89 +99,6 @@ export function formatNodeVersion(node: AdminNode): string {
   return current === target ? current : `${current} -> ${target}`;
 }
 
-export function SparkArea({
-  data,
-  gradientId,
-  className = "h-8 w-full min-w-0"
-}: {
-  data: SparklinePoint[];
-  gradientId: string;
-  className?: string;
-}) {
-  return (
-    <div className={`pointer-events-none ${className}`} aria-hidden="true">
-      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 32 }}>
-        <AreaChart data={data} margin={{ top: 1, right: 0, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={SPARKLINE_COLOR} stopOpacity={0.55} />
-              <stop offset="95%" stopColor={SPARKLINE_COLOR} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area
-            type="monotone"
-            dataKey="value"
-            stroke={SPARKLINE_COLOR}
-            strokeWidth={1.4}
-            fill={`url(#${gradientId})`}
-            fillOpacity={0.35}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-export function PageTopBar({ current }: { current: string }) {
-  const { status } = usePublishStatus();
-  return (
-    <div
-      className={`flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6 ${publishBarToneClass(status)}`}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <Sidebar.Trigger className="md:hidden" />
-        <Breadcrumbs size="sm">
-          <Breadcrumbs.Link href={adminPath("/")}>BoxFleet</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
-        </Breadcrumbs>
-      </div>
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-        <PublishStrip />
-        <div className="flex gap-1">
-          <LinkButton href={adminPath("/system-logs")} variant="ghost" size="sm" icon={ListChecksIcon}>
-            <span className="hidden md:inline">Logs</span>
-          </LinkButton>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function PageHeader({
-  title,
-  description,
-  actions
-}: {
-  title: string;
-  description: string;
-  actions?: ReactNode;
-}) {
-  return (
-    <div className="mx-auto w-full max-w-[1400px] px-6 py-0 md:px-8 lg:px-10">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-4 pt-6">
-        <div className="flex min-w-0 flex-col">
-          <h1 className="mb-1.5 text-xl font-semibold text-kumo-default md:text-3xl">{title}</h1>
-          <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p>
-        </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-      </header>
-    </div>
-  );
-}
-
 export function WidgetHeader({
   title,
   count,
@@ -207,21 +114,40 @@ export function WidgetHeader({
   actionHref?: string;
   actionLabel?: string;
 }) {
+  const navigate = useNavigate();
+  const spaNavigate = (path: string) => (event: MouseEvent<HTMLElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(path);
+  };
   return (
     <LayerCard.Secondary className="h-14 justify-between py-0">
-      <div role="heading" aria-level={2} className="flex min-w-0 items-center gap-2">
+      <h2 className="flex min-w-0 items-center gap-2 text-[length:inherit] font-[number:inherit]">
         {Icon ? <Icon className="size-4.5 shrink-0" /> : null}
         <span className="truncate">{title}</span>
         {typeof count === "number" ? <Badge variant="secondary">{count}</Badge> : null}
-      </div>
+      </h2>
       <div className="flex shrink-0 items-center justify-center gap-1.5">
         {actionHref ? (
-          <LinkButton href={actionHref} variant="secondary" size="sm" shape="square" aria-label={actionLabel}>
+          <LinkButton
+            href={adminPath(actionHref)}
+            onClick={spaNavigate(actionHref)}
+            variant="secondary"
+            size="sm"
+            shape="square"
+            aria-label={actionLabel}
+          >
             <PlusIcon className="size-4" />
           </LinkButton>
         ) : null}
         {href ? (
-          <Link href={href} variant="current" aria-label={`Open ${title}`} className="flex !no-underline text-kumo-default">
+          <Link
+            href={adminPath(href)}
+            onClick={spaNavigate(href)}
+            variant="current"
+            aria-label={`Open ${title}`}
+            className="flex !no-underline text-kumo-default"
+          >
             <ArrowRightIcon className="pointer-events-none size-4 shrink-0" />
           </Link>
         ) : null}

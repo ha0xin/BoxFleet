@@ -1,31 +1,36 @@
 import type { ReactNode } from "react";
-import { Breadcrumbs, Sidebar } from "@cloudflare/kumo";
+import { useLocation, useNavigate } from "react-router-dom";
+import { FileTextIcon } from "@phosphor-icons/react";
+import { Breadcrumbs, LinkButton, Sidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
 import { PublishStrip, publishBarToneClass } from "@/publish/publish-strip";
 
 /**
- * App page header. The top breadcrumb bar is exactly `h-[58px]` with a bottom
- * hairline so it lines up with Kumo's `Sidebar.Header` (also `h-[58px]`,
- * `border-b border-kumo-line`) — the two borders form one continuous line.
+ * The single app page header: a breadcrumb top bar aligned with Kumo's
+ * `Sidebar.Header` (both `min-h-[58px]` with a bottom hairline, so the two
+ * borders read as one continuous line) followed by the page title block.
  *
- * The bar's right slot (`actions`) is where page-level controls live (e.g. the
- * future "review & publish" button). Title + description + page `children` sit
- * in the padded content area below.
+ * The bar's right slot carries the publish strip, a Logs shortcut (hidden on
+ * the System Logs page itself), and the page-level `actions`. Every admin page
+ * renders this once at the top; page content below owns its own
+ * `max-w-[1400px]` container.
  */
 export function AppPageHeader({
   title,
   description,
-  actions,
-  children
+  actions
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
-  children?: ReactNode;
 }) {
   const { status } = usePublishStatus();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const onSystemLogs = location.pathname.startsWith("/system-logs");
+
   return (
     <div className="flex flex-col">
       <div
@@ -34,23 +39,49 @@ export function AppPageHeader({
         <div className="flex min-w-0 items-center gap-2">
           <Sidebar.Trigger className="md:hidden" />
           <Breadcrumbs size="sm">
-            <Breadcrumbs.Link href={`${adminBasename()}/`}>BoxFleet</Breadcrumbs.Link>
+            <span
+              onClickCapture={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                navigate("/");
+              }}
+            >
+              <Breadcrumbs.Link href={`${adminBasename()}/`}>BoxFleet</Breadcrumbs.Link>
+            </span>
             <Breadcrumbs.Separator />
             <Breadcrumbs.Current>{title}</Breadcrumbs.Current>
           </Breadcrumbs>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <PublishStrip />
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          {!onSystemLogs ? (
+            <LinkButton
+              variant="ghost"
+              size="sm"
+              icon={FileTextIcon}
+              href={`${adminBasename()}/system-logs`}
+              onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                navigate("/system-logs");
+              }}
+            >
+              <span className="hidden md:inline">Logs</span>
+            </LinkButton>
+          ) : null}
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 px-6 py-6 md:px-8 lg:px-10">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-xl font-semibold tracking-tight text-kumo-default md:text-3xl">{title}</h1>
-          {description ? <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p> : null}
-        </div>
-        {children}
+      <div className="mx-auto w-full max-w-[1400px] px-6 md:px-8 lg:px-10">
+        <header className="mb-4 flex flex-wrap items-start justify-between gap-4 pt-6">
+          <div className="flex min-w-0 flex-col">
+            <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-kumo-default md:text-3xl">{title}</h1>
+            {description ? (
+              <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p>
+            ) : null}
+          </div>
+          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        </header>
       </div>
     </div>
   );
