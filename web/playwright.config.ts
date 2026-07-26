@@ -49,6 +49,12 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 8_000 },
   fullyParallel: false,
+  // Every spec drives one shared `bfs` instance backed by one SQLite file, so
+  // specs are not isolated from each other: `fullyParallel: false` only
+  // serialises tests *within* a file, leaving separate files to race over the
+  // same rows. Pin to a single worker — the suite is also faster this way,
+  // because the contention was costing more than the parallelism gained.
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
   use: {
