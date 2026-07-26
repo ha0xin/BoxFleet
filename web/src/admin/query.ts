@@ -1,3 +1,18 @@
+/**
+ * Shared auto-refresh cadences so every page stays live without a manual
+ * reload. TanStack Query pauses interval refetches while the tab is hidden
+ * (`refetchIntervalInBackground` defaults to false), so these are focused-tab
+ * costs only.
+ */
+export const refreshIntervals = {
+  /** State driven by node heartbeats: nodes, users, proxies, logs. */
+  live: 15_000,
+  /** Telemetry feeds and aggregates: traffic series, network events. */
+  telemetry: 30_000,
+  /** Slow-moving inventories and trend charts. */
+  slow: 60_000
+} as const;
+
 export function queryString(params: Record<string, string | number | boolean | undefined>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

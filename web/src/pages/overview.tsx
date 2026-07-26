@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -18,7 +18,7 @@ import type { Icon } from "@phosphor-icons/react";
 import { Button, Empty, LayerCard, Link } from "@cloudflare/kumo";
 
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { AppPageHeader } from "@/components/app-page-header";
 import { Sparkline } from "@/components/sparkline";
 import { StatusBadge } from "@/components/status-badge";
@@ -99,17 +99,28 @@ type TrendWindow = { start: string; end: string; bucket: "day"; offset_minutes: 
 
 function useTrendWindow(): TrendWindow {
   // Truncating the window end to the hour keeps the query key — and with it the
-  // cache entry — stable while the operator moves between pages.
-  return useMemo(() => {
-    const end = startOfHour(new Date());
-    return {
-      start: startOfDay(subDays(end, TREND_DAYS - 1)).toISOString(),
-      end: end.toISOString(),
+  // cache entry — stable while the operator moves between pages. The anchor
+  // advances when the wall clock crosses into the next hour so a long-lived tab
+  // keeps pulling the current day's rows into the window.
+  const [anchor, setAnchor] = useState(() => startOfHour(new Date()));
+  useEffect(() => {
+    const untilNextHour = anchor.getTime() + 3_600_000 - Date.now();
+    const timer = setTimeout(
+      () => setAnchor(startOfHour(new Date())),
+      Math.max(untilNextHour, 1_000)
+    );
+    return () => clearTimeout(timer);
+  }, [anchor]);
+  return useMemo(
+    () => ({
+      start: startOfDay(subDays(anchor, TREND_DAYS - 1)).toISOString(),
+      end: anchor.toISOString(),
       bucket: "day",
       // The server adds this to UTC to get local time, the opposite of the JS sign.
-      offset_minutes: -end.getTimezoneOffset()
-    };
-  }, []);
+      offset_minutes: -anchor.getTimezoneOffset()
+    }),
+    [anchor]
+  );
 }
 
 function useTrafficTrend(trend: TrendWindow, group: "total" | "node") {
@@ -118,7 +129,9 @@ function useTrafficTrend(trend: TrendWindow, group: "total" | "node") {
   return useQuery({
     queryKey: adminKeys.trafficSeries(params),
     queryFn: () => request<TrafficSeriesResponse>(`/api/admin/traffic/series${queryString(params)}`),
-    staleTime: 60_000
+    staleTime: 60_000,
+    // Late-arriving node reports can still merge into buckets inside the window.
+    refetchInterval: refreshIntervals.slow
   });
 }
 
@@ -128,7 +141,8 @@ function useNetworkEventTrend(trend: TrendWindow) {
   return useQuery({
     queryKey: adminKeys.networkEventSeries(params),
     queryFn: () => request<NetworkEventSeriesResponse>(`/api/admin/network-events/series${queryString(params)}`),
-    staleTime: 60_000
+    staleTime: 60_000,
+    refetchInterval: refreshIntervals.slow
   });
 }
 

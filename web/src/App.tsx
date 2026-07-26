@@ -6,7 +6,7 @@ import { Banner, Button, Loader, Sidebar, Text, Toasty } from "@cloudflare/kumo"
 
 import { AdminApiProvider, useAdminApi } from "@/admin/api";
 import { adminToastManager } from "@/admin/toast";
-import { adminKeys } from "@/admin/query";
+import { adminKeys, refreshIntervals } from "@/admin/query";
 import { PublishStatusProvider } from "@/publish/publish-status";
 import { PublishDiffDialog } from "@/publish/publish-diff-dialog";
 import { navGroups, settingsNav } from "./navigation";
@@ -136,6 +136,7 @@ function AdminApp({
   authRequired: boolean;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   return (
     <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
       <AppSidebar />
@@ -163,33 +164,38 @@ function AdminApp({
             </div>
           ) : null}
           <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<OverviewRoute authVersion={authVersion} />} />
-              <Route path="/nodes" element={<NodesPage />} />
-              <Route path="/proxies" element={<ProxiesPage />} />
-              <Route path="/paths" element={<PathsPage />} />
-              <Route path="/users" element={<UsersPage />} />
-              <Route path="/mihomo-profiles" element={<MihomoProfilesPage />} />
-              <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage />} />
-              <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage />} />
-              <Route path="/traffic" element={<TrafficPage />} />
-              <Route path="/network-events" element={<NetworkEventsPage />} />
-              <Route path="/system-logs" element={<SystemLogsPage />} />
-              <Route
-                path="/settings"
-                element={
-                  <SettingsPage
-                    tokenInput={tokenInput}
-                    setTokenInput={setTokenInput}
-                    activeToken={activeToken}
-                    applyToken={applyToken}
-                    logout={logout}
-                    refresh={refresh}
-                  />
-                }
-              />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            {/* Keyed by pathname so route changes replay the entrance animation;
+                search-param (filter) changes deliberately do not. Grid makes the
+                page stretch to the scroll container like it did unwrapped. */}
+            <div key={location.pathname} className="grid min-h-full animate-page-enter">
+              <Routes>
+                <Route path="/" element={<OverviewRoute authVersion={authVersion} />} />
+                <Route path="/nodes" element={<NodesPage />} />
+                <Route path="/proxies" element={<ProxiesPage />} />
+                <Route path="/paths" element={<PathsPage />} />
+                <Route path="/users" element={<UsersPage />} />
+                <Route path="/mihomo-profiles" element={<MihomoProfilesPage />} />
+                <Route path="/mihomo-profiles/new" element={<MihomoConfigurationPage />} />
+                <Route path="/mihomo-profiles/:profile/edit" element={<MihomoConfigurationPage />} />
+                <Route path="/traffic" element={<TrafficPage />} />
+                <Route path="/network-events" element={<NetworkEventsPage />} />
+                <Route path="/system-logs" element={<SystemLogsPage />} />
+                <Route
+                  path="/settings"
+                  element={
+                    <SettingsPage
+                      tokenInput={tokenInput}
+                      setTokenInput={setTokenInput}
+                      activeToken={activeToken}
+                      applyToken={applyToken}
+                      logout={logout}
+                      refresh={refresh}
+                    />
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
           </Suspense>
 
           <PublishDiffDialog />
@@ -205,8 +211,7 @@ function OverviewRoute({ authVersion }: { authVersion: number }) {
   const overviewQuery = useQuery({
     queryKey: adminKeys.overview(authVersion),
     queryFn: () => request<Overview>("/api/admin/overview"),
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true
+    refetchInterval: refreshIntervals.live
   });
 
   if (overviewQuery.error) {
@@ -227,7 +232,7 @@ function OverviewRoute({ authVersion }: { authVersion: number }) {
 
 function PageLoader() {
   return (
-    <div className="flex items-center justify-center py-16">
+    <div className="flex items-center justify-center py-16 animate-loader-in">
       <Loader size={20} />
     </div>
   );

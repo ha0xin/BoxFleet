@@ -40,7 +40,8 @@ import type {
   TrafficVolume
 } from "../types";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
+import { useAutoRefresh } from "@/admin/use-auto-refresh";
 import { SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import type { SortDirection } from "@/components/admin-table";
 import { AppPageHeader } from "@/components/app-page-header";
@@ -301,6 +302,7 @@ export function TrafficPage() {
   const [nowAnchor, setNowAnchor] = useState(() => new Date());
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
   const [sorting, setSorting] = useState<SortingState>([{ id: "total", desc: true }]);
   const isDark = useIsDarkMode();
 
@@ -329,6 +331,14 @@ export function TrafficPage() {
   useEffect(() => {
     setDraftRange(dateRangeFromParams(filters, startParam, endParam, nowAnchor));
   }, [endParam, filters, nowAnchor, startParam]);
+
+  // Replays the header Refresh button on a cadence: advancing the anchor slides
+  // preset windows forward and bumping the generation re-keys every query.
+  // Paused while the range popover is open so a tick cannot reset the draft.
+  useAutoRefresh(refreshIntervals.telemetry, !rangeOpen, () => {
+    setNowAnchor(new Date());
+    setRefreshGeneration((value) => value + 1);
+  });
 
   function writeParams(values: FilterValues, nextStart = startParam, nextEnd = endParam) {
     if (values.range !== "custom") setNowAnchor(new Date());
@@ -527,7 +537,7 @@ export function TrafficPage() {
           <Button
             variant="secondary"
             icon={ArrowClockwiseIcon}
-            disabled={totalQuery.isFetching || userQuery.isFetching}
+            loading={totalQuery.isFetching || userQuery.isFetching}
             onClick={() => {
               setNowAnchor(new Date());
               setRefreshGeneration((value) => value + 1);
@@ -575,7 +585,7 @@ export function TrafficPage() {
                 ) : null}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <Popover>
+                <Popover open={rangeOpen} onOpenChange={setRangeOpen}>
                   <Popover.Trigger render={<Button variant="secondary" icon={CalendarBlankIcon} />}>
                     {timeRange.label}
                   </Popover.Trigger>

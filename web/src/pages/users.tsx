@@ -22,7 +22,7 @@ import type { AdminUser, AdminUserEffectiveStatus, AdminUsersResponse, TrafficVo
 import { formatBytes } from "../utils";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
@@ -199,8 +199,7 @@ export function UsersPage() {
     queryKey: adminKeys.usersPage(perPage, offset, filters.search, filters.status, filters.sort, filters.direction),
     queryFn: ({ signal }) => request<AdminUsersResponse>(usersRequestPath(filters, perPage, offset), { signal }),
     placeholderData: (previous) => previous,
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true
+    refetchInterval: refreshIntervals.live
   });
 
   const rows = usersQuery.data?.users ?? [];

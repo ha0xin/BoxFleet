@@ -20,7 +20,7 @@ import type { AdminProxy, AdminProxiesResponse } from "../types";
 import { formatRelativeTime } from "./operations-common";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString } from "@/admin/query";
+import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -133,7 +133,9 @@ export function ProxiesPage() {
   const proxiesQuery = useQuery({
     queryKey: adminKeys.proxiesPage(perPage, offset, filters.search, filters.status, filters.sort, filters.direction),
     queryFn: ({ signal }) => request<AdminProxiesResponse>(path, { signal }),
-    placeholderData: (previous) => previous
+    placeholderData: (previous) => previous,
+    // Proxy status is derived from node heartbeats, so it moves on its own.
+    refetchInterval: refreshIntervals.live
   });
   const proxies = proxiesQuery.data?.proxies ?? [];
   const total = proxiesQuery.data?.total ?? 0;

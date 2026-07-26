@@ -7,7 +7,7 @@ import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Select, Switch, Tab
 import { CheckCircleIcon, PencilSimpleIcon, PlusIcon, ProhibitIcon, TrashIcon } from "@phosphor-icons/react";
 
 import { useAdminApi } from "@/admin/api";
-import { adminKeys } from "@/admin/query";
+import { adminKeys, refreshIntervals } from "@/admin/query";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
@@ -33,7 +33,8 @@ export function PathsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminPath | null>(null);
   const pathsQuery = useQuery({
     queryKey: adminKeys.paths,
-    queryFn: () => request<AdminPath[]>("/api/admin/paths")
+    queryFn: () => request<AdminPath[]>("/api/admin/paths"),
+    refetchInterval: refreshIntervals.slow
   });
   const toggleEnabled = useAdminMutation<AdminPath>(request, (req, path) =>
     req(`/api/admin/paths/${encodeURIComponent(path.id)}`, {
