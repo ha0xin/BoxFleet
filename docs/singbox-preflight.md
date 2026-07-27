@@ -64,9 +64,16 @@ snapshots, logs) stay in the work directory whenever anything failed, and with
 ## Check 1 — build tags intact
 
 **Protects:** every feature BoxFleet reaches through a build tag.
-`with_v2ray_api` backs per-user traffic counters and therefore billing;
-`with_clash_api` backs connection tracking and is the prerequisite for the 1.14
-telemetry migration.
+`with_v2ray_api` backs per-user traffic counters and therefore billing, and is
+the one that matters.
+
+`with_clash_api` is also asserted, because CI asserts it and this check reads its
+required-tag list out of CI rather than restating it. Nothing BoxFleet renders
+uses it: `experimental.clash_api` is never emitted, and it is **not** a
+prerequisite for the 1.14 connection stream — `service/api` and
+`common/trafficcontrol` carry no build tag, and `box.go` creates the traffic
+manager under `needClashAPI || needAPIService`. Dropping the tag is a separate
+decision to make in CI, not here.
 
 **How it runs:** clones sing-box, checks out the candidate, and builds
 `./cmd/sing-box` with the workflow's exact `SING_BOX_TAGS` and `release/LDFLAGS`,
@@ -202,7 +209,23 @@ This harness is the second half of that trigger. It is equally the gate for an
 ordinary 1.13 patch bump — a patch release can reword a log line just as easily
 as a minor one can.
 
-Passing the preflight authorizes moving the pin. It does not authorize adopting
-1.14's `service.api` connection stream: that needs a renderer `services` block,
-loopback binding, a mandatory per-node secret, a node-side aggregator and an
-ingest path, none of which this script covers.
+**Passing the preflight authorizes moving the pin. It does not authorize
+enabling connection telemetry on any node.** The renderer block, the loopback
+bind, the per-node secret, the node-side aggregator and the ingest path all exist
+now ([ADR 0002](adr/0002-opt-in-connection-telemetry.md)), but they are opt-in
+per node and enabled nowhere, and none of them is exercised by these four checks.
+
+Two gaps to close when a candidate is being evaluated for that purpose:
+
+- **Check 2 renders only nodes that have not opted in.** Extend
+  `scripts/singbox-preflight render-configs` to emit an opted-in node as well, so
+  `sing-box check -c` sees the `services` block. Until then, the only proof that
+  the block parses on a candidate is a manual `sing-box check` against a config
+  rendered from an opted-in fixture.
+- **Nothing verifies the stream itself.** A fifth check — that a candidate build
+  actually serves `SubscribeConnections` on the rendered endpoint — is the one
+  thing that would catch an upstream rename or relocation of the api service
+  before an operator opts a node in. The proto contract is separately pinned
+  against upstream's compiled descriptor
+  ([`internal/singboxapi/README.md`](../internal/singboxapi/README.md)), which
+  catches a *schema* change but not a service that stopped being reachable.

@@ -1,0 +1,67 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-39090",
+      "listen": "0.0.0.0",
+      "listen_port": 39090,
+      "users": [
+        {
+          "name": "vless-39090@alice",
+          "uuid": "00000000-0000-0000-0000-000000000000",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "www.amazon.com",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "www.amazon.com",
+            "server_port": 443
+          },
+          "private_key": "private-key",
+          "short_id": "01234567"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  },
+  "services": [
+    {
+      "type": "api",
+      "tag": "boxfleet-telemetry",
+      "listen": "127.0.0.1",
+      "listen_port": 9091,
+      "secret": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "experimental": {
+    "v2ray_api": {
+      "listen": "127.0.0.1:18082",
+      "stats": {
+        "enabled": true,
+        "users": [
+          "vless-39090@alice"
+        ]
+      }
+    }
+  }
+}

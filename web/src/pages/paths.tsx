@@ -12,7 +12,8 @@ import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
-import { TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import { TableCard, TableColgroup, TableEmpty, TableError, TableLoading, tableMinWidth } from "@/components/admin-table";
+import type { TableColumnWidth } from "@/components/admin-table";
 import type { AdminNode, AdminPath, AdminProxiesResponse } from "../types";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 
@@ -23,8 +24,27 @@ const VISIBILITY_LABELS: Record<AdminPath["visibility"], string> = {
   dependency: "Dependency only"
 };
 
+/**
+ * Column widths, in table order. Published name, endpoint and dialer are all
+ * composed from user-chosen names and hosts, so they flex and truncate;
+ * visibility and status come from a closed vocabulary and are pinned.
+ */
+const pathColumns: TableColumnWidth[] = [
+  { min: 160 }, // Published name
+  { min: 160 }, // Endpoint
+  { min: 160 }, // Dialer Path
+  128, // Visibility
+  116, // Status
+  52 // Actions
+];
+
 function pathLabel(path: AdminPath): string {
   return path.display_name || `${path.proxy_name} · ${path.name}`;
+}
+
+/** Endpoint cell text, shared by the visible label and its truncation tooltip. */
+function pathEndpoint(path: AdminPath): string {
+  return `${path.proxy_name} @ ${path.host_tag || path.host}`;
 }
 
 export function PathsPage() {
@@ -33,7 +53,7 @@ export function PathsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminPath | null>(null);
   const pathsQuery = useQuery({
     queryKey: adminKeys.paths,
-    queryFn: () => request<AdminPath[]>("/api/admin/paths"),
+    queryFn: ({ signal }) => request<AdminPath[]>("/api/admin/paths", { signal }),
     refetchInterval: refreshIntervals.slow
   });
   const toggleEnabled = useAdminMutation<AdminPath>(request, (req, path) =>
@@ -45,7 +65,10 @@ export function PathsPage() {
   const paths = pathsQuery.data ?? [];
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    // `min-w-0`: this div is a grid item, and without it the table's min-width
+    // becomes the page's min-width and the whole page scrolls sideways instead
+    // of the table.
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="Paths"
         description="Publish a Proxy through a specific Host, optionally using another Path as its Mihomo dialer."
@@ -65,7 +88,8 @@ export function PathsPage() {
               </p>
             </div>
             <TableCard>
-              <Table className="min-w-[900px]">
+              <Table layout="fixed" style={{ minWidth: tableMinWidth(pathColumns) }}>
+                <TableColgroup widths={pathColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
                     <Table.Head>Published name</Table.Head>
@@ -95,24 +119,26 @@ export function PathsPage() {
                       return (
                         <Table.Row key={path.id}>
                           <Table.Cell>
-                            <div className="flex min-w-48 items-center gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
                               <span className="truncate font-medium text-kumo-default" title={pathLabel(path)}>
                                 {pathLabel(path)}
                               </span>
-                              {path.managed ? <Badge variant="secondary">Managed</Badge> : null}
+                              {path.managed ? <Badge variant="secondary" className="shrink-0">Managed</Badge> : null}
                             </div>
-                            <div className="text-xs text-kumo-subtle">{path.name}</div>
+                            <div className="truncate text-xs text-kumo-subtle" title={path.name}>{path.name}</div>
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="whitespace-nowrap text-kumo-subtle">
-                              {path.proxy_name} @ {path.host_tag || path.host}
+                            <span className="block truncate text-kumo-subtle" title={pathEndpoint(path)}>
+                              {pathEndpoint(path)}
                             </span>
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="text-kumo-subtle">{dialer ? pathLabel(dialer) : "Direct"}</span>
+                            <span className="block truncate text-kumo-subtle" title={dialer ? pathLabel(dialer) : "Direct"}>
+                              {dialer ? pathLabel(dialer) : "Direct"}
+                            </span>
                           </Table.Cell>
                           <Table.Cell>
-                            <span className="whitespace-nowrap text-kumo-subtle">{VISIBILITY_LABELS[path.visibility]}</span>
+                            <span className="block truncate text-kumo-subtle">{VISIBILITY_LABELS[path.visibility]}</span>
                           </Table.Cell>
                           <Table.Cell>
                             <StatusBadge tone={path.enabled ? "success" : "neutral"}>
@@ -214,11 +240,11 @@ function PathEditor({
 
   const proxiesQuery = useQuery({
     queryKey: adminKeys.proxies,
-    queryFn: () => request<AdminProxiesResponse>("/api/admin/proxies?limit=500")
+    queryFn: ({ signal }) => request<AdminProxiesResponse>("/api/admin/proxies?limit=500", { signal })
   });
   const nodesQuery = useQuery({
     queryKey: adminKeys.nodes,
-    queryFn: () => request<AdminNode[]>("/api/admin/nodes")
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
   const loading = proxiesQuery.isLoading || nodesQuery.isLoading;
   const loadError = proxiesQuery.error ?? nodesQuery.error;

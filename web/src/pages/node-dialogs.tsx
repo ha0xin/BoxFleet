@@ -283,7 +283,7 @@ export function EditNodeDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Edit {node.name}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           Update the node's name, hosts, and API URL. Use Disable or Decommission to change its status.

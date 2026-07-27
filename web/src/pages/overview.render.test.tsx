@@ -184,6 +184,18 @@ describe("OverviewPage", () => {
     expect(screen.getByText("12")).toBeTruthy();
   });
 
+  it("passes the query signal to the polling series requests", async () => {
+    const fetchMock = stubSeriesFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    renderOverview();
+
+    // Both traffic groups plus the network-event series.
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
+    // The stub only declares the `input` argument, so reach past its arity.
+    const inits = fetchMock.mock.calls.map((call) => (call as unknown as [unknown, RequestInit?])[1]);
+    expect(inits.every((init) => init?.signal instanceof AbortSignal)).toBe(true);
+  });
+
   it("renders without trend lines when the series endpoints fail", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
     renderOverview();

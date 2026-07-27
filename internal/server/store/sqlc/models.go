@@ -30,6 +30,56 @@ type ConfigVersion struct {
 	PublishedAt sql.NullString `json:"published_at"`
 }
 
+type ConnectionEvent struct {
+	ID                string         `json:"id"`
+	NodeID            string         `json:"node_id"`
+	ProxyUserID       sql.NullString `json:"proxy_user_id"`
+	AuthName          string         `json:"auth_name"`
+	SourceIp          string         `json:"source_ip"`
+	TargetHost        string         `json:"target_host"`
+	TargetPort        int64          `json:"target_port"`
+	Domain            string         `json:"domain"`
+	Network           string         `json:"network"`
+	IpVersion         int64          `json:"ip_version"`
+	Protocol          string         `json:"protocol"`
+	Inbound           string         `json:"inbound"`
+	InboundType       string         `json:"inbound_type"`
+	Rule              string         `json:"rule"`
+	Outbound          string         `json:"outbound"`
+	OutboundType      string         `json:"outbound_type"`
+	Chain             string         `json:"chain"`
+	ConnectionsOpened int64          `json:"connections_opened"`
+	ConnectionsClosed int64          `json:"connections_closed"`
+	UplinkBytes       int64          `json:"uplink_bytes"`
+	DownlinkBytes     int64          `json:"downlink_bytes"`
+	DurationMsTotal   int64          `json:"duration_ms_total"`
+	AggregateKey      string         `json:"aggregate_key"`
+	BucketStart       string         `json:"bucket_start"`
+	WindowStart       string         `json:"window_start"`
+	WindowEnd         string         `json:"window_end"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
+}
+
+type ConnectionReport struct {
+	ID                      string `json:"id"`
+	NodeID                  string `json:"node_id"`
+	Sequence                int64  `json:"sequence"`
+	AgentBootID             string `json:"agent_boot_id"`
+	WindowStart             string `json:"window_start"`
+	WindowEnd               string `json:"window_end"`
+	ConnectionsObserved     int64  `json:"connections_observed"`
+	ConnectionsAttributed   int64  `json:"connections_attributed"`
+	ConnectionsUnattributed int64  `json:"connections_unattributed"`
+	ConnectionsOrphaned     int64  `json:"connections_orphaned"`
+	StreamResets            int64  `json:"stream_resets"`
+	DroppedBuckets          int64  `json:"dropped_buckets"`
+	BytesObserved           int64  `json:"bytes_observed"`
+	BytesAttributed         int64  `json:"bytes_attributed"`
+	ReportedAt              string `json:"reported_at"`
+	CreatedAt               string `json:"created_at"`
+}
+
 type DomainServiceOverride struct {
 	Suffix    string `json:"suffix"`
 	Service   string `json:"service"`
@@ -135,6 +185,17 @@ type NodeConfigStatus struct {
 	LastApplyStatus        string         `json:"last_apply_status"`
 	LastApplyError         string         `json:"last_apply_error"`
 	UpdatedAt              string         `json:"updated_at"`
+}
+
+type NodeConnectionTelemetry struct {
+	NodeID        string         `json:"node_id"`
+	Enabled       int64          `json:"enabled"`
+	ListenAddress string         `json:"listen_address"`
+	ListenPort    int64          `json:"listen_port"`
+	Secret        string         `json:"secret"`
+	RotatedAt     sql.NullString `json:"rotated_at"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
 }
 
 type NodeHeartbeat struct {

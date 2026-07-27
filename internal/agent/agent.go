@@ -87,6 +87,11 @@ type Agent struct {
 	// configMu guards the mutable parts of Config. Only the canonical node name
 	// changes at runtime, and it is read by every request goroutine.
 	configMu sync.RWMutex
+	// connectionMu guards the opt-in sing-box 1.14 connection telemetry
+	// collector, which the poll loop starts and stops as the applied config
+	// gains or loses an api service. See connections.go.
+	connectionMu sync.Mutex
+	connections  *connectionCollectorHandle
 }
 
 type ConfigResponse struct {
@@ -112,6 +117,16 @@ type State struct {
 	LastSystemLogSince  map[string]string    `json:"last_system_log_since"`
 	AppliedConfigHash   string               `json:"applied_config_hash"`
 	PendingTraffic      *model.TrafficReport `json:"pending_traffic,omitempty"`
+	// PendingConnections stages one connection telemetry report across the POST,
+	// exactly as PendingTraffic does. ConnectionSequence is its own counter so
+	// the two reports keep independent, gapless (boot id, sequence) idempotency
+	// keys.
+	PendingConnections *model.ConnectionReport `json:"pending_connections,omitempty"`
+	ConnectionSequence int64                   `json:"connection_sequence"`
+	// LastConnectionCloseMs is the newest connection close already reported. It
+	// survives agent restarts so sing-box's closed-connection replay ring cannot
+	// re-report what this node already sent.
+	LastConnectionCloseMs int64 `json:"last_connection_close_ms"`
 }
 
 type Runner interface {
@@ -605,6 +620,9 @@ func (a *Agent) reportRuntimeState(ctx context.Context, response ConfigResponse)
 		{"apply result", func(ctx context.Context) error { return a.ReportApplyResult(ctx, response, "applied", "") }},
 		{"heartbeat", func(ctx context.Context) error { return a.ReportHeartbeat(ctx, response, "ok") }},
 		{"traffic", a.ReportTraffic},
+		// Connection telemetry is a no-op unless the node is opted in and the
+		// collector produced something, so it costs an idle node nothing.
+		{"connections", a.ReportConnections},
 		{"network logs", a.ReportLogs},
 		{"system logs", a.ReportSystemLogs},
 	}
@@ -654,6 +672,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	go func() { errorsOut <- a.RunOperations(runCtx) }()
 	err = <-errorsOut
 	cancel()
+	// Stage the collector's final window before the process exits. Connection
+	// deltas live only in this process, so dropping them here would cost a whole
+	// poll interval on every restart.
+	a.flushConnectionsToState()
 	if err == nil {
 		return context.Cause(runCtx)
 	}
@@ -665,7 +687,13 @@ func (a *Agent) Run(ctx context.Context) error {
 // unreachable right after an update must not leave the guard pending, or the
 // next service start would silently roll the agent back to the old version.
 func (a *Agent) poll(ctx context.Context) {
-	if err := a.Once(ctx); err != nil {
+	err := a.Once(ctx)
+	// Reconciled even when the cycle failed: the collector follows the config
+	// already on disk, which a failed fetch or a rolled-back apply does not
+	// change. Run is the only caller, so one-shot `boxfleet-agent once` never
+	// starts a background collector.
+	a.reconcileConnectionCollector(ctx)
+	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
 		}

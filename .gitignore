@@ -38,3 +38,6 @@
 .idea/
 .vscode/
 *.swp
+
+# Claude Code local state, including agent worktrees (full repo copies)
+.claude/

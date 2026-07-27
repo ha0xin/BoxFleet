@@ -194,6 +194,50 @@ func TestAdminSystemLogsPageFiltersAndReportsTotal(t *testing.T) {
 	}
 }
 
+// The node status response is an adminNode, so it must carry the same
+// paused-vs-decommissioned signal the list and single-node endpoints do. A
+// hard-coded false here would read as "tokens revoked" for a healthy node.
+func TestAdminNodeStatusReportsTheActiveTokenSignal(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IssueNodeToken(ctx, "azus"); err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+
+	nodeStatus := func() adminNode {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, adminJSONRequest(t, http.MethodGet, "/api/admin/nodes/azus/status", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var node adminNode
+		if err := json.NewDecoder(rec.Body).Decode(&node); err != nil {
+			t.Fatal(err)
+		}
+		return node
+	}
+
+	paused := nodeStatus()
+	if !paused.HasActiveToken {
+		t.Fatalf("has_active_token = false for a node holding a token: %+v", paused)
+	}
+	if paused.Name != "azus" || paused.PublicHost != "203.0.113.10" {
+		t.Fatalf("node identity = %+v, want the full node fields", paused)
+	}
+
+	if err := store.RevokeNodeTokens(ctx, "azus"); err != nil {
+		t.Fatal(err)
+	}
+	if decommissioned := nodeStatus(); decommissioned.HasActiveToken {
+		t.Fatalf("has_active_token = true after revoking tokens: %+v", decommissioned)
+	}
+}
+
 func TestAdminSystemLogsRejectsAnUnknownNode(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)

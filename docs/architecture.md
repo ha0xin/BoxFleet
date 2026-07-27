@@ -24,7 +24,9 @@ required.
 
 Node report bodies are bounded so a node token cannot exhaust server memory:
 64 KiB for fixed-shape apply results and heartbeats, 1 MiB for journal and
-traffic batches, 256 KiB for operation progress. Over-limit requests get 413.
+traffic batches, 256 KiB for operation progress, 2 MiB for connection telemetry
+(the ingest caps a batch at 2000 pre-aggregated buckets). Over-limit requests
+get 413.
 The HTTP server sets read, write, and idle timeouts and shuts down gracefully.
 
 Read paths that decide whether a node keeps serving fail closed. A `GetNode` or
@@ -78,19 +80,29 @@ opt-out.
 
 ## Telemetry
 
-Two independent pipelines feed telemetry, and they share only
+Two pipelines run on every node, and they share only
 `(node, user, approximate time)`:
 
 - **Traffic.** The agent reads cumulative V2Ray API counters. A fresh state
   establishes a baseline; counter regression starts a new epoch. This avoids
-  losing traffic when a report fails or sing-box restarts.
+  losing traffic when a report fails or sing-box restarts. This is the only
+  source per-user billing reads.
 - **Network events.** The agent ships journal text from sing-box; the server
   parses it with regexes into per-minute aggregated `log_events`.
 
-Neither pipeline can be joined to the other at connection granularity, so bytes
-are never attributable to a destination host. The choice to keep both sources —
-and the conditions under which the journal parser is replaced — is recorded in
+Neither can be joined to the other at connection granularity, so on these two
+sources bytes are never attributable to a destination host. The choice to keep
+both — and the conditions under which the journal parser is replaced — is
 [ADR 0001](adr/0001-network-event-telemetry-source.md).
+
+A third pipeline exists and is **opt-in per node, off by default, and enabled
+nowhere**: sing-box 1.14's daemon gRPC connection stream, aggregated on the node
+into `connection_events`. It answers bytes-per-destination and session duration,
+which the other two structurally cannot, for the nodes that run it. It cannot be
+turned on fleet-wide — the fleet runs 1.13, whose parser rejects the config block
+it needs — and it never feeds billing. Rationale is
+[ADR 0002](adr/0002-opt-in-connection-telemetry.md); operation and contracts are
+in [connection telemetry](connection-telemetry.md).
 
 Bucketing and zero-fill are server concerns. `internal/server/db/series_common.go`
 is the single source of bucket truth (granularity derivation, span ceilings,
@@ -120,6 +132,7 @@ Admin telemetry endpoints, all under the admin prefix and behind
 | `GET /api/admin/network-events/series` | Bucketed connection counts plus the unbucketed action histogram, `group=total\|action\|node\|user` |
 | `GET /api/admin/network-events/services` | Connections and distinct hosts per service or category |
 | `GET /api/admin/network-events/hosts` | Per-host drill-down with its classification and match source |
+| `GET /api/admin/connection-events{,/series,/hosts,/nodes}` | The opt-in 1.14 stream — see [connection telemetry](connection-telemetry.md#reading-the-data) |
 | `GET/PUT /api/admin/service-overrides`, `DELETE .../{suffix}` | Operator classification overrides |
 
 `start` and `end` are RFC3339 and **required** on both `/series` endpoints — an
@@ -161,8 +174,8 @@ appear outdated.
 
 - Nodes run no database, Docker daemon, panel, or monitoring stack.
 - SQLite uses WAL, a busy timeout, explicit migrations, and bounded queries.
-- The supported renderer protocol is VLESS-Reality with
-  `xtls-rprx-vision`; adding a protocol requires server rendering, client output,
+- The supported renderer protocols are VLESS-Reality with `xtls-rprx-vision` and
+  Shadowsocks 2022; adding a protocol requires server rendering, client output,
   validation, and tests together.
 - Multi-admin authentication, quota enforcement, and rate limiting are not
   implemented.

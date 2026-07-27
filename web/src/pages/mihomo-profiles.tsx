@@ -87,12 +87,12 @@ export function MihomoProfilesPage() {
 
   const profilesQuery = useQuery({
     queryKey: adminKeys.mihomoProfiles,
-    queryFn: () => request<MihomoProfile[]>("/api/admin/mihomo/profiles"),
+    queryFn: ({ signal }) => request<MihomoProfile[]>("/api/admin/mihomo/profiles", { signal }),
     refetchInterval: refreshIntervals.slow
   });
   const templatesQuery = useQuery({
     queryKey: adminKeys.mihomoTemplates,
-    queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates"),
+    queryFn: ({ signal }) => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates", { signal }),
     refetchInterval: refreshIntervals.slow
   });
 
@@ -329,16 +329,16 @@ export function MihomoConfigurationPage() {
   const creating = !profileID;
   const usersQuery = useQuery({
     queryKey: adminKeys.users(false),
-    queryFn: () => request<AdminUser[]>("/api/admin/users"),
+    queryFn: ({ signal }) => request<AdminUser[]>("/api/admin/users", { signal }),
     enabled: creating
   });
   const templatesQuery = useQuery({
     queryKey: adminKeys.mihomoTemplates,
-    queryFn: () => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates")
+    queryFn: ({ signal }) => request<MihomoRewriteTemplate[]>("/api/admin/mihomo/rewrite-templates", { signal })
   });
   const profileQuery = useQuery({
     queryKey: adminKeys.mihomoProfile(profileID ?? "new"),
-    queryFn: () => request<MihomoProfile>(`/api/admin/mihomo/profiles/${profileID}`),
+    queryFn: ({ signal }) => request<MihomoProfile>(`/api/admin/mihomo/profiles/${profileID}`, { signal }),
     enabled: !creating
   });
   const error = usersQuery.error ?? templatesQuery.error ?? profileQuery.error;

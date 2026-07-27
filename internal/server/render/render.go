@@ -103,10 +103,17 @@ type vlessRealitySettings struct {
 }
 
 type singBoxConfig struct {
-	Log          *logConfig          `json:"log,omitempty"`
-	Inbounds     []any               `json:"inbounds,omitempty"`
-	Outbounds    []any               `json:"outbounds,omitempty"`
-	Route        *routeConfig        `json:"route,omitempty"`
+	Log       *logConfig   `json:"log,omitempty"`
+	Inbounds  []any        `json:"inbounds,omitempty"`
+	Outbounds []any        `json:"outbounds,omitempty"`
+	Route     *routeConfig `json:"route,omitempty"`
+	// Services is the sing-box 1.14 `services` block. It MUST stay omitempty:
+	// the production fleet runs 1.13, which rejects this key outright, so a
+	// node that has not opted in has to render byte-identically to the
+	// pre-1.14 output. Positioned between route and experimental to match
+	// option.Options upstream. TestRenderNodeConfigDefaultShapeIsUnchanged and
+	// TestRenderNodeConfigOptOutRestoresDefaultBytes pin the invariant.
+	Services     []any               `json:"services,omitempty"`
 	Experimental *experimentalConfig `json:"experimental,omitempty"`
 }
 
@@ -232,6 +239,61 @@ type v2rayAPIStats struct {
 	Users   []string `json:"users"`
 }
 
+// apiService is sing-box 1.14's option.APIServiceOptions, reduced to the four
+// keys BoxFleet sets. The embedded ListenOptions contribute `listen` (a
+// netip.Addr, so a hostname is not accepted) and `listen_port`; `secret` is the
+// Bearer token the daemon's authenticate() compares against.
+//
+// Nothing else is emitted on purpose. `dashboard` would fetch and serve a web
+// UI from the node, and the TLS container would put a certificate on a
+// loopback listener that does not need one — both are cost on a node whose
+// memory is a hard constraint.
+type apiService struct {
+	Type       string `json:"type"`
+	Tag        string `json:"tag"`
+	Listen     string `json:"listen"`
+	ListenPort int64  `json:"listen_port"`
+	Secret     string `json:"secret"`
+}
+
+// connectionTelemetryServiceTag names the service in the node config and in
+// sing-box's own logs.
+const connectionTelemetryServiceTag = "boxfleet-telemetry"
+
+// connectionTelemetryService returns the `services` entry for a node, or nil
+// when the node has not opted in — which is every node by default, because the
+// fleet runs 1.13 and this block does not parse there.
+//
+// It fails closed. The endpoint carries a control plane (StopService,
+// ReloadService, CloseAllConnections, TriggerDebugCrash) alongside the
+// telemetry stream, and upstream's authenticate() returns nil for an empty
+// secret rather than denying, so an under-specified row must abort the render
+// rather than produce a config that silently exposes it. The facade validates
+// the same two invariants on write; this is the check that survives a
+// hand-edited database row.
+func connectionTelemetryService(ctx context.Context, store *db.DB, nodeName string) (*apiService, error) {
+	config, ok, err := store.NodeConnectionTelemetryConfig(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || !config.Enabled {
+		return nil, nil
+	}
+	if err := db.ValidateConnectionTelemetryListen(config.ListenAddress, config.ListenPort); err != nil {
+		return nil, fmt.Errorf("node %s connection telemetry: %w", nodeName, err)
+	}
+	if err := db.ValidateConnectionTelemetrySecret(config.Secret); err != nil {
+		return nil, fmt.Errorf("node %s connection telemetry: %w", nodeName, err)
+	}
+	return &apiService{
+		Type:       "api",
+		Tag:        connectionTelemetryServiceTag,
+		Listen:     config.ListenAddress,
+		ListenPort: config.ListenPort,
+		Secret:     config.Secret,
+	}, nil
+}
+
 // emptyNodeConfig is a valid running sing-box config with no inbounds: it serves
 // nothing. Used both for nodes with no accesses and for disabled nodes.
 func emptyNodeConfig() singBoxConfig {
@@ -264,8 +326,16 @@ func RenderNodeConfig(ctx context.Context, store *db.DB, nodeName string) ([]byt
 	if err != nil {
 		return nil, err
 	}
+	// A node with no accesses serves nothing, so it has no connections to
+	// report and gets no telemetry service — the same config a disabled node
+	// gets. An opted-in node in this state simply has nothing for its collector
+	// to dial, which the collector already tolerates (it connects lazily).
 	if len(accesses) == 0 {
 		return json.MarshalIndent(emptyNodeConfig(), "", "  ")
+	}
+	telemetry, err := connectionTelemetryService(ctx, store, nodeName)
+	if err != nil {
+		return nil, err
 	}
 	inboundByName := make(map[string]any)
 	var inboundOrder []string
@@ -341,6 +411,11 @@ func RenderNodeConfig(ctx context.Context, store *db.DB, nodeName string) ([]byt
 				Stats:  v2rayAPIStats{Enabled: true, Users: statsUsers},
 			},
 		},
+	}
+	// Left nil for every node that has not opted in, which keeps `services`
+	// out of the marshalled output entirely.
+	if telemetry != nil {
+		cfg.Services = []any{telemetry}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

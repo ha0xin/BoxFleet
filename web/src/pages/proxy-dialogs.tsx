@@ -148,7 +148,7 @@ export function ProxyFormDialog({
 
   const nodesQuery = useQuery({
     queryKey: adminKeys.nodes,
-    queryFn: () => request<AdminNode[]>("/api/admin/nodes"),
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal }),
     enabled: !isEdit
   });
   const nodeItems = useMemo(
@@ -217,7 +217,7 @@ export function ProxyFormDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open || mutation.isPending ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+      <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">
           {isEdit ? `Edit ${state.proxy.name}` : "Create proxy"}
         </Dialog.Title>

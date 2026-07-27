@@ -31,7 +31,17 @@ import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
 import type { StatusTone } from "@/components/status-badge";
-import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import {
+  AdminPagination,
+  SortHead,
+  TableCard,
+  TableColgroup,
+  TableEmpty,
+  TableError,
+  TableLoading,
+  tableMinWidth
+} from "@/components/admin-table";
+import type { TableColumnWidth } from "@/components/admin-table";
 
 /**
  * Status vocabulary of the paged endpoint. These are the *derived* statuses the
@@ -112,6 +122,22 @@ export function rawBytes(traffic: TrafficVolume): number {
   return traffic.uplink_raw_bytes + traffic.downlink_raw_bytes;
 }
 
+/**
+ * Column widths, in table order. The quota meter and the user identity are the
+ * only cells whose useful width is open-ended, so they take the leftover space;
+ * a status badge, a byte figure, a grant count and a relative expiry all have a
+ * hard content ceiling and are pinned to it.
+ */
+const userColumns: TableColumnWidth[] = [
+  { min: 192 }, // User
+  120, // Status
+  116, // Traffic
+  { min: 192 }, // Quota — the meter plus its up/down legend
+  96, // Access
+  116, // Expires
+  52 // Actions
+];
+
 export function formatExpiry(value: string): string {
   if (!value) return "never";
   const time = new Date(value).getTime();
@@ -143,7 +169,7 @@ function QuotaMeter({ quota, traffic }: { quota: number; traffic: TrafficVolume 
   } as CSSProperties;
 
   return (
-    <div className="min-w-64">
+    <div className="min-w-0">
       <Meter
         label="Usage"
         value={value}
@@ -224,7 +250,10 @@ export function UsersPage() {
   }, [lastPage, loaded, page, setPage]);
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    // `min-w-0`: this div is a grid item, and without it the table's min-width
+    // becomes the page's min-width and the whole page scrolls sideways instead
+    // of the table.
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="Users"
         description="Manage proxy users, quotas, access counts, expiration, and traffic usage."
@@ -290,7 +319,8 @@ export function UsersPage() {
             </div>
 
             <TableCard>
-              <Table className="min-w-[1215px]">
+              <Table layout="fixed" style={{ minWidth: tableMinWidth(userColumns) }}>
+                <TableColgroup widths={userColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
                     <SortHead label="User" column="name" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
@@ -313,7 +343,7 @@ export function UsersPage() {
                     rows.map((row) => (
                       <Table.Row key={row.id}>
                         <Table.Cell sticky="left">
-                          <div className="flex min-w-52 items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
                             <div className="min-w-0">
                               <div className="truncate text-base font-medium text-kumo-default" title={row.name}>
@@ -331,19 +361,21 @@ export function UsersPage() {
                           </StatusBadge>
                         </Table.Cell>
                         <Table.Cell>
-                          <div className="whitespace-nowrap">
-                            <div className="text-kumo-default">{formatBytes(billableBytes(row.traffic))}</div>
-                            <div className="text-xs text-kumo-subtle">raw {formatBytes(rawBytes(row.traffic))}</div>
+                          <div className="min-w-0">
+                            <div className="truncate text-kumo-default">{formatBytes(billableBytes(row.traffic))}</div>
+                            <div className="truncate text-xs text-kumo-subtle">raw {formatBytes(rawBytes(row.traffic))}</div>
                           </div>
                         </Table.Cell>
                         <Table.Cell>
                           <QuotaMeter quota={row.global_quota_bytes} traffic={row.traffic} />
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{row.proxy_count}</span>
+                          <span className="block truncate text-kumo-subtle">{row.proxy_count}</span>
                         </Table.Cell>
                         <Table.Cell>
-                          <span className="whitespace-nowrap text-kumo-subtle">{formatExpiry(row.expire_at)}</span>
+                          <span className="block truncate text-kumo-subtle" title={row.expire_at || undefined}>
+                            {formatExpiry(row.expire_at)}
+                          </span>
                         </Table.Cell>
                         <Table.Cell className="text-right">
                           <RowActionsMenu label={`Actions for ${row.name}`}>

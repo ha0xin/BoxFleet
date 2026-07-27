@@ -60,7 +60,8 @@ variants.
 
 Shared design-system components (`src/components/`):
 
-- `admin-table.tsx` — `TableCard` (canonical table chrome), `SortHead`
+- `admin-table.tsx` — `TableCard` (canonical table chrome), `TableColgroup` /
+  `tableMinWidth` / `TableColumnWidth` (column sizing, see below), `SortHead`
   (aria-sort, optional `sticky="left"`), `TableEmpty` / `TableError` /
   `TableLoading`, and `AdminPagination`. Query errors render `TableError`, not
   the empty state. Empty tables show only `0 items` (no page-size control).
@@ -76,18 +77,126 @@ row actions require horizontal scrolling — never hand-rolled sticky classes.
 `useAdminMutation` shows an error toast by default; dialogs that render an
 inline error `Banner` pass `toastError: false`.
 
+## Dialog widths
+
+`<Dialog size>` sets a **fixed** width at `sm:` and above, and it is the only
+width control a dialog gets. The border-box totals are `sm` 288px, `base` 384px,
+`lg` 512px, `xl` 768px; subtract the 48px of `p-6` for usable content. Below
+640px the size variant drops out entirely and every dialog is `width: 100%`
+clamped to `calc(100vw - 2rem)`, so a phone renders all four sizes identically.
+
+Kumo 2.5.x behaved differently — the popup was `sm:w-auto` with the size prop
+supplying only a `min-width` floor, so a dialog was actually sized by its widest
+unwrappable content and the prop was close to decorative. Do not carry over
+layout intuitions from that era, and never restore the old behaviour with a
+`min-w-*` on the popup: that is the page-widening pattern documented below,
+moved inside a dialog.
+
+Pick the size from the widest row the form actually contains, and verify by
+measuring rather than by eye — no descendant may have `scrollWidth >
+clientWidth` unless it is a deliberate scroll container. A multi-column row is
+what forces the choice: `grid-cols-2` of labelled fields needs `lg`, because two
+`Input`s with labels like "Traffic multiplier" have a combined min-content width
+of ~390px and silently overflow `base`. `EditNodeDialog`'s four-column hosts
+repeater is `lg` for the same reason.
+
+## Table column widths
+
+Every list table declares its column widths. Kumo's `<Table>` is `w-full`, so
+under the default `layout="auto"` the browser spreads all surplus width
+proportionally across every column — a one-character "Config" cell ends up as
+wide as a hostname. The fix is to say what each column is worth:
+
+```tsx
+const nodeColumns: TableColumnWidth[] = [{ min: 104 }, 144, /* … */ 52];
+
+<TableCard>
+  <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
+    <TableColgroup widths={nodeColumns} />
+    …
+```
+
+- A **number** is an exact px width. Use it for content with a hard ceiling:
+  status badges, version strings, counts, relative timestamps, the kebab. Derive
+  it by measurement — render the table at `width: max-content` and read the
+  column's natural width — not by guessing.
+- **`{ min }`** marks a flexible column that takes the leftover width. Use it
+  only for genuinely open-ended text (names, hosts, endpoints, log messages).
+- Fixed table layout divides the leftover **equally** between flexible columns.
+  That is the one distribution every browser implements identically, so it is
+  what the helpers rely on. Percentage `<col>` widths do bias the split in
+  Chrome but over-constrain the table, and `calc()` percentages are ignored
+  entirely — do not reach for either. A column that must stay narrower than its
+  peers gets a px width instead of being made flexible.
+- `tableMinWidth` therefore reserves the *largest* flexible floor for every
+  flexible column. Below that width `TableCard`'s scroll container takes over,
+  which is the correct behaviour, not a bug.
+- Never put `min-w-[NNNNpx]` on a `<Table>`. It is a page-wide constraint
+  wearing a table's clothing — see below.
+
+Fixed layout means overflow is visible instead of self-correcting, so **every
+cell in a flexible column must truncate and carry a tooltip**: `block truncate`
+plus `title` on the span, or `flex min-w-0` with `min-w-0 truncate` children when
+the cell has an icon or an arrow. A cell with `whitespace-nowrap` and no
+`overflow` will spill across the column border.
+
+### Page roots need `min-w-0`
+
+Admin page roots are grid items (`App.tsx` keys the route by pathname inside a
+`grid`), and a grid item's default `min-width: auto` means it can never be
+narrower than its min-content size. A table's minimum width therefore leaks
+straight *past* `TableCard`'s `overflow-x-auto` and widens the page: the sidebar
+`<main>` computes `overflow-x: auto` and the whole page slides sideways while the
+table's own scroll container never scrolls at all — which also silently defeats
+`sticky="left"`, because the sticky column is pinned to a scrollport that is not
+the one moving. Every page root carries `min-w-0` for this reason:
+
+```tsx
+<div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
+```
+
+Verify with geometry, never by eye: the sidebar `<main>` must have
+`scrollWidth - clientWidth === 0` at every viewport, and `.bf-table-scroll` must
+be the element that scrolls when a table is genuinely wider than its card.
+
+### Draggable column resizing
+
+Kumo does ship `Table.ResizeHandle` (`Table.ResizeHandle` in
+`node_modules/@cloudflare/kumo/dist/src/components/table/table.d.ts`;
+`Table.Head` is already `group relative` so the handle positions itself). It is
+an affordance only — no drag logic, no state, no persistence — and Kumo's own
+docs pair it with TanStack Table:
+`refs/kumo/packages/kumo-docs-astro/src/pages/components/table.mdx`. **`npx kumo
+docs Table` lists it with empty props and no example and never mentions
+resizing**, the same CLI blind spot recorded above for charts.
+
+It is deliberately not wired up. Resizing is an escape hatch on top of good
+defaults, not a substitute for them, and it would cost: converting the
+hand-rolled pages to TanStack column definitions, a persistence layer, and a
+keyboard path (`getResizeHandler` binds only mouse and touch, so shipping it
+as-is adds a focusable control per header that does nothing on Enter). If it is
+ever added, `layout="fixed"` plus `TableColgroup` is already the substrate — feed
+the widths from `column.getSize()` — and it should start on a page that is
+already TanStack-driven. Pass `className="bg-kumo-elevated"` to the handle so it
+matches the compact header; Kumo hardcodes `bg-kumo-base`.
+
 ## Charts
 
-**Kumo ships a chart system that `npx kumo ls` does not list.** The CLI catalog
-covers 42 components and omits charts entirely; `npx kumo docs Chart` reports
-"Component not found". `@cloudflare/kumo` nevertheless re-exports `Chart`,
-`ChartPalette`, `TimeseriesChart`, `ChartLegend`, and `SankeyChart` from its root
-barrel. Do not conclude from the CLI that Kumo has no charts — check
-`node_modules/@cloudflare/kumo/dist/src/components/chart/*.d.ts`, which is the
-authority for the installed version, and cross-read
-`refs/kumo/packages/kumo/src/components/chart/` for behaviour. Re-run the CLI
-after a Kumo upgrade in case the catalog has caught up; until it does, these
-APIs can change without the CLI ever surfacing it.
+**The CLI catalog is incomplete, and how incomplete changes between releases.**
+Through 2.5.x it covered 42 components and omitted charts entirely; `npx kumo
+docs Chart` reported "Component not found". As of 2.8.0 it lists 48 and the
+catalog has caught up on the chart *components* — `Chart`, `TimeseriesChart`,
+`SankeyChart`, `BubbleMap`, and `ChoroplethMap` are all listed, and `npx kumo
+docs TimeseriesChart` returns full props and examples. It has **not** caught up
+on `ChartLegend` or `ChartPalette`, both of which this app uses and both of
+which still report "Component not found".
+
+So the rule stands, just for a smaller surface: never conclude from the CLI that
+an export does not exist. `node_modules/@cloudflare/kumo/dist/src/components/chart/*.d.ts`
+is the authority for the installed version. `refs/kumo/` is a checkout pinned to
+an older release and goes stale the moment Kumo is upgraded — cross-read it for
+behaviour only after confirming the version matches, never for API shape. Re-run
+`npx kumo ls` after each upgrade and correct this paragraph.
 
 `echarts` is Kumo's own declared **optional** peer dependency, so using it is
 policy-compliant. Kumo's chart components take the core instance as a prop
@@ -123,6 +232,22 @@ are tuned for a 16px badge, chart semantics are deliberately softer, and a canva
 cannot read CSS variables anyway. Per-action breakdowns stay as `StatusBadge`
 plus a count — a dot, a label, and a number — rather than a stacked-by-action
 bar chart.
+
+### An accepted contrast deviation on Button
+
+Kumo 2.6.0 gave the `primary` and `destructive` Button variants token-derived
+gradient fills. Measured white-on-fill contrast in light mode fell below WCAG AA
+as a result — primary 4.53:1 → 3.63:1, destructive 3.81:1 → 3.13:1. Dark mode
+improved. This is upstream styling, it was reviewed, and it is **accepted as-is**:
+do not override the variant tokens locally to "fix" it. Overriding would fork the
+button treatment away from Kumo for every future release, to chase a value
+upstream owns. Re-measure after each Kumo bump and revisit only if it regresses
+further or upstream ships a correction.
+
+Note that this is the button *fill*, not `text-kumo-danger`, which is a separate
+token (`--text-color-kumo-danger`) and measures 6.64:1 on `bg-kumo-base` in dark
+mode. The two are easy to conflate — a pre-upgrade review did exactly that and
+raised a false alarm about the publish strip being unreadable.
 
 **The server owns bucketing, zero-fill, and ordering.** Series points arrive
 contiguous and oldest-first; render them verbatim. Never bucket, fill, or sort

@@ -43,6 +43,13 @@ export const adminKeys = {
   networkEventSeries: (filters: object) => ["admin", "network-event-series", filters] as const,
   networkEventServices: (filters: object) => ["admin", "network-event-services", filters] as const,
   networkEventHosts: (filters: object) => ["admin", "network-event-hosts", filters] as const,
+  // Connection telemetry keys stay distinct from the network-event ones: the
+  // two producers answer different questions over different tables, and a
+  // shared key would let a journal response satisfy a stream query.
+  connectionTelemetryNodes: ["admin", "connection-telemetry-nodes"] as const,
+  connectionEvents: (filters: object) => ["admin", "connection-events", filters] as const,
+  connectionSeries: (filters: object) => ["admin", "connection-series", filters] as const,
+  connectionHosts: (filters: object) => ["admin", "connection-hosts", filters] as const,
   serviceOverrides: ["admin", "service-overrides"] as const,
   userAccess: (name: string) => ["admin", "user-access", name] as const,
   userConnection: (name: string) => ["admin", "user-connection-info", name] as const,

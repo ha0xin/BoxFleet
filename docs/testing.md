@@ -27,6 +27,8 @@ must exist before Go tests because the server embeds them.
 - `internal/agent`: fake the command runner, service manager, filesystem-facing
   boundaries and HTTP servers. Unit tests must never invoke real `sing-box`,
   `systemctl`, or `journalctl`.
+- `internal/singboxapi`: the vendored proto contract and the gRPC client, both
+  exercised against an in-process fake daemon. See below.
 - `web/src/**/*.test.*`: API parsing, query serialization, hooks and mutation
   ordering under Vitest.
 - `web/e2e`: real server plus Vite, covering resource lifecycle, Mihomo workflow,
@@ -78,6 +80,64 @@ behavior. Treat a failure as a real signal before adjusting the assertion.
   `internal/servicecatalog/data/services.tsv` and asserts every rule classifies
   to a non-empty label and category, so a bad regeneration cannot ship blank UI
   groups. Run `go test ./internal/servicecatalog/...` after any dataset bump.
+
+- **Upstream proto conformance.** `internal/singboxapi/daemonpb` diffs the
+  vendored descriptor against
+  `testdata/upstream-v1.14.0-beta.2.descriptorset.binpb`, a committed copy of the
+  real compiled upstream descriptor. See
+  [connection telemetry](#connection-telemetry).
+
+- **Default node config shape.** `TestRenderNodeConfigDefaultShapeIsUnchanged`
+  and `TestRenderNodeConfigOptOutRestoresDefaultBytes` assert that a node without
+  connection telemetry renders byte-identically to the pre-1.14 output, and that
+  opting out restores those exact bytes. The 1.14 `services` block does not parse
+  on the 1.13 the fleet runs, so a leak into the default path would break every
+  node.
+
+## Connection telemetry
+
+Every test in this feature runs in-process. **No test starts a real `sing-box`,
+and none needs a 1.14 binary** — which is the point, since the pinned build is
+1.13 and cannot serve the stream at all.
+
+- **Fake gRPC daemon.** `internal/singboxapi/client_test.go` and
+  `internal/agent/connections_test.go` each stand up a real gRPC server on
+  `127.0.0.1:0` and script the connection stream against it. The auth
+  interceptor is a faithful copy of upstream's `daemon/server.go` **including
+  its empty-secret bypass**: reproducing the real check, rather than a convenient
+  approximation, is what makes the credential tests mean anything. A real
+  loopback listener is used rather than `bufconn`, matching
+  `internal/v2raystats/client_test.go`, so the transport, the metadata
+  propagation and the client's loopback validation are all exercised for real.
+
+  `TestEmptyDaemonSecretAcceptsAnything` pins the upstream bypass itself. If
+  upstream ever fixes it, that test fails and tells the next person the rationale
+  for `ErrEmptySecret` has changed.
+
+- **Proto conformance, mechanically.** A hand-transcribed field table is a second
+  thing that can be wrong, silently. Instead the real upstream descriptor is
+  committed as a fixture and diffed field by field.
+  `TestVendoredFieldsMatchUpstream` fails on any number, name, type or
+  cardinality change, and on any upstream field that is not vendored and not in
+  the explicit omission allow-list — currently exactly
+  `{Connection.14, Connection.15}`. An accidental omission decodes as a zero
+  value and loses data quietly, so it must fail as loudly as a wrong field
+  number. **These diffs are findings to investigate, not chores to regenerate
+  away.** Procedure for moving the pin:
+  [`internal/singboxapi/README.md`](../internal/singboxapi/README.md).
+
+- **Query plans.** `TestConnectionTelemetryReadPathsUseBoundedIndexes` holds
+  `connection_events` to the same standard as `log_events`: the range read, the
+  host ranking, the node/user filters and the retention delete must all use a
+  bounded or covering index, never a table scan.
+
+- **Hostile ingest.** `RecordConnectionReport` is tested against the payloads a
+  compromised node token could send — negative and near-`int64`-max measures,
+  over-length hosts, out-of-range ports, unparseable bucket times, replayed
+  sequences. Buckets are clamped or dropped, never stored half-formed, and a
+  replay is skipped whole. Bytes are summed on ingest, so a partially applied
+  replay is unrecoverable; that is what the report-level idempotency guard is
+  for.
 
 ## Browser tests
 
