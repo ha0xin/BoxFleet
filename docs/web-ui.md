@@ -233,6 +233,22 @@ cannot read CSS variables anyway. Per-action breakdowns stay as `StatusBadge`
 plus a count — a dot, a label, and a number — rather than a stacked-by-action
 bar chart.
 
+### An accepted contrast deviation on Button
+
+Kumo 2.6.0 gave the `primary` and `destructive` Button variants token-derived
+gradient fills. Measured white-on-fill contrast in light mode fell below WCAG AA
+as a result — primary 4.53:1 → 3.63:1, destructive 3.81:1 → 3.13:1. Dark mode
+improved. This is upstream styling, it was reviewed, and it is **accepted as-is**:
+do not override the variant tokens locally to "fix" it. Overriding would fork the
+button treatment away from Kumo for every future release, to chase a value
+upstream owns. Re-measure after each Kumo bump and revisit only if it regresses
+further or upstream ships a correction.
+
+Note that this is the button *fill*, not `text-kumo-danger`, which is a separate
+token (`--text-color-kumo-danger`) and measures 6.64:1 on `bg-kumo-base` in dark
+mode. The two are easy to conflate — a pre-upgrade review did exactly that and
+raised a false alarm about the publish strip being unreadable.
+
 **The server owns bucketing, zero-fill, and ordering.** Series points arrive
 contiguous and oldest-first; render them verbatim. Never bucket, fill, or sort
 client-side — the bug this replaced aggregated one page of table rows and changed
