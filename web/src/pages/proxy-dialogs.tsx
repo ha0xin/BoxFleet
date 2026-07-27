@@ -148,7 +148,7 @@ export function ProxyFormDialog({
 
   const nodesQuery = useQuery({
     queryKey: adminKeys.nodes,
-    queryFn: () => request<AdminNode[]>("/api/admin/nodes"),
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal }),
     enabled: !isEdit
   });
   const nodeItems = useMemo(

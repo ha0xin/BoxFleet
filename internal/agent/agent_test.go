@@ -383,6 +383,80 @@ func (r *recordingRunner) StreamLines(context.Context, string, []string, func(st
 	return nil
 }
 
+func TestOnceDisabledStopsUnlessActiveStateConfirmsDown(t *testing.T) {
+	t.Parallel()
+	// Only a settled "inactive"/"failed" is proof the unit is down. A unit that is
+	// still transitioning — including one *stuck* deactivating — must keep getting
+	// the (idempotent) stop, otherwise a wedged shutdown would look like a
+	// successfully disabled node forever.
+	for _, tc := range []struct {
+		activeState string
+		wantStops   int
+	}{
+		{"active", 1},
+		{"activating", 1},
+		{"deactivating", 1},
+		{"inactive", 0},
+		{"failed", 0},
+	} {
+		t.Run(tc.activeState, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/node/config" {
+					w.Header().Set("X-BoxFleet-Node-State", "disabled")
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			tmp := t.TempDir()
+			runner := &fixedStateRunner{state: tc.activeState}
+			a := New(Config{
+				NodeName:        "azus",
+				Token:           "secret",
+				ServerURL:       server.URL,
+				SingBoxPath:     "sing-box",
+				SingBoxConfig:   filepath.Join(tmp, "sing-box.json"),
+				SingBoxService:  "sing-box.service",
+				StatePath:       filepath.Join(tmp, "state.json"),
+				V2RayAPIAddress: "127.0.0.1:1",
+			})
+			a.Runner = runner
+			if err := a.Once(context.Background()); err != nil {
+				t.Fatalf("Once: %v", err)
+			}
+			if runner.stops != tc.wantStops {
+				t.Fatalf("stops = %d, want %d for ActiveState=%s", runner.stops, tc.wantStops, tc.activeState)
+			}
+		})
+	}
+}
+
+// fixedStateRunner reports one constant `systemctl show ActiveState` value,
+// including while it is being stopped, so a wedged unit can be simulated.
+type fixedStateRunner struct {
+	state string
+	stops int
+}
+
+func (r *fixedStateRunner) Run(_ context.Context, name string, args ...string) error {
+	if name == "systemctl" && len(args) == 2 && args[0] == "stop" {
+		r.stops++
+	}
+	return nil
+}
+
+func (r *fixedStateRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	if name == "systemctl" && len(args) >= 1 && args[0] == "show" {
+		return []byte(r.state + "\n"), nil
+	}
+	return []byte("sing-box test"), nil
+}
+
+func (r *fixedStateRunner) StreamLines(context.Context, string, []string, func(string) bool) error {
+	return nil
+}
+
 func TestOnceRestartsWhenServiceNotConfirmedActive(t *testing.T) {
 	t.Parallel()
 	config := []byte(`{"inbounds":[]}`)

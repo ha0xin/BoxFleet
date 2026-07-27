@@ -759,12 +759,23 @@ func adminRestoreNodeHandler(store *db.DB) http.HandlerFunc {
 
 func adminNodeStatusHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		status, err := store.GetNodeConfigStatus(r.Context(), chi.URLParam(r, "node"))
+		node, err := store.GetNode(r.Context(), chi.URLParam(r, "node"))
 		if err != nil {
 			writeAdminError(w, err)
 			return
 		}
-		writeJSON(w, adminNodeFromStatus(status))
+		status, err := store.GetNodeConfigStatus(r.Context(), node.Name)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		resp, err := adminNodeResponse(r.Context(), store, node)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		applyAdminNodeStatus(&resp, status)
+		writeJSON(w, resp)
 	}
 }
 
@@ -1721,17 +1732,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 			item.ActiveOperation = &operationCopy
 		}
 		if status, ok := statusByNode[node.Name]; ok {
-			statusItem := adminNodeFromStatus(status)
-			item.TargetVersion = statusItem.TargetVersion
-			item.CurrentVersion = statusItem.CurrentVersion
-			item.ApplyStatus = statusItem.ApplyStatus
-			item.ApplyError = statusItem.ApplyError
-			item.LatestHeartbeat = statusItem.LatestHeartbeat
-			item.AgentVersion = statusItem.AgentVersion
-			item.AgentGOOS = statusItem.AgentGOOS
-			item.AgentGOARCH = statusItem.AgentGOARCH
-			item.Capabilities = statusItem.Capabilities
-			item.SingBoxVersion = statusItem.SingBoxVersion
+			applyAdminNodeStatus(&item, status)
 		}
 		out = append(out, item)
 	}
@@ -1977,21 +1978,21 @@ func adminSystemLogs(logs []db.SystemLog) []adminSystemLog {
 	return out
 }
 
-func adminNodeFromStatus(status db.NodeConfigStatus) adminNode {
-	return adminNode{
-		ID:              status.NodeID,
-		Name:            status.NodeName,
-		TargetVersion:   nullInt(status.TargetVersion),
-		CurrentVersion:  nullInt(status.CurrentVersion),
-		ApplyStatus:     status.LastApplyStatus,
-		ApplyError:      status.LastApplyError,
-		LatestHeartbeat: nullString(status.LatestHeartbeat),
-		AgentVersion:    status.AgentVersion,
-		AgentGOOS:       status.AgentGOOS,
-		AgentGOARCH:     status.AgentGOARCH,
-		Capabilities:    status.Capabilities,
-		SingBoxVersion:  status.SingBoxVersion,
-	}
+// applyAdminNodeStatus overlays the config/apply projection onto a node
+// response. A status row alone can never produce an adminNode: has_active_token
+// is not derivable from it, and a response that silently reported false would
+// read as decommissioned.
+func applyAdminNodeStatus(item *adminNode, status db.NodeConfigStatus) {
+	item.TargetVersion = nullInt(status.TargetVersion)
+	item.CurrentVersion = nullInt(status.CurrentVersion)
+	item.ApplyStatus = status.LastApplyStatus
+	item.ApplyError = status.LastApplyError
+	item.LatestHeartbeat = nullString(status.LatestHeartbeat)
+	item.AgentVersion = status.AgentVersion
+	item.AgentGOOS = status.AgentGOOS
+	item.AgentGOARCH = status.AgentGOARCH
+	item.Capabilities = status.Capabilities
+	item.SingBoxVersion = status.SingBoxVersion
 }
 
 func proxySettingsJSON(payload adminProxyPayload) (string, error) {

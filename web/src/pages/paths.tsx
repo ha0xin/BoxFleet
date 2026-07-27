@@ -53,7 +53,7 @@ export function PathsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminPath | null>(null);
   const pathsQuery = useQuery({
     queryKey: adminKeys.paths,
-    queryFn: () => request<AdminPath[]>("/api/admin/paths"),
+    queryFn: ({ signal }) => request<AdminPath[]>("/api/admin/paths", { signal }),
     refetchInterval: refreshIntervals.slow
   });
   const toggleEnabled = useAdminMutation<AdminPath>(request, (req, path) =>
@@ -240,11 +240,11 @@ function PathEditor({
 
   const proxiesQuery = useQuery({
     queryKey: adminKeys.proxies,
-    queryFn: () => request<AdminProxiesResponse>("/api/admin/proxies?limit=500")
+    queryFn: ({ signal }) => request<AdminProxiesResponse>("/api/admin/proxies?limit=500", { signal })
   });
   const nodesQuery = useQuery({
     queryKey: adminKeys.nodes,
-    queryFn: () => request<AdminNode[]>("/api/admin/nodes")
+    queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
   const loading = proxiesQuery.isLoading || nodesQuery.isLoading;
   const loadError = proxiesQuery.error ?? nodesQuery.error;

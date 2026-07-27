@@ -127,15 +127,34 @@ function completedCampaign(nodeNames: string[]): NodeUpdateCampaignDetail {
   return detail;
 }
 
+// Mirrors internal/model.Capability*; a current agent reports all of them on
+// every heartbeat and the Nodes page gates managed updates on them.
+const agentCapabilities = [
+  "operations.v1",
+  "update.agent.v1",
+  "update.sing_box.v1",
+  "download.streaming.v1",
+  "install.versioned.v1",
+  "restart_resume.agent.v1",
+  "rollback.sing_box.v1"
+] as const;
+
+// The server derives a stable id per stored host row (see legacyNodeHostID), so
+// reordering or removing a sibling never renumbers the survivors. Mirror that:
+// Paths stores host_id, and an id that shifts under an edit breaks the link.
+function mockHostID(nodeID: string, host: string): string {
+  return `host_${nodeID}_${host.replace(/[^a-z0-9]+/gi, "_")}`;
+}
+
 const nodes: AdminNode[] = [
   {
     id: "node_tokyo",
     name: "tokyo",
     public_host: "tokyo.example.net",
     hosts: [
-      { host: "tokyo.example.net", tag: "", selected: true },
-      { host: "203.0.113.10", tag: "ipv4", selected: true },
-      { host: "2606:4700::6810:84e5", tag: "ipv6", selected: false }
+      { id: "host_tokyo_1", host: "tokyo.example.net", tag: "", selected: true },
+      { id: "host_tokyo_2", host: "203.0.113.10", tag: "ipv4", selected: true },
+      { id: "host_tokyo_3", host: "2606:4700::6810:84e5", tag: "ipv6", selected: false }
     ],
     api_base_url: "https://203.0.113.10:18080",
     status: "active",
@@ -146,6 +165,7 @@ const nodes: AdminNode[] = [
     apply_status: "applied",
     latest_heartbeat: iso(20_000),
     agent_version: "0.4.1",
+    capabilities: [...agentCapabilities],
     has_active_token: true,
     deleted_at: ""
   },
@@ -153,6 +173,7 @@ const nodes: AdminNode[] = [
     id: "node_frankfurt",
     name: "frankfurt",
     public_host: "198.51.100.22",
+    hosts: [{ id: "host_frankfurt_1", host: "198.51.100.22", tag: "", selected: true }],
     api_base_url: "https://198.51.100.22:18080",
     status: "active",
     sing_box_version: "1.9.3",
@@ -162,6 +183,7 @@ const nodes: AdminNode[] = [
     apply_status: "pending",
     latest_heartbeat: iso(45_000),
     agent_version: "0.4.1",
+    capabilities: [...agentCapabilities],
     has_active_token: true,
     deleted_at: ""
   },
@@ -169,6 +191,7 @@ const nodes: AdminNode[] = [
     id: "node_singapore",
     name: "singapore",
     public_host: "192.0.2.31",
+    hosts: [{ id: "host_singapore_1", host: "192.0.2.31", tag: "", selected: true }],
     api_base_url: "https://192.0.2.31:18080",
     status: "degraded",
     sing_box_version: "1.9.1",
@@ -179,6 +202,7 @@ const nodes: AdminNode[] = [
     apply_error: "sing-box check failed: timeout dialing reality handshake",
     latest_heartbeat: iso(3 * HOUR),
     agent_version: "0.3.9",
+    capabilities: [...agentCapabilities],
     has_active_token: true,
     deleted_at: ""
   },
@@ -187,20 +211,25 @@ const nodes: AdminNode[] = [
     id: "node_osaka",
     name: "osaka",
     public_host: "203.0.113.55",
+    hosts: [{ id: "host_osaka_1", host: "203.0.113.55", tag: "", selected: true }],
     api_base_url: "https://203.0.113.55:18080",
     status: "disabled",
     sing_box_version: "1.9.3",
     last_seen_at: iso(2 * HOUR),
     latest_heartbeat: iso(2 * HOUR),
     agent_version: "0.4.1",
+    capabilities: [...agentCapabilities],
     has_active_token: true,
     deleted_at: ""
   },
   {
     // Decommissioned (disabled, tokens revoked) — menu shows re-enroll, not Enable.
+    // An agent this old predates the operations protocol, so it reports no
+    // capabilities and the row menu must not offer managed updates.
     id: "node_berlin",
     name: "berlin",
     public_host: "198.51.100.77",
+    hosts: [{ id: "host_berlin_1", host: "198.51.100.77", tag: "", selected: true }],
     api_base_url: "",
     status: "disabled",
     sing_box_version: "1.9.0",
@@ -1754,14 +1783,21 @@ const routes: Route[] = [
     pattern: /^\/api\/admin\/nodes\/bootstrap$/,
     handler: ({ body }): AdminNodeBootstrap => {
       const name = (body?.name as string) || `node-${nodes.length}`;
+      const publicHost = (body?.public_host as string) || "";
       const node: AdminNode = {
         id: `node_${name}`,
         name,
-        public_host: (body?.public_host as string) || "",
+        public_host: publicHost,
+        hosts: publicHost
+          ? [{ id: mockHostID(`node_${name}`, publicHost), host: publicHost, tag: "", selected: true }]
+          : [],
         api_base_url: "",
         status: "pending",
         sing_box_version: "",
         last_seen_at: "",
+        // Bootstrap issues the node's first token, so the row is a pending
+        // enrollment rather than a decommissioned node.
+        has_active_token: true,
         deleted_at: ""
       };
       nodes.push(node);
@@ -1799,12 +1835,16 @@ const routes: Route[] = [
         if (Array.isArray(body.hosts)) {
           const hosts = (body.hosts as AdminNode["hosts"]) ?? [];
           if (hosts.length > 0) {
-            node.hosts = hosts;
+            // The server mints an id for every host row it stores; a host that
+            // reaches Paths without one cannot be selected as an endpoint.
+            node.hosts = hosts.map((host) => ({ ...host, id: host.id || mockHostID(node.id, host.host) }));
             node.public_host = hosts[0].host;
           }
         } else if (typeof body.public_host === "string") {
           node.public_host = body.public_host;
-          node.hosts = [{ host: body.public_host, tag: "", selected: true }];
+          node.hosts = [
+            { id: mockHostID(node.id, body.public_host), host: body.public_host, tag: "", selected: true }
+          ];
         }
         if (typeof body.api_base_url === "string") node.api_base_url = body.api_base_url;
         if (body.status === "active" || body.status === "disabled") node.status = body.status;

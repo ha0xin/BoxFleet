@@ -128,7 +128,8 @@ function useTrafficTrend(trend: TrendWindow, group: "total" | "node") {
   const params = { ...trend, group, limit: group === "node" ? NODE_TREND_LIMIT : undefined };
   return useQuery({
     queryKey: adminKeys.trafficSeries(params),
-    queryFn: () => request<TrafficSeriesResponse>(`/api/admin/traffic/series${queryString(params)}`),
+    queryFn: ({ signal }) =>
+      request<TrafficSeriesResponse>(`/api/admin/traffic/series${queryString(params)}`, { signal }),
     staleTime: 60_000,
     // Late-arriving node reports can still merge into buckets inside the window.
     refetchInterval: refreshIntervals.slow
@@ -140,7 +141,8 @@ function useNetworkEventTrend(trend: TrendWindow) {
   const params = { ...trend, group: "total" };
   return useQuery({
     queryKey: adminKeys.networkEventSeries(params),
-    queryFn: () => request<NetworkEventSeriesResponse>(`/api/admin/network-events/series${queryString(params)}`),
+    queryFn: ({ signal }) =>
+      request<NetworkEventSeriesResponse>(`/api/admin/network-events/series${queryString(params)}`, { signal }),
     staleTime: 60_000,
     refetchInterval: refreshIntervals.slow
   });
