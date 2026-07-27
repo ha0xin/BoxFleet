@@ -71,7 +71,7 @@ const (
 	// recomputed — one hostile int64 would poison a row permanently.
 	maxConnectionBucketBytes       = int64(4) << 40
 	maxConnectionBucketConnections = int64(10_000_000)
-	maxConnectionBucketDurationMs  = int64(30*24*3600) * 1000 * 1000
+	maxConnectionBucketDurationMs  = int64(30*24*3600) * 1000
 
 	// String ceilings. Every one of these arrives from a node, which is a
 	// lower-trust domain; the request body limit bounds the batch but not any

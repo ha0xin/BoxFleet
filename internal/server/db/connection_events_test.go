@@ -264,6 +264,23 @@ func TestRecordConnectionReportClampsHostileValues(t *testing.T) {
 	}
 }
 
+// The clamp assertions above compare against the constants themselves, so they
+// hold for any value and cannot catch a wrong unit. This pins the units: the
+// ceiling shipped as seconds-to-microseconds once, which made it 1000x too
+// large and left the hostile-payload guard doing nothing.
+func TestConnectionBucketCeilingUnits(t *testing.T) {
+	const thirtyDaysMs = int64(30) * 24 * 60 * 60 * 1000
+	if maxConnectionBucketDurationMs != thirtyDaysMs {
+		t.Errorf("duration ceiling = %d ms (%.1f days), want %d ms (30 days)",
+			maxConnectionBucketDurationMs,
+			float64(maxConnectionBucketDurationMs)/float64(24*60*60*1000),
+			thirtyDaysMs)
+	}
+	if maxConnectionBucketBytes != int64(4)<<40 {
+		t.Errorf("byte ceiling = %d, want 4 TiB", maxConnectionBucketBytes)
+	}
+}
+
 // A node does not get to place its own rows on the time axis: whatever it
 // sends is re-truncated to the bucket grid server-side.
 func TestRecordConnectionReportRetruncatesBucketStart(t *testing.T) {

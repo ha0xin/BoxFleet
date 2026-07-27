@@ -247,9 +247,16 @@ so a partial ranking cannot read as a complete one.
 long-lived session contributes bytes to several consecutive buckets, so summing
 "connections" must use `opened`.
 
-The admin UI does not read these endpoints yet. Query keys, TypeScript types and
-mock fixtures exist (`web/src/admin/query.ts`, `web/src/types.ts`,
-`web/mocks/admin.ts`); the page is not wired.
+The Network Events page reads these through a **Connection stream** panel. It
+queries `/connection-events/nodes` first and renders nothing but a short
+explanation when no node is opted in — which is every node today — so the panel
+never shows as an empty table that reads like breakage. When a node is opted in
+the panel makes clear it covers only those nodes, not the fleet, because the
+journal-based table above it covers everything.
+
+Byte figures in that panel always carry the attribution ratio from the coverage
+counters. Do not present them without it: they under-count by an amount that
+varies with load and cannot be bounded.
 
 ## Rolling back
 
