@@ -108,9 +108,9 @@ type singBoxConfig struct {
 	Outbounds []any        `json:"outbounds,omitempty"`
 	Route     *routeConfig `json:"route,omitempty"`
 	// Services is the sing-box 1.14 `services` block. It MUST stay omitempty:
-	// the production fleet runs 1.13, which rejects this key outright, so a
-	// node that has not opted in has to render byte-identically to the
-	// pre-1.14 output. Positioned between route and experimental to match
+	// mixed-version rollout and rollback leave 1.13 nodes in the fleet, and they
+	// reject this key outright. A node that has not opted in has to render
+	// byte-identically to the pre-1.14 output. Positioned between route and experimental to match
 	// option.Options upstream. TestRenderNodeConfigDefaultShapeIsUnchanged and
 	// TestRenderNodeConfigOptOutRestoresDefaultBytes pin the invariant.
 	Services     []any               `json:"services,omitempty"`
@@ -261,8 +261,8 @@ type apiService struct {
 const connectionTelemetryServiceTag = "boxfleet-telemetry"
 
 // connectionTelemetryService returns the `services` entry for a node, or nil
-// when the node has not opted in — which is every node by default, because the
-// fleet runs 1.13 and this block does not parse there.
+// when the node has not opted in. This remains the default during a mixed 1.13
+// / 1.14 rollout because the block does not parse on 1.13.
 //
 // It fails closed. The endpoint carries a control plane (StopService,
 // ReloadService, CloseAllConnections, TriggerDebugCrash) alongside the

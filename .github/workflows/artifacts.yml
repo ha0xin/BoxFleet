@@ -18,7 +18,7 @@ jobs:
       GOOS: linux
       GOARCH: amd64
       AGENT_REVISION: v0.7.0
-      SING_BOX_REVISION: v1.13.14
+      SING_BOX_REVISION: v1.14.0-beta.2
       SING_BOX_TAGS: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,badlinkname,tfogo_checklinkname0,with_v2ray_api
 
     steps:
@@ -87,6 +87,14 @@ jobs:
           # silently must fail the build, not a node.
           grep -F 'with_v2ray_api' <<<"$sing_box_version_output"
           grep -F 'with_clash_api' <<<"$sing_box_version_output"
+
+      - name: Run sing-box live preflight
+        shell: bash
+        run: |
+          sudo env "PATH=$PATH" scripts/singbox-preflight.sh \
+            --live \
+            --binary "$GITHUB_WORKSPACE/dist/artifacts/sing-box-${SING_BOX_REVISION}-linux-amd64" \
+            "$SING_BOX_REVISION"
 
       - name: Package artifacts
         shell: bash

@@ -85,8 +85,8 @@ const (
 
 // NodeConnectionTelemetry is one node's opt-in to the sing-box 1.14 daemon
 // gRPC stream. A missing row is the disabled state, which is why the fleet
-// default is off structurally: the production fleet runs 1.13, where the
-// `service.api` config block does not parse at all.
+// default is off structurally so mixed-version rollout and rollback remain
+// safe: the `service.api` config block does not parse on 1.13.
 type NodeConnectionTelemetry struct {
 	NodeName      string
 	Enabled       bool

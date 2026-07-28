@@ -2,11 +2,11 @@
 
 `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` pins the one sing-box
 build BoxFleet ships. `scripts/singbox-preflight.sh` is the gate that pin passes
-before it moves — to a 1.13 patch, and eventually to 1.14. It implements the four
+before it moves — to a 1.13 patch, and eventually to 1.14. It implements the five
 off-fleet checks required by
 [ADR 0001](adr/0001-network-event-telemetry-source.md#off-fleet-checks-required-before-the-pin-moves-past-113).
 
-The harness exists because two of the four failure modes are silent. The agent's
+The harness exists because multiple failure modes are silent. The agent's
 health check asserts systemd `ActiveState` only, so a sing-box that starts
 cleanly but renamed a build tag or reworded a log line reports healthy on every
 node while traffic accounting or the entire network-event and service-audit view
@@ -24,11 +24,11 @@ server, do not point it at a node, and do not reuse the configs it writes.
 | --- | --- |
 | 1 | Go toolchain, `git`, network access to `github.com/SagerNet/sing-box` |
 | 2 | Go toolchain with CGO enabled (the SQLite driver is `mattn/go-sqlite3`) |
-| 3, 4 | everything above, plus a Linux host with systemd and `journalctl`, `curl`, root, outbound internet, and a checkout of this repository |
+| 3, 4, 5 | everything above, plus a Linux host with systemd and `journalctl`, `curl`, root, outbound internet, and a checkout of this repository |
 
-Checks 1 and 2 run unattended on any developer machine, macOS included. Checks 3
-and 4 need a live instance and real traffic, so they run only under `--live` on a
-Linux host.
+Checks 1 and 2 run unattended on any developer machine, macOS included. Checks
+3, 4 and 5 need a live instance and real traffic, so they run only under
+`--live` on a Linux host.
 
 ## Running it
 
@@ -52,9 +52,9 @@ spelled twice; editing the workflow is enough.
 
 Exit codes:
 
-- `0` — all four checks passed. Moving the pin is an ordinary release change.
+- `0` — all five checks passed. Moving the pin is an ordinary release change.
 - `1` — a check failed, or `--live` was requested and could not be completed.
-- `2` — the preflight is incomplete: checks 3 and 4 were not run. A check that
+- `2` — the preflight is incomplete: checks 3, 4 and 5 were not run. A check that
   did not run is not a check that passed, so this is never a green result.
 
 Artifacts (the built binary, rendered configs, journal capture, counter
@@ -198,12 +198,20 @@ go run ./scripts/singbox-preflight journal-fixture [-in FILE]
 the array-of-bytes form journald falls back to for output it does not consider
 printable UTF-8, which is what sing-box's ANSI-colored lines can produce.
 
+## Check 5 — authenticated connection stream intact
+
+**Protects:** the opt-in 1.14 path. The renderer emits a real `services` block,
+and BoxFleet's `internal/singboxapi` client must authenticate, receive the
+initial reset and then receive a real connection event. This catches an
+upstream service rename or authentication-contract change that config parsing
+alone cannot detect.
+
 ## Relationship to the 1.14 migration
 
 ADR 0001 keeps network events on the journal scraper and traffic on the V2Ray
-counters, and states one trigger for revisiting: the `v1.14.0` **stable** tag is
-published *and* a build of it at BoxFleet's `SING_BOX_TAGS` passes these four
-checks. Both conditions. "The beta looks quiet" is not one of them.
+counters. The original trigger required the `v1.14.0` stable tag; on 2026-07-28
+the operator explicitly accepted beta risk for `v1.14.0-beta.2`. The exception
+does not bypass this preflight or the canary-first rollout requirement.
 
 This harness is the second half of that trigger. It is equally the gate for an
 ordinary 1.13 patch bump — a patch release can reword a log line just as easily
@@ -212,20 +220,8 @@ as a minor one can.
 **Passing the preflight authorizes moving the pin. It does not authorize
 enabling connection telemetry on any node.** The renderer block, the loopback
 bind, the per-node secret, the node-side aggregator and the ingest path all exist
-now ([ADR 0002](adr/0002-opt-in-connection-telemetry.md)), but they are opt-in
-per node and enabled nowhere, and none of them is exercised by these four checks.
-
-Two gaps to close when a candidate is being evaluated for that purpose:
-
-- **Check 2 renders only nodes that have not opted in.** Extend
-  `scripts/singbox-preflight render-configs` to emit an opted-in node as well, so
-  `sing-box check -c` sees the `services` block. Until then, the only proof that
-  the block parses on a candidate is a manual `sing-box check` against a config
-  rendered from an opted-in fixture.
-- **Nothing verifies the stream itself.** A fifth check — that a candidate build
-  actually serves `SubscribeConnections` on the rendered endpoint — is the one
-  thing that would catch an upstream rename or relocation of the api service
-  before an operator opts a node in. The proto contract is separately pinned
-  against upstream's compiled descriptor
-  ([`internal/singboxapi/README.md`](../internal/singboxapi/README.md)), which
-  catches a *schema* change but not a service that stopped being reachable.
+now ([ADR 0002](adr/0002-opt-in-connection-telemetry.md)), but they remain
+opt-in per node. Check 2 renders both default and opted-in nodes, and check 5
+exercises the stream through the production client. The proto contract remains
+separately pinned against upstream's compiled descriptor
+([`internal/singboxapi/README.md`](../internal/singboxapi/README.md)).

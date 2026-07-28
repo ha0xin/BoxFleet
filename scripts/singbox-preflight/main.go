@@ -6,6 +6,7 @@
 //
 //	render-configs   write sing-box configs produced by internal/server/render
 //	query-stats      read counters through internal/v2raystats, as the agent does
+//	query-connections verify sing-box 1.14's authenticated connection stream
 //	journal-fixture  turn `journalctl -o json` output into log-parser fixture lines
 //
 // This is off-fleet tooling. Nothing here talks to a BoxFleet server or to a
@@ -28,6 +29,7 @@ import (
 	"github.com/haoxin/boxfleet/internal/secret"
 	"github.com/haoxin/boxfleet/internal/server/db"
 	"github.com/haoxin/boxfleet/internal/server/render"
+	"github.com/haoxin/boxfleet/internal/singboxapi"
 	"github.com/haoxin/boxfleet/internal/v2raystats"
 )
 
@@ -42,6 +44,8 @@ func main() {
 		err = renderConfigs(os.Args[2:])
 	case "query-stats":
 		err = queryStats(os.Args[2:])
+	case "query-connections":
+		err = queryConnections(os.Args[2:])
 	case "journal-fixture":
 		err = journalFixture(os.Args[2:])
 	case "-h", "--help", "help":
@@ -68,6 +72,10 @@ func usage() {
         Print "<counter>\t<value>" for every V2Ray stats counter matching
         PATTERN, using the same client and the same non-resetting read the
         agent performs.
+
+  query-connections -secret-file FILE [-addr HOST:PORT] [-timeout DURATION]
+        Subscribe through BoxFleet's singboxapi client and require an initial
+        reset plus at least one connection event.
 
   journal-fixture [-in FILE]
         Read "journalctl -o json" lines and write one MESSAGE per line in the
@@ -123,6 +131,17 @@ func renderConfigs(args []string) error {
 	if err != nil {
 		return err
 	}
+	telemetry, err := store.SetNodeConnectionTelemetry(ctx, db.SetNodeConnectionTelemetryParams{
+		NodeName: preflightVLESSNode,
+		Enabled:  true,
+	})
+	if err != nil {
+		return err
+	}
+	nodeVLESSTelemetry, err := render.RenderNodeConfig(ctx, store, preflightVLESSNode)
+	if err != nil {
+		return err
+	}
 	nodeSS, err := render.RenderNodeConfig(ctx, store, preflightSSNode)
 	if err != nil {
 		return err
@@ -155,11 +174,17 @@ func renderConfigs(args []string) error {
 		data []byte
 	}{
 		{"node-vless-reality.json", nodeVLESS},
+		{"node-vless-reality-telemetry.json", nodeVLESSTelemetry},
 		{"node-shadowsocks2022.json", nodeSS},
 		{"node-disabled.json", disabled},
 		{"client-vless-reality.json", clientVLESS},
 		{"client-shadowsocks2022.json", clientSS},
 	}
+	secretPath := filepath.Join(*out, "connection-telemetry-secret.txt")
+	if err := os.WriteFile(secretPath, []byte(telemetry.Secret+"\n"), 0o600); err != nil {
+		return err
+	}
+	fmt.Println(secretPath)
 	for _, file := range files {
 		path := filepath.Join(*out, file.name)
 		if err := os.WriteFile(path, append(file.data, '\n'), 0o644); err != nil {
@@ -181,6 +206,54 @@ func renderConfigs(args []string) error {
 	}
 	fmt.Println(usersPath)
 	return nil
+}
+
+func queryConnections(args []string) error {
+	flags := flag.NewFlagSet("query-connections", flag.ExitOnError)
+	addr := flags.String("addr", "127.0.0.1:9091", "sing-box api service address")
+	secretFile := flags.String("secret-file", "", "file containing the api service secret (required)")
+	timeout := flags.Duration("timeout", 20*time.Second, "maximum time to wait for a connection event")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*secretFile) == "" {
+		return errors.New("-secret-file is required")
+	}
+	rawSecret, err := os.ReadFile(*secretFile)
+	if err != nil {
+		return err
+	}
+	client, err := singboxapi.Dial(singboxapi.Options{
+		Address:  *addr,
+		Secret:   strings.TrimSpace(string(rawSecret)),
+		Interval: time.Second,
+	})
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	stream, err := client.Subscribe(ctx)
+	if err != nil {
+		return err
+	}
+	seenReset := false
+	for {
+		batch, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		seenReset = seenReset || batch.GetReset_()
+		for _, event := range batch.GetEvents() {
+			connection := event.GetConnection()
+			fmt.Printf("reset=%t type=%s id=%s user=%s destination=%s\n",
+				seenReset, event.GetType(), event.GetId(), connection.GetUser(), connection.GetDestination())
+			if seenReset {
+				return nil
+			}
+		}
+	}
 }
 
 func seedPreflightFixture(ctx context.Context, store *db.DB, host string) error {

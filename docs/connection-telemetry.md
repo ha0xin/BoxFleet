@@ -2,13 +2,13 @@
 
 sing-box 1.14 exposes a daemon gRPC stream, `SubscribeConnections`, that reports
 every connection with its user, destination, byte totals and duration on one
-message. BoxFleet can consume it. **Nothing consumes it today.**
+message. BoxFleet can consume it when a node is explicitly opted in.
 
-This path is **opt-in per node and off by default**, and it must stay that way
-until the pin moves:
+This path is **opt-in per node and off by default**:
 
-- `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` is `v1.13.14`. The
-  production fleet runs 1.13.
+- `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` is
+  `v1.14.0-beta.2`. This prerelease pin is an explicit operator exception to
+  the original stable-only gate; rollout must be canary-first.
 - 1.13's config parser rejects the `services` block this stream needs —
   `services[0]: unknown inbound type: api`. Rendering it unconditionally would
   break every node.
@@ -16,12 +16,10 @@ until the pin moves:
   default, and still the only source that covers every node. The two coexist
   permanently; neither replaces the other in this release.
 
-The decision to build it now, ahead of the switch, is
-[ADR 0002](adr/0002-opt-in-connection-telemetry.md). The unchanged trigger for
-actually switching the fleet is in
-[ADR 0001](adr/0001-network-event-telemetry-source.md): the `v1.14.0` **stable**
-tag published *and* a candidate build passing
-[the preflight](singbox-preflight.md). Both.
+The decision to build it ahead of the switch is
+[ADR 0002](adr/0002-opt-in-connection-telemetry.md). The operator-approved
+beta.2 exception and its required preflight are recorded in
+[ADR 0001](adr/0001-network-event-telemetry-source.md).
 
 ## What it adds
 
