@@ -62,6 +62,12 @@ them on failure. Startup applies embedded migrations. A
 server-only release replaces only `bfs`; never update node
 components on the management host.
 
+After all smoke checks pass and the rollback trap is disarmed, retain only the
+backup created by that deployment. It is the rollback copy of the immediately
+previous server version and database state. Delete older backup directories
+only at that point; a failed deployment must not prune any backups, and a
+cleanup failure must not roll back a healthy release.
+
 Admin auth is mandatory through `BOXFLEET_ADMIN_TOKEN` unless the explicit
 development-only `--allow-insecure-admin` flag is used. A hidden admin prefix
 may be configured with `BOXFLEET_ADMIN_PATH_TOKEN`.
