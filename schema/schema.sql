@@ -234,6 +234,7 @@ SELECT
   p.transport,
   p.enabled,
   p.traffic_multiplier,
+  COALESCE(publication.direct_enabled, 1) AS direct_publish,
   p.settings_json,
   p.inbound_rules_json,
   p.outbound_rules_json,
@@ -243,7 +244,8 @@ SELECT
   p.created_at,
   p.updated_at
 FROM proxies p
-JOIN nodes n ON n.id = p.node_id;
+JOIN nodes n ON n.id = p.node_id
+LEFT JOIN proxy_publication_settings publication ON publication.proxy_id = p.id;
 
 CREATE TABLE IF NOT EXISTS proxy_accesses (
   id TEXT PRIMARY KEY,

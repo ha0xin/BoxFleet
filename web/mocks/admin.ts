@@ -392,6 +392,7 @@ const makeProxy = (over: Partial<AdminProxy> & Pick<AdminProxy, "id" | "node_nam
   transport: "tcp",
   enabled: true,
   traffic_multiplier: 1,
+  direct_publish: true,
   short_id: "a1b2c3d4",
   settings_json: JSON.stringify({ flow: "xtls-rprx-vision", short_id: "a1b2c3d4" }),
   inbound_rules_json: "[]",
@@ -1634,6 +1635,7 @@ const routes: Route[] = [
         listen_port: Number(body?.listen_port) || 443,
         enabled: body?.enabled ?? true,
         traffic_multiplier: Number(body?.traffic_multiplier) || 1,
+        direct_publish: body?.direct_publish ?? true,
         settings_json:
           typeof body?.settings_json === "string"
             ? body.settings_json
@@ -1655,6 +1657,7 @@ const routes: Route[] = [
         if (typeof body.enabled === "boolean") proxy.enabled = body.enabled;
         if (typeof body.listen_port === "number") proxy.listen_port = body.listen_port;
         if (typeof body.traffic_multiplier === "number") proxy.traffic_multiplier = body.traffic_multiplier;
+        if (typeof body.direct_publish === "boolean") proxy.direct_publish = body.direct_publish;
         if (typeof body.settings_json === "string") proxy.settings_json = body.settings_json;
         if (typeof body.short_id === "string") {
           proxy.short_id = body.short_id;

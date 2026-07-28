@@ -107,7 +107,7 @@ func (q *Queries) DeleteProxyNameAlias(ctx context.Context, arg DeleteProxyNameA
 }
 
 const getProxyByID = `-- name: GetProxyByID :one
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE id = ?1
   AND deleted_at IS NULL
@@ -129,6 +129,7 @@ func (q *Queries) GetProxyByID(ctx context.Context, id string) (ProxyDetail, err
 		&i.Transport,
 		&i.Enabled,
 		&i.TrafficMultiplier,
+		&i.DirectPublish,
 		&i.SettingsJson,
 		&i.InboundRulesJson,
 		&i.OutboundRulesJson,
@@ -142,7 +143,7 @@ func (q *Queries) GetProxyByID(ctx context.Context, id string) (ProxyDetail, err
 }
 
 const getProxyByNodeAndName = `-- name: GetProxyByNodeAndName :one
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE node_id = (
     SELECT n.id
@@ -188,6 +189,7 @@ func (q *Queries) GetProxyByNodeAndName(ctx context.Context, arg GetProxyByNodeA
 		&i.Transport,
 		&i.Enabled,
 		&i.TrafficMultiplier,
+		&i.DirectPublish,
 		&i.SettingsJson,
 		&i.InboundRulesJson,
 		&i.OutboundRulesJson,
@@ -201,7 +203,7 @@ func (q *Queries) GetProxyByNodeAndName(ctx context.Context, arg GetProxyByNodeA
 }
 
 const getProxyByNodeAndNameIncludingDeleted = `-- name: GetProxyByNodeAndNameIncludingDeleted :one
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE node_id = (
     SELECT n.id
@@ -245,6 +247,7 @@ func (q *Queries) GetProxyByNodeAndNameIncludingDeleted(ctx context.Context, arg
 		&i.Transport,
 		&i.Enabled,
 		&i.TrafficMultiplier,
+		&i.DirectPublish,
 		&i.SettingsJson,
 		&i.InboundRulesJson,
 		&i.OutboundRulesJson,
@@ -276,7 +279,7 @@ func (q *Queries) GetProxyIDByNameOrAlias(ctx context.Context, name string) (str
 }
 
 const listProxies = `-- name: ListProxies :many
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE deleted_at IS NULL
   AND node_deleted_at IS NULL
@@ -304,6 +307,7 @@ func (q *Queries) ListProxies(ctx context.Context) ([]ProxyDetail, error) {
 			&i.Transport,
 			&i.Enabled,
 			&i.TrafficMultiplier,
+			&i.DirectPublish,
 			&i.SettingsJson,
 			&i.InboundRulesJson,
 			&i.OutboundRulesJson,
@@ -327,7 +331,7 @@ func (q *Queries) ListProxies(ctx context.Context) ([]ProxyDetail, error) {
 }
 
 const listProxiesByNodeName = `-- name: ListProxiesByNodeName :many
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
 FROM proxy_details
 WHERE node_name = ?1
   AND deleted_at IS NULL
@@ -356,6 +360,7 @@ func (q *Queries) ListProxiesByNodeName(ctx context.Context, nodeName string) ([
 			&i.Transport,
 			&i.Enabled,
 			&i.TrafficMultiplier,
+			&i.DirectPublish,
 			&i.SettingsJson,
 			&i.InboundRulesJson,
 			&i.OutboundRulesJson,

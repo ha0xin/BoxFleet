@@ -107,8 +107,7 @@ function defaults(state: Exclude<ProxyDialogState, null>): ProxyFormValues {
       ss_method: parseSSMethod(p.settings_json),
       short_id: parseShortID(p),
       traffic_multiplier: p.traffic_multiplier,
-      // Not sent on PATCH, but the form schema requires the field.
-      direct_publish: true,
+      direct_publish: p.direct_publish,
       enabled: p.enabled
     };
   }
@@ -201,6 +200,7 @@ export function ProxyFormDialog({
             short_id: values.short_id.trim().toLowerCase(),
             listen_port: values.listen_port,
             traffic_multiplier: values.traffic_multiplier,
+            direct_publish: values.direct_publish,
             enabled: values.enabled,
             settings_json
           })
@@ -322,19 +322,17 @@ export function ProxyFormDialog({
             />
           ) : null}
 
-          {!isEdit ? (
-            <div>
-              <Switch
-                label="Publish direct Paths"
-                controlFirst={false}
-                checked={directPublish}
-                onCheckedChange={(value) => form.setValue("direct_publish", Boolean(value))}
-              />
-              <p className="mt-1 text-xs text-kumo-subtle">
-                Creates one managed direct Path per selected Host. Disable this when the Proxy should only be used through custom chains.
-              </p>
-            </div>
-          ) : null}
+          <div>
+            <Switch
+              label="Publish direct Paths"
+              controlFirst={false}
+              checked={directPublish}
+              onCheckedChange={(value) => form.setValue("direct_publish", Boolean(value))}
+            />
+            <p className="mt-1 text-xs text-kumo-subtle">
+              Creates one managed direct Path per selected Host. Disable this when the Proxy should only be used through custom chains.
+            </p>
+          </div>
 
           <Switch
             label="Enabled"

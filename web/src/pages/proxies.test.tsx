@@ -41,6 +41,7 @@ function proxy(overrides: Partial<AdminProxy> = {}): AdminProxy {
     transport: "tcp",
     enabled: true,
     traffic_multiplier: 1,
+    direct_publish: true,
     short_id: "",
     settings_json: "{}",
     inbound_rules_json: "[]",

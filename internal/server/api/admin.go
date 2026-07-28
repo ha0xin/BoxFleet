@@ -116,6 +116,7 @@ type adminProxy struct {
 	Transport         string  `json:"transport"`
 	Enabled           bool    `json:"enabled"`
 	TrafficMultiplier float64 `json:"traffic_multiplier"`
+	DirectPublish     bool    `json:"direct_publish"`
 	ShortID           string  `json:"short_id"`
 	SettingsJSON      string  `json:"settings_json"`
 	InboundRulesJSON  string  `json:"inbound_rules_json"`
@@ -952,6 +953,7 @@ func adminUpdateProxyHandler(store *db.DB) http.HandlerFunc {
 				writeAdminError(w, err)
 				return
 			}
+			proxy.DirectPublish = *payload.DirectPublish
 		}
 		writeJSON(w, adminProxyFromDB(proxy))
 	}
@@ -1942,6 +1944,7 @@ func adminProxyFromDB(proxy db.Proxy) adminProxy {
 		Transport:         proxy.Transport,
 		Enabled:           proxy.Enabled,
 		TrafficMultiplier: proxy.TrafficMultiplier,
+		DirectPublish:     proxy.DirectPublish,
 		ShortID:           proxyShortID(proxy.SettingsJSON),
 		SettingsJSON:      proxy.SettingsJSON,
 		InboundRulesJSON:  proxy.InboundRulesJSON,
