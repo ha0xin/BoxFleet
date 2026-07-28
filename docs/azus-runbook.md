@@ -59,6 +59,14 @@ files plus the previous unit, run `systemctl daemon-reload`, then restart the ol
 service. After a successful migration to `bfs`, remove the legacy
 `/opt/boxfleet/bin/boxfleet-server` binary.
 
+Keep exactly one rollback backup: the `pre-<version>-<UTC timestamp>` directory
+created by the latest successful deployment, which contains the immediately
+previous server version and database state. Only after every smoke check has
+passed and the rollback trap has been disarmed, delete all older directories
+under `/opt/boxfleet/backups/`. Never prune backups before or during the smoke
+checks, and do not prune them on a failed deployment. If backup pruning fails,
+report the cleanup failure without rolling back an otherwise healthy release.
+
 ## Smoke checks
 
 Without exposing environment values, confirm:
