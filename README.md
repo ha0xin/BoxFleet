@@ -69,6 +69,8 @@ bootstrap, and [azus runbook](docs/azus-runbook.md) for the production host.
 - [Database invariants](docs/db-schema.md)
 - [Configuration rendering](docs/config-generation.md)
 - [Node operations](docs/node-operations.md)
+- [Component compatibility](docs/component-compatibility.md) — server, agent,
+  and sing-box release/upgrade rules and the current compatibility matrix
 - [Connection telemetry](docs/connection-telemetry.md) — the opt-in sing-box 1.14
   stream, off by default
 - [sing-box preflight](docs/singbox-preflight.md) — the gate `SING_BOX_REVISION`
