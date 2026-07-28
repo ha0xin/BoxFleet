@@ -4,8 +4,8 @@ const listeners = new Set<() => void>();
 let observer: MutationObserver | null = null;
 
 /**
- * Current colour mode. `src/main.tsx` is the single writer of `data-mode` on the
- * root element, so reading the attribute is the whole story.
+ * Current colour mode. `color-mode.ts` is the single writer of `data-mode` on
+ * the root element, so reading the attribute is the whole story.
  */
 export function getIsDarkMode(): boolean {
   return typeof document !== "undefined" && document.documentElement.dataset.mode === "dark";
