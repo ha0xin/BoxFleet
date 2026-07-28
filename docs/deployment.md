@@ -13,10 +13,13 @@ Pushing a `v*` tag runs `.github/workflows/artifacts.yml` and publishes:
 - `sing-box-<sing-box-version>-linux-amd64`
 - a tarball, `boxfleet-update.json`, and `SHA256SUMS`
 
-Server, agent, and sing-box versions are independent. Change
+Server, agent, and sing-box version identities and installation choices are
+independent, but publication is still bundled under one server release. Change
 `AGENT_REVISION` only when agent code or its runtime contract changes, and
 `SING_BOX_REVISION` only when the pinned upstream build changes. Server-only
-releases therefore do not advertise no-op node upgrades.
+releases therefore do not advertise no-op node upgrades. See
+[component compatibility](component-compatibility.md) for the exact boundary,
+supported rolling window, and upgrade order.
 
 ```bash
 git tag -a vX.Y.Z -m 'BoxFleet vX.Y.Z'
