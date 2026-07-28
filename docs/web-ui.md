@@ -54,9 +54,10 @@ Navigation is defined in `src/navigation.ts`; routes are registered in
 title block + actions slot) and the shared 1400px content width; the 58px
 breadcrumb bar aligns with `Sidebar.Header`. Mobile navigation must remain
 reachable, tables own their horizontal scrolling, and dialogs use a
-viewport-bounded scroll area. Light/dark follows the system preference via
-`data-mode` on the root element (wired in `src/main.tsx`); never use `dark:`
-variants.
+viewport-bounded scroll area. Light/dark uses `data-mode` on the root element
+(wired in `src/components/color-mode.ts`): it follows the system preference
+until the operator selects a mode from the page header, then persists that
+choice locally. Never use `dark:` variants.
 
 Shared design-system components (`src/components/`):
 

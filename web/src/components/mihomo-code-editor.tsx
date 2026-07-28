@@ -5,6 +5,7 @@ import JSONWorker from "monaco-editor/language/json/json.worker?worker";
 import TSWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { configureMonacoYaml, type JSONSchema } from "monaco-yaml";
 import mihomoSchema from "meta-json-schema/schemas/meta-json-schema.json";
+import { useIsDarkMode } from "./chart/use-color-mode";
 import YAMLWorker from "./mihomo-yaml.worker?worker";
 
 type RewriteKind = "yaml" | "javascript";
@@ -72,8 +73,7 @@ const editorOptions: monaco.editor.IStandaloneEditorConstructionOptions = {
   lineHeight: 20,
   scrollBeyondLastLine: false,
   wordWrap: "on",
-  padding: { top: 12 },
-  theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "vs-dark" : "vs"
+  padding: { top: 12 }
 };
 
 export function MihomoCodeEditor({
@@ -91,6 +91,7 @@ export function MihomoCodeEditor({
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const changeRef = useRef(onChange);
   const valueRef = useRef(value);
+  const isDarkMode = useIsDarkMode();
 
   useEffect(() => {
     changeRef.current = onChange;
@@ -98,12 +99,8 @@ export function MihomoCodeEditor({
   }, [onChange, value]);
 
   useEffect(() => {
-    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-    const syncTheme = () => monaco.editor.setTheme(colorScheme.matches ? "vs-dark" : "vs");
-    syncTheme();
-    colorScheme.addEventListener("change", syncTheme);
-    return () => colorScheme.removeEventListener("change", syncTheme);
-  }, []);
+    monaco.editor.setTheme(isDarkMode ? "vs-dark" : "vs");
+  }, [isDarkMode]);
 
   useEffect(() => {
     if (!hostRef.current) return;

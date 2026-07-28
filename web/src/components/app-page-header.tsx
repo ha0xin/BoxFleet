@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileTextIcon } from "@phosphor-icons/react";
-import { Breadcrumbs, LinkButton, Sidebar } from "@cloudflare/kumo";
+import { FileTextIcon, MoonIcon, SunIcon } from "@phosphor-icons/react";
+import { Breadcrumbs, Button, LinkButton, Sidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
 import { PublishStrip, publishBarToneClass } from "@/publish/publish-strip";
+import { toggleColorMode } from "@/components/color-mode";
+import { useIsDarkMode } from "@/components/chart/use-color-mode";
 
 /**
  * The single app page header: a breadcrumb top bar aligned with Kumo's
@@ -30,6 +32,7 @@ export function AppPageHeader({
   const navigate = useNavigate();
   const location = useLocation();
   const onSystemLogs = location.pathname.startsWith("/system-logs");
+  const isDarkMode = useIsDarkMode();
 
   return (
     <div className="flex flex-col">
@@ -69,6 +72,16 @@ export function AppPageHeader({
               <span className="hidden md:inline">Logs</span>
             </LinkButton>
           ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={isDarkMode ? SunIcon : MoonIcon}
+            aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+            title={isDarkMode ? "Light mode" : "Dark mode"}
+            onClick={toggleColorMode}
+          />
         </div>
       </div>
 
