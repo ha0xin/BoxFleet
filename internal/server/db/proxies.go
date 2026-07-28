@@ -43,6 +43,7 @@ type Proxy struct {
 	Transport         string
 	Enabled           bool
 	TrafficMultiplier float64
+	DirectPublish     bool
 	SettingsJSON      string
 	InboundRulesJSON  string
 	OutboundRulesJSON string
@@ -164,6 +165,7 @@ func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy,
 	if _, err := db.SetProxyDirectPublication(ctx, created.ID, directPublish); err != nil {
 		return Proxy{}, err
 	}
+	created.DirectPublish = directPublish
 	return created, nil
 }
 
@@ -874,6 +876,7 @@ func proxyFromDetail(row store.ProxyDetail) Proxy {
 		Transport:         row.Transport,
 		Enabled:           int64ToBool(row.Enabled),
 		TrafficMultiplier: row.TrafficMultiplier,
+		DirectPublish:     int64ToBool(row.DirectPublish),
 		SettingsJSON:      row.SettingsJson,
 		InboundRulesJSON:  row.InboundRulesJson,
 		OutboundRulesJSON: row.OutboundRulesJson,

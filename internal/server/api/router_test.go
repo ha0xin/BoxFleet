@@ -986,6 +986,7 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 		"transport":          "tcp",
 		"enabled":            false,
 		"traffic_multiplier": 1.5,
+		"direct_publish":     false,
 		"settings_json":      `{"server_name":"www.amazon.com","reality_private_key":"private","reality_public_key":"public","short_id":"","handshake_server":"www.amazon.com","handshake_port":443}`,
 	})
 	rec = httptest.NewRecorder()
@@ -993,11 +994,18 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update proxy status = %d, body = %s", rec.Code, rec.Body.String())
 	}
+	var updated adminProxy
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.DirectPublish {
+		t.Fatalf("updated proxy still publishes direct Paths: %#v", updated)
+	}
 	proxy, err := store.GetProxy(context.Background(), "node-a", "vless-39090")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proxy.ListenPort != 39091 || proxy.Enabled || proxy.TrafficMultiplier != 1.5 {
+	if proxy.ListenPort != 39091 || proxy.Enabled || proxy.TrafficMultiplier != 1.5 || proxy.DirectPublish {
 		t.Fatalf("proxy = %#v", proxy)
 	}
 }

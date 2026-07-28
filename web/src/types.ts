@@ -160,6 +160,7 @@ export type AdminProxy = {
   transport: string;
   enabled: boolean;
   traffic_multiplier: number;
+  direct_publish: boolean;
   short_id: string;
   settings_json: string;
   inbound_rules_json: string;

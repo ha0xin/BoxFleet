@@ -417,6 +417,7 @@ type ProxyDetail struct {
 	Transport         string         `json:"transport"`
 	Enabled           int64          `json:"enabled"`
 	TrafficMultiplier float64        `json:"traffic_multiplier"`
+	DirectPublish     int64          `json:"direct_publish"`
 	SettingsJson      string         `json:"settings_json"`
 	InboundRulesJson  string         `json:"inbound_rules_json"`
 	OutboundRulesJson string         `json:"outbound_rules_json"`
