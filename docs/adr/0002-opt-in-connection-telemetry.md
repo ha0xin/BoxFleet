@@ -2,8 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-27
-- Extends: [ADR 0001](0001-network-event-telemetry-source.md), whose decision and
-  trigger are unchanged
+- Extends: [ADR 0001](0001-network-event-telemetry-source.md)
 - Applies to: `internal/singboxapi`, `internal/model/connection_telemetry.go`,
   `internal/agent/connections.go`, `internal/server/db/connection_events.go`,
   `internal/server/render`, `migrations/026_connection_telemetry.sql`
@@ -23,14 +22,13 @@ and off by default**.
   Absence of the row *is* the disabled state, so the default is off structurally
   rather than by convention.
 
-**This is preparation, not activation.** No node is opted in, no admin endpoint
-mounts the opt-in, and the admin UI does not read the data. `SING_BOX_REVISION`
-remains `v1.13.14`.
+**This remains opt-in activation.** Moving `SING_BOX_REVISION` to
+`v1.14.0-beta.2` makes the service available but does not enable it on any node;
+an enabled `node_connection_telemetry` row is still required.
 
-**ADR 0001's trigger is untouched**: the fleet switches when the `v1.14.0`
-**stable** tag is published *and* a candidate build at BoxFleet's
-`SING_BOX_TAGS` passes [the preflight](../singbox-preflight.md). Both. Nothing
-in this ADR moves that line, and nothing here should be read as having moved it.
+The original stable-only trigger was overridden by an explicit operator choice
+on 2026-07-28. ADR 0001 records the exception. The preflight remains mandatory,
+including the opted-in config and authenticated stream checks added for 1.14.
 
 ## Context
 
@@ -155,17 +153,14 @@ feature nothing is meant to enable yet:
   collecting; the agent currently treats both as a failed report.
 - **`connection_event_retention_days` is not in `AdminSettings`.** Changeable
   only in the `settings` table.
-- **The preflight does not exercise the stream.** Its four checks protect the
-  1.13 path. A fifth — that a candidate build actually serves
-  `SubscribeConnections` on the rendered block — is the one thing that would
-  catch an upstream rename of the api service before an operator opts a node in.
+- **The preflight exercises the stream.** Its fifth check requires the real
+  BoxFleet client to receive an authenticated event after the initial reset.
 
 ## What this ADR does not change
 
 - ADR 0001's rejection of the Clash API `/connections` endpoint. Every reason
   still holds; nothing here reopens it.
-- ADR 0001's trigger for switching the fleet.
-- `SING_BOX_REVISION`, and the preflight's authority over moving it.
+- The preflight's authority over moving `SING_BOX_REVISION`.
 - The journal scraper, its golden fixtures, or the rule that a golden diff after
   a pin bump is a regression to investigate rather than regenerate.
 - Per-user billing, which stays on the V2Ray counters.

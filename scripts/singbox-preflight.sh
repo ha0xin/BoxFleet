@@ -3,19 +3,20 @@
 # singbox-preflight.sh — off-fleet gate for moving SING_BOX_REVISION.
 #
 # BoxFleet pins one sing-box build in .github/workflows/artifacts.yml. Two of the
-# four ways a new build can break BoxFleet are SILENT: nothing in the update
+# several ways a new build can break BoxFleet are SILENT: nothing in the update
 # pipeline catches them, because the agent's health check asserts systemd
 # ActiveState only. A sing-box that starts cleanly but renamed a build tag zeroes
 # traffic billing, and one that reworded a log line sends every network event and
 # the whole service audit to zero — with no alert, on every node at once.
 #
-# This script runs the four checks ADR 0001 requires before the pin moves
+# This script runs the checks ADR 0001 requires before the pin moves
 # ("Off-fleet checks required before the pin moves past 1.13"):
 #
 #   1  build tags intact      unattended
 #   2  config compatibility   unattended
 #   3  log format unchanged   needs a live instance and real traffic (--live)
 #   4  traffic counters       needs a live instance and real traffic (--live)
+#   5  connection stream      needs a live instance and real traffic (--live)
 #
 # THROWAWAY HOST ONLY. This script never contacts a BoxFleet server and never
 # touches a production node: it builds into a temporary directory, runs the
@@ -62,7 +63,7 @@ Options:
   --tags TAGS            build tags (default: SING_BOX_TAGS from artifacts.yml)
   --binary PATH          use an already-built candidate instead of building one
   --workdir DIR          keep artifacts here (default: a fresh mktemp -d)
-  --live                 also run checks 3 and 4 against a live instance
+  --live                 also run checks 3, 4 and 5 against a live instance
   --target URL           traffic target for the live run (default cloudflare trace)
   --requests N           number of proxied requests to drive (default 5)
   --baseline-shape FILE  diff the captured log shape against a previous capture
@@ -144,10 +145,12 @@ status_1="NOT RUN"
 status_2="NOT RUN"
 status_3="NOT RUN"
 status_4="NOT RUN"
+status_5="NOT RUN"
 detail_1=""
 detail_2=""
 detail_3=""
 detail_4=""
+detail_5=""
 
 heading() { printf '\n=== %s ===\n' "$*"; }
 info() { printf '     %s\n' "$*"; }
@@ -183,6 +186,10 @@ record() {
 	4)
 		status_4="$status"
 		detail_4="$detail"
+		;;
+	5)
+		status_5="$status"
+		detail_5="$detail"
 		;;
 	esac
 	printf '  [%s] check %s%s\n' "$status" "$check" "${detail:+ — $detail}"
@@ -241,6 +248,7 @@ capture_dir="${workdir}/capture"
 mkdir -p "$config_dir" "$capture_dir"
 
 client_pid=""
+connection_query_pid=""
 
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 cleanup() {
@@ -249,6 +257,10 @@ cleanup() {
 	if [[ -n "$client_pid" ]] && kill -0 "$client_pid" 2>/dev/null; then
 		kill "$client_pid" 2>/dev/null
 		wait "$client_pid" 2>/dev/null
+	fi
+	if [[ -n "$connection_query_pid" ]] && kill -0 "$connection_query_pid" 2>/dev/null; then
+		kill "$connection_query_pid" 2>/dev/null
+		wait "$connection_query_pid" 2>/dev/null
 	fi
 	if [[ $live -eq 1 ]] && command -v systemctl >/dev/null 2>&1; then
 		systemctl stop "$unit_name" >/dev/null 2>&1
@@ -390,12 +402,12 @@ check_config_compat() {
 }
 
 # ---------------------------------------------------------------------------
-# Live instance — shared by checks 3 and 4
+# Live instance — shared by checks 3, 4 and 5
 # ---------------------------------------------------------------------------
 
 live_prereqs() {
 	local problems=""
-	[[ "$(uname -s)" == "Linux" ]] || problems="${problems}\n  - checks 3 and 4 need Linux with systemd/journalctl; this host is $(uname -s)"
+	[[ "$(uname -s)" == "Linux" ]] || problems="${problems}\n  - checks 3, 4 and 5 need Linux with systemd/journalctl; this host is $(uname -s)"
 	command -v systemd-run >/dev/null 2>&1 || problems="${problems}\n  - systemd-run not found"
 	command -v journalctl >/dev/null 2>&1 || problems="${problems}\n  - journalctl not found"
 	command -v curl >/dev/null 2>&1 || problems="${problems}\n  - curl not found"
@@ -424,7 +436,7 @@ start_live_instance() {
 	systemctl reset-failed "$unit_name" >/dev/null 2>&1 || true
 	info "starting the candidate as transient unit ${unit_name}"
 	if ! systemd-run --unit="$unit_name" --collect --description='BoxFleet sing-box preflight (throwaway)' \
-		"$binary" run -c "${config_dir}/node-vless-reality.json" >/dev/null 2>&1; then
+		"$binary" run -c "${config_dir}/node-vless-reality-telemetry.json" >/dev/null 2>&1; then
 		printf 'could not start the transient unit\n' >&2
 		return 1
 	fi
@@ -443,6 +455,28 @@ start_live_instance() {
 		return 1
 	fi
 	info "client mixed inbound on 127.0.0.1:${proxy_port}"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# Check 5 — authenticated connection stream intact
+# ---------------------------------------------------------------------------
+
+check_connection_stream() {
+	heading "Check 5 — authenticated connection stream intact"
+	if [[ $live -eq 0 ]]; then
+		record 5 "NOT RUN" "needs a live instance and real traffic"
+		todo "Re-run on a throwaway Linux host with systemd, as root:"
+		todo "    sudo scripts/singbox-preflight.sh --live ${revision}"
+		return 0
+	fi
+	if [[ ! -s "${capture_dir}/connection-stream.txt" ]]; then
+		sed 's/^/     | /' "${workdir}/connection-stream.log" >&2 || true
+		record 5 FAIL "SubscribeConnections returned no authenticated event"
+		return 1
+	fi
+	sed 's/^/     | /' "${capture_dir}/connection-stream.txt"
+	record 5 PASS "BoxFleet client received an authenticated connection event after reset"
 	return 0
 }
 
@@ -715,6 +749,7 @@ else
 fi
 
 live_ready=0
+stream_ready=0
 if [[ $live -eq 1 ]]; then
 	if [[ "$status_2" != "PASS" ]]; then
 		printf '\n--live requested but checks 1-2 did not pass; not starting an instance\n' >&2
@@ -725,7 +760,16 @@ if [[ $live -eq 1 ]]; then
 	else
 		(cd "$repo_root" && go run ./scripts/singbox-preflight query-stats -addr "$stats_addr") \
 			>"${capture_dir}/stats-before.txt" 2>"${workdir}/stats-before.log" || true
+		(cd "$repo_root" && go run ./scripts/singbox-preflight query-connections \
+			-addr 127.0.0.1:9091 \
+			-secret-file "${config_dir}/connection-telemetry-secret.txt" \
+			-timeout 30s) >"${capture_dir}/connection-stream.txt" 2>"${workdir}/connection-stream.log" &
+		connection_query_pid=$!
 		if drive_traffic; then
+			if wait "$connection_query_pid"; then
+				stream_ready=1
+			fi
+			connection_query_pid=""
 			if (cd "$repo_root" && go run ./scripts/singbox-preflight query-stats -addr "$stats_addr") \
 				>"${capture_dir}/stats-after.txt" 2>"${workdir}/stats-after.log"; then
 				live_ready=1
@@ -741,13 +785,15 @@ if [[ $live -eq 1 ]]; then
 		# what happened is that the candidate could not be exercised at all.
 		record 3 FAIL "live run requested but could not be completed"
 		record 4 FAIL "live run requested but could not be completed"
-		failures=$((failures + 2))
+		record 5 FAIL "live run requested but could not be completed"
+		failures=$((failures + 3))
 	fi
 fi
 
 if [[ $live -eq 0 || $live_ready -eq 1 ]]; then
 	check_log_format || failures=$((failures + 1))
 	check_traffic_counters || failures=$((failures + 1))
+	check_connection_stream || failures=$((failures + 1))
 fi
 
 heading "Summary"
@@ -755,6 +801,7 @@ printf '  check 1  build tags intact       [%s]%s\n' "$status_1" "${detail_1:+ �
 printf '  check 2  config compatibility    [%s]%s\n' "$status_2" "${detail_2:+ — $detail_2}"
 printf '  check 3  log format unchanged    [%s]%s\n' "$status_3" "${detail_3:+ — $detail_3}"
 printf '  check 4  traffic counters        [%s]%s\n' "$status_4" "${detail_4:+ — $detail_4}"
+printf '  check 5  connection stream       [%s]%s\n' "$status_5" "${detail_5:+ — $detail_5}"
 
 if [[ $keep -eq 1 || $failures -gt 0 ]]; then
 	printf '\nartifacts kept in %s\n' "$workdir"
@@ -765,8 +812,8 @@ if ((failures > 0)); then
 	printf '\nPREFLIGHT FAILED — do not move SING_BOX_REVISION to %s.\n' "$revision"
 	exit 1
 fi
-if [[ "$status_3" != "PASS" || "$status_4" != "PASS" ]]; then
-	printf '\nPREFLIGHT INCOMPLETE — checks 3 and 4 have not been run against %s.\n' "$revision"
+if [[ "$status_3" != "PASS" || "$status_4" != "PASS" || "$status_5" != "PASS" ]]; then
+	printf '\nPREFLIGHT INCOMPLETE — live checks 3, 4 and 5 have not all passed against %s.\n' "$revision"
 	printf 'A check that did not run is not a check that passed. Finish them on a\n'
 	printf 'throwaway host before moving the pin. See docs/singbox-preflight.md.\n'
 	exit 2

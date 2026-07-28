@@ -130,11 +130,11 @@ connections on subscribe (`buildInitialConnectionState`), so it avoids the
 the Amendment; the resulting per-host byte view is a best-effort estimate, not
 a ledger.
 
-**Trigger, restated after the amendment below:** the `v1.14.0` **stable** tag is
-published *and* a build of it at BoxFleet's `SING_BOX_TAGS` passes the four
-off-fleet checks listed in the Amendment. Both conditions — "the beta looks
-quiet" is not one of them. **This trigger is unchanged by ADR 0002 and remains
-unmet.**
+**Original trigger, restated after the amendment below:** the `v1.14.0`
+**stable** tag is published and a build passes the off-fleet checks. On
+2026-07-28 the operator explicitly accepted the prerelease risk and selected
+`v1.14.0-beta.2`. This is a narrow exception, not a weakening of the default
+policy: the full preflight remains mandatory and rollout is canary-first.
 
 This section originally predicted that the migration would be a producer swap
 into the existing `model.LogEventInput` shape, deleting `parseSingBoxLogEvent`.
@@ -256,6 +256,8 @@ Build the candidate at BoxFleet's `SING_BOX_TAGS` on a throwaway host and assert
    starts cleanly but changed its log wording sends the audit view silently to
    zero. A golden diff here is a real regression: investigate, do not regenerate.
 4. `user>>>NAME>>>traffic>>>{uplink,downlink}` still increments.
+5. The opted-in rendered config parses, and BoxFleet's authenticated client
+   receives a `SubscribeConnections` event after the initial reset.
 
 ### Outcome
 

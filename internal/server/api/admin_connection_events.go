@@ -10,9 +10,9 @@ import (
 // Admin reads over the sing-box 1.14 daemon connection stream.
 //
 // These sit beside the /network-events endpoints rather than replacing them.
-// The production fleet runs 1.13, where the `service.api` config block does not
-// even parse, so most nodes produce journal-scraped log_events and nothing
-// here. The split is deliberate and visible: /connection-events/nodes tells the
+// The `service.api` config block does not parse on 1.13, so nodes still on the
+// old version produce journal-scraped log_events and nothing here. The split is
+// deliberate and visible: /connection-events/nodes tells the
 // admin UI exactly which nodes stream, so a mixed-version fleet reads as "this
 // node has a richer source" instead of as columns that are mysteriously empty.
 //
