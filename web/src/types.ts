@@ -215,6 +215,7 @@ export type AdminUser = {
   status: string;
   global_quota_bytes: number;
   expire_at: string;
+  // Legacy field name: this is the number of active product-level Path grants.
   proxy_count: number;
   deleted_at: string;
 };

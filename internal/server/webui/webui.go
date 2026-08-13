@@ -27,8 +27,16 @@ func Handler(mountPath string) http.Handler {
 		mountPath = "/admin"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == mountPath {
+			target := mountPath + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusPermanentRedirect)
+			return
+		}
 		path := strings.TrimPrefix(r.URL.Path, mountPath)
-		if path == "" || path == "/" {
+		if path == "/" {
 			serveIndex(root, mountPath, w)
 			return
 		}

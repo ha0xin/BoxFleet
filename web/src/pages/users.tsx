@@ -327,7 +327,7 @@ export function UsersPage() {
                     <SortHead label="Status" column="status" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Traffic" column="traffic" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Quota" column="quota" sort={filters.sort} direction={filters.direction} setSort={setSort} />
-                    <SortHead label="Access" column="proxy_count" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Paths" column="proxy_count" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Expires" column="expire_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>

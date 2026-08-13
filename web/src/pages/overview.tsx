@@ -407,7 +407,7 @@ function buildUserItems(users: AdminUser[]): ListWidgetItem[] {
         {userStatusLabel(user.status)}
       </StatusBadge>
     ),
-    detail: `${user.proxy_count} proxies`,
+    detail: `${user.proxy_count} paths`,
     icon: UsersIcon
   }));
 }

@@ -1078,7 +1078,7 @@ func adminUpdateUserHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		accesses, err := store.ListProxyCredentialsByUser(r.Context(), name)
+		accesses, err := store.ListActivePathAccessesByUser(r.Context(), name)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -1121,7 +1121,7 @@ func adminRestoreUserHandler(store *db.DB) http.HandlerFunc {
 			writeAdminError(w, err)
 			return
 		}
-		accesses, err := store.ListProxyCredentialsByUser(r.Context(), user.Name)
+		accesses, err := store.ListActivePathAccessesByUser(r.Context(), user.Name)
 		if err != nil {
 			writeAdminError(w, err)
 			return

@@ -2001,6 +2001,8 @@ const routes: Route[] = [
         updated_at: new Date().toISOString()
       };
       list.push(access);
+      const user = users.find((item) => item.name === userName);
+      if (user) user.proxy_count = list.length;
       return access;
     }
   },
@@ -2013,6 +2015,8 @@ const routes: Route[] = [
       const list = pathAccessFor(userName);
       const index = list.findIndex((access) => access.path_id === pathID);
       if (index >= 0) list.splice(index, 1);
+      const user = users.find((item) => item.name === userName);
+      if (user) user.proxy_count = list.length;
       return { ok: true };
     }
   },

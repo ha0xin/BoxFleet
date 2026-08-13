@@ -263,10 +263,39 @@ func TestListUsersPageSortsOnWhitelistedKeysOnly(t *testing.T) {
 	}
 }
 
-func TestListUsersPageCountsLiveAccessesOnly(t *testing.T) {
+func TestListUsersPageCountsLivePathAccessesOnly(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	seedTrafficFixture(t, ctx, store)
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNode(ctx, "edge", "198.51.100.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName: "edge", Name: "edge-vless", Protocol: ProtocolVLESSReality,
+		ListenPort: 443, Enabled: true, SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := store.GetNode(ctx, "edge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.EnsureEndpoint(ctx, proxy.ID, node.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.CreatePath(ctx, CreatePathParams{
+		Name: "direct", EndpointID: endpoint.ID, Enabled: true, Visibility: PathVisibilitySelectable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GrantPathToUser(ctx, "alice", path.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	page, err := store.ListUsersPage(ctx, UserFilter{Search: "alice"})
 	if err != nil {
@@ -275,18 +304,25 @@ func TestListUsersPageCountsLiveAccessesOnly(t *testing.T) {
 	if len(page.Users) != 1 {
 		t.Fatalf("page = %v", userPageNames(page))
 	}
+	if page.Users[0].ProxyCount != 1 {
+		t.Fatalf("proxy_count before revoke = %d, want 1 live Path", page.Users[0].ProxyCount)
+	}
+	if _, err := store.RevokePathAccess(ctx, "alice", path.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err = store.ListUsersPage(ctx, UserFilter{Search: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Users[0].ProxyCount != 0 {
+		t.Fatalf("proxy_count after revoke = %d, want 0 live Paths", page.Users[0].ProxyCount)
+	}
 	users, err := store.ListProxyUsersWithProxyCounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want int64
-	for _, user := range users {
-		if user.Name == "alice" {
-			want = user.ProxyCount
-		}
-	}
-	if page.Users[0].ProxyCount != want {
-		t.Fatalf("proxy_count = %d, want the unpaged count %d", page.Users[0].ProxyCount, want)
+	if len(users) != 1 || users[0].ProxyCount != 0 {
+		t.Fatalf("unpaged proxy_count after revoke = %#v, want 0", users)
 	}
 }
 
@@ -319,11 +355,11 @@ OFFSET 0`,
 		{
 			name: "the access count is an indexed lookup per user",
 			query: `
-SELECT u.id, ` + userProxyCountSQL + ` AS proxy_count
+SELECT u.id, ` + userPathCountSQL + ` AS proxy_count
 FROM proxy_users u
 WHERE u.deleted_at IS NULL
 LIMIT 50`,
-			want:      "idx_proxy_accesses_user_id",
+			want:      "idx_path_accesses_user_id",
 			forbidden: "scan a",
 		},
 		{

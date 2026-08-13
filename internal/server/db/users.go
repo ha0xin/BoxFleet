@@ -58,7 +58,10 @@ type UserPage struct {
 // per user rather than a scan of the delta history.
 const userBillableBytesSQL = `(SELECT COALESCE(SUM(t.billable_bytes), 0) FROM traffic_usage_totals t WHERE t.proxy_user_id = u.id)`
 
-const userProxyCountSQL = `(SELECT COUNT(*) FROM proxy_accesses a WHERE a.proxy_user_id = u.id AND a.deleted_at IS NULL)`
+// proxy_count is the legacy API field name. The product-level access shown in
+// the Users page is a Path grant, so only live PathAccess rows belong here;
+// technical proxy credentials may outlive a revoke as disabled rows.
+const userPathCountSQL = `(SELECT COUNT(*) FROM path_accesses a WHERE a.proxy_user_id = u.id AND a.enabled = 1 AND a.deleted_at IS NULL)`
 
 // userEffectiveStatusSQL derives the status the Users page badges, in the same
 // precedence: deleted, disabled, over quota, expired, then active. Quota
@@ -194,7 +197,7 @@ SELECT
   u.deleted_at,
   u.created_at,
   u.updated_at,
-  ` + userProxyCountSQL + ` AS proxy_count,
+  ` + userPathCountSQL + ` AS proxy_count,
   ` + userEffectiveStatusSQL + ` AS effective_status,
   COALESCE((SELECT t.raw_bytes FROM traffic_usage_totals t WHERE t.proxy_user_id = u.id AND t.direction = 'uplink'), 0) AS uplink_raw_bytes,
   COALESCE((SELECT t.billable_bytes FROM traffic_usage_totals t WHERE t.proxy_user_id = u.id AND t.direction = 'uplink'), 0) AS uplink_billable_bytes,
@@ -279,7 +282,7 @@ func userPageSort(sort, direction string) string {
 	case "quota":
 		sortColumn = "u.global_quota_bytes"
 	case "proxy_count":
-		sortColumn = userProxyCountSQL
+		sortColumn = userPathCountSQL
 	case "expire_at":
 		// A missing expiry sorts as "never", which must not collapse into the
 		// same slot as an expiry at the epoch.

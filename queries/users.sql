@@ -39,9 +39,9 @@ SELECT
   u.deleted_at,
   u.created_at,
   u.updated_at,
-  COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS proxy_count
+  COUNT(a.id) FILTER (WHERE a.enabled = 1 AND a.deleted_at IS NULL) AS proxy_count
 FROM proxy_users u
-LEFT JOIN proxy_accesses a ON a.proxy_user_id = u.id
+LEFT JOIN path_accesses a ON a.proxy_user_id = u.id
 WHERE u.deleted_at IS NULL
 GROUP BY
   u.id,
@@ -66,9 +66,9 @@ SELECT
   u.deleted_at,
   u.created_at,
   u.updated_at,
-  COUNT(a.id) FILTER (WHERE a.deleted_at IS NULL) AS proxy_count
+  COUNT(a.id) FILTER (WHERE a.enabled = 1 AND a.deleted_at IS NULL) AS proxy_count
 FROM proxy_users u
-LEFT JOIN proxy_accesses a ON a.proxy_user_id = u.id
+LEFT JOIN path_accesses a ON a.proxy_user_id = u.id
 WHERE u.deleted_at IS NOT NULL
 GROUP BY
   u.id,

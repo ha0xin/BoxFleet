@@ -631,8 +631,18 @@ func TestAdminPathTokenMovesAdminRoutes(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/panel-secret/admin", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusPermanentRedirect {
 		t.Fatalf("prefixed admin UI status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/panel-secret/admin/" {
+		t.Fatalf("prefixed admin UI redirect = %q", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/panel-secret/admin/", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("prefixed admin UI index status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `src="./assets/`) {
 		t.Fatalf("admin asset paths were not mount-relative: %s", rec.Body.String())
@@ -1583,7 +1593,13 @@ func TestAdminUIRouteServesEmbeddedIndex(t *testing.T) {
 	store := openAPITestDB(t)
 	router := NewRouter(Options{DB: store})
 
-	for _, path := range []string{"/admin", "/admin/network-events"} {
+	root := httptest.NewRecorder()
+	router.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/admin", nil))
+	if root.Code != http.StatusPermanentRedirect || root.Header().Get("Location") != "/admin/" {
+		t.Fatalf("/admin redirect = %d %q", root.Code, root.Header().Get("Location"))
+	}
+
+	for _, path := range []string{"/admin/", "/admin/network-events"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)

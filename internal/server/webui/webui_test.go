@@ -64,6 +64,17 @@ func TestIndexIsNotStoredAsImmutable(t *testing.T) {
 	}
 }
 
+func TestMountRootRedirectsToTrailingSlash(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Handler("/secret/admin").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/secret/admin?tab=nodes", nil))
+	if rec.Code != http.StatusPermanentRedirect {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusPermanentRedirect)
+	}
+	if got := rec.Header().Get("Location"); got != "/secret/admin/?tab=nodes" {
+		t.Fatalf("Location = %q", got)
+	}
+}
+
 func TestNestedRouteLoadsInitialAssetFromHiddenMount(t *testing.T) {
 	handler := Handler("/secret/admin")
 	index := httptest.NewRecorder()
