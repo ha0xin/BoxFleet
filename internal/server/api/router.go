@@ -332,7 +332,7 @@ func nodeLogsHandler(store *db.DB) http.HandlerFunc {
 
 func nodeSystemLogsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		nodeName, ok := authenticateNode(w, r, store)
+		_, ok := authenticateNode(w, r, store)
 		if !ok {
 			return
 		}
@@ -340,11 +340,9 @@ func nodeSystemLogsHandler(store *db.DB) http.HandlerFunc {
 		if !decodeNodeReport(w, r, maxNodeBulkReportBytes, &report) {
 			return
 		}
-		report.NodeName = nodeName
-		if err := store.RecordSystemLogs(r.Context(), report); err != nil {
-			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-			return
-		}
+		// System-log persistence is intentionally disabled. Keep accepting and
+		// decoding authenticated reports so existing agents advance their journal
+		// cursors instead of retrying an ever-growing backlog.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	}

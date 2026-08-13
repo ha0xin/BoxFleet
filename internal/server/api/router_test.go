@@ -1556,7 +1556,7 @@ func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	}
 }
 
-func TestNodeSystemLogsEndpointAndAdminQuery(t *testing.T) {
+func TestNodeSystemLogsEndpointDiscardsReports(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
 	seedAPITestNode(t, ctx, store)
@@ -1583,9 +1583,8 @@ func TestNodeSystemLogsEndpointAndAdminQuery(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"service":"boxfleet-agent.service"`) ||
-		!strings.Contains(rec.Body.String(), `"message":"agent started"`) {
-		t.Fatalf("body = %s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), `"agent started"`) {
+		t.Fatalf("disabled system-log persistence stored the report: %s", rec.Body.String())
 	}
 }
 
