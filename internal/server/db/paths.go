@@ -574,6 +574,22 @@ func (db *DB) ListPaths(ctx context.Context) ([]Path, error) {
 	return out, nil
 }
 
+// ListPathsForAdmin returns Paths whose Endpoint still resolves to a live
+// Proxy and Node. Proxies and Nodes are soft-deleted, so their foreign-key
+// children remain in SQLite; those orphaned Paths must not make the admin
+// listing fail while adminPathFromDB resolves the endpoint details.
+func (db *DB) ListPathsForAdmin(ctx context.Context) ([]Path, error) {
+	rows, err := db.q.ListPathsForAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Path, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, pathFromRow(row))
+	}
+	return out, nil
+}
+
 func (db *DB) DeletePath(ctx context.Context, pathID string) error {
 	path, err := db.GetPath(ctx, pathID)
 	if err != nil {

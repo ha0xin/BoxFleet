@@ -260,6 +260,51 @@ func (q *Queries) ListPathsByEndpointID(ctx context.Context, endpointID string) 
 	return items, nil
 }
 
+const listPathsForAdmin = `-- name: ListPathsForAdmin :many
+SELECT path.id, path.name, path.display_name, path.endpoint_id, path.dialer_path_id, path.enabled, path.visibility, path.managed, path.sort_order, path.created_at, path.updated_at
+FROM paths AS path
+JOIN endpoints AS endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details AS proxy ON proxy.id = endpoint.proxy_id
+WHERE proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
+ORDER BY path.sort_order, path.name, path.id
+`
+
+func (q *Queries) ListPathsForAdmin(ctx context.Context) ([]Path, error) {
+	rows, err := q.db.QueryContext(ctx, listPathsForAdmin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Path
+	for rows.Next() {
+		var i Path
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.DisplayName,
+			&i.EndpointID,
+			&i.DialerPathID,
+			&i.Enabled,
+			&i.Visibility,
+			&i.Managed,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserNamesByPathID = `-- name: ListUserNamesByPathID :many
 SELECT u.name
 FROM path_accesses a

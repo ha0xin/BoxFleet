@@ -1190,7 +1190,7 @@ func adminIssueUserProxyCredentialHandler(store *db.DB) http.HandlerFunc {
 
 func adminPathsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		paths, err := store.ListPaths(r.Context())
+		paths, err := store.ListPathsForAdmin(r.Context())
 		if err != nil {
 			writeAdminError(w, err)
 			return

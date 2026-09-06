@@ -1433,6 +1433,47 @@ func TestAdminPathPatchPreservesOmittedFields(t *testing.T) {
 	}
 }
 
+func TestAdminPathsIgnorePathsForDeletedNodes(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	seedAPITestNode(t, ctx, store)
+	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := store.GetNode(ctx, "azus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := store.EnsureEndpoint(ctx, proxy.ID, node.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreatePath(ctx, db.CreatePathParams{
+		Name: "stale", EndpointID: endpoint.ID, Enabled: true,
+		Visibility: db.PathVisibilitySelectable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SoftDeleteNode(ctx, "azus"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := adminJSONRequest(t, http.MethodGet, "/api/admin/paths", nil)
+	rec := httptest.NewRecorder()
+	NewRouter(Options{DB: store, AdminToken: "secret"}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("paths status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var paths []adminPath
+	if err := json.NewDecoder(rec.Body).Decode(&paths); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("paths = %#v, want stale paths omitted", paths)
+	}
+}
+
 func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)

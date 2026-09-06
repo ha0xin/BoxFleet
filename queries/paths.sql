@@ -14,6 +14,15 @@ SELECT * FROM paths WHERE id = sqlc.arg(id);
 -- name: ListPaths :many
 SELECT * FROM paths ORDER BY sort_order, name, id;
 
+-- name: ListPathsForAdmin :many
+SELECT path.*
+FROM paths AS path
+JOIN endpoints AS endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details AS proxy ON proxy.id = endpoint.proxy_id
+WHERE proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
+ORDER BY path.sort_order, path.name, path.id;
+
 -- name: ListPathsByEndpointID :many
 SELECT * FROM paths
 WHERE endpoint_id = sqlc.arg(endpoint_id)
