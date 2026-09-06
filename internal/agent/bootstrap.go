@@ -35,6 +35,11 @@ func Bootstrap(ctx context.Context, value string, allowInsecureTransport bool) e
 		return fmt.Errorf("decode bootstrap string: %w", err)
 	}
 	config := ConfigFromBootstrap(bootstrapConfig)
+	initSystem, err := detectInitSystem()
+	if err != nil {
+		return err
+	}
+	config.InitSystem = initSystem
 	config.AllowInsecureTransport = allowInsecureTransport
 	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {

@@ -1,0 +1,16 @@
+#!/sbin/openrc-run
+description="sing-box managed by BoxFleet"
+command={{ quote .Command }}
+command_args={{ quote .Arguments }}
+command_background="yes"
+pidfile={{ quote .PIDFile }}
+output_log={{ quote .OutputLog }}
+error_log={{ quote .ErrorLog }}
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+rc_ulimit="-n 1048576"
+
+depend() {
+	need net
+}

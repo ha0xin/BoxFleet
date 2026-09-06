@@ -90,7 +90,7 @@ against `SHA256SUMS`, installs them under `/opt/boxfleet/bin`, and runs
 `boxfleet-agent bootstrap`.
 
 Bootstrap writes `/etc/boxfleet/agent.json`, checks for `with_v2ray_api`,
-installs systemd units, applies config, and starts the agent. The node begins
+detects systemd or OpenRC, installs the matching services, applies config, and starts the agent. Alpine Linux nodes use OpenRC with `supervise-daemon`; Debian and Ubuntu nodes continue to use systemd. The node begins
 `pending`; its first authenticated heartbeat promotes it to `active`.
 
 ## Managed updates
@@ -135,6 +135,10 @@ systemctl status boxfleet-agent boxfleet-sing-box --no-pager
 readlink -f /opt/boxfleet/bin/boxfleet-agent
 readlink -f /opt/boxfleet/bin/sing-box
 ```
+
+On Alpine/OpenRC use `rc-service boxfleet-agent status` and
+`rc-service boxfleet-sing-box status`. OpenRC service output is retained under
+`/opt/boxfleet/log/` and uploaded by the same bounded log-reporting pipeline.
 
 Never expose admin/path/node tokens, subscription URLs, environment contents,
 or database data in deployment logs.

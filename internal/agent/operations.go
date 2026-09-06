@@ -87,7 +87,7 @@ func (a *Agent) RunOperations(ctx context.Context) error {
 		}
 		if state == nil || state.Assignment.ID != assignment.ID || state.Assignment.Attempt != assignment.Attempt {
 			if state != nil && state.Assignment.ID == assignment.ID {
-				// A lease may expire while systemd is restarting the agent. A new
+				// A lease may expire while the service manager restarts the agent. A new
 				// server attempt resets the event sequence but keeps the durable
 				// execution checkpoint so already-committed filesystem steps are
 				// reconciled instead of blindly repeated.
@@ -264,8 +264,8 @@ func (a *Agent) collectDiagnostics(ctx context.Context) map[string]any {
 		result["sing_box_version_error"] = err.Error()
 	}
 	for key, service := range map[string]string{"agent_state": a.Config.AgentService, "sing_box_state": a.Config.SingBoxService} {
-		if output, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", service); err == nil {
-			result[key] = strings.TrimSpace(string(output))
+		if state, err := a.serviceActiveState(ctx, service); err == nil {
+			result[key] = state
 		} else {
 			result[key+"_error"] = err.Error()
 		}

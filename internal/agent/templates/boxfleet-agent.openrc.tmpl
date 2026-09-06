@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+description="BoxFleet node agent"
+command={{ quote .Command }}
+command_args={{ quote .Arguments }}
+command_background="yes"
+pidfile={{ quote .PIDFile }}
+output_log={{ quote .OutputLog }}
+error_log={{ quote .ErrorLog }}
+supervisor="supervise-daemon"
+respawn_delay=10
+respawn_max=0
+
+depend() {
+	need net
+}
+
+start_pre() {
+	{{ .Guard }}
+}

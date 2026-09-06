@@ -67,7 +67,7 @@ func (a *Agent) loadAgentUpdateGuard() (*AgentUpdateGuardState, error) {
 	return &state, nil
 }
 
-// RunAgentGuard is invoked by systemd ExecStartPre from a stable copy of the
+// RunAgentGuard is invoked by the service manager before start from a stable copy of the
 // last confirmed agent. Three failed starts (or the deadline) atomically point
 // the service path back to the previous version before systemd starts it again.
 func (a *Agent) RunAgentGuard() error {

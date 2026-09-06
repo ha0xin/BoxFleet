@@ -51,6 +51,7 @@ const (
 )
 
 type Config struct {
+	InitSystem          string `json:"init_system,omitempty"`
 	NodeName            string `json:"node_name"`
 	Token               string `json:"token"`
 	ServerURL           string `json:"server_url"`
@@ -106,17 +107,19 @@ type ConfigResponse struct {
 }
 
 type State struct {
-	BootID              string               `json:"boot_id"`
-	Sequence            int64                `json:"sequence"`
-	LastCounters        map[string]int64     `json:"last_counters"`
-	CounterEpoch        map[string]int64     `json:"counter_epoch"`
-	LastLogLines        map[string]bool      `json:"last_log_lines"`
-	LastLogSince        string               `json:"last_log_since"`
-	LastLogCursor       string               `json:"last_log_cursor"`
-	LastSystemLogCursor map[string]string    `json:"last_system_log_cursor"`
-	LastSystemLogSince  map[string]string    `json:"last_system_log_since"`
-	AppliedConfigHash   string               `json:"applied_config_hash"`
-	PendingTraffic      *model.TrafficReport `json:"pending_traffic,omitempty"`
+	BootID                    string               `json:"boot_id"`
+	Sequence                  int64                `json:"sequence"`
+	LastCounters              map[string]int64     `json:"last_counters"`
+	CounterEpoch              map[string]int64     `json:"counter_epoch"`
+	LastLogLines              map[string]bool      `json:"last_log_lines"`
+	LastLogSince              string               `json:"last_log_since"`
+	LastLogCursor             string               `json:"last_log_cursor"`
+	LastSystemLogCursor       map[string]string    `json:"last_system_log_cursor"`
+	LastSystemLogSince        map[string]string    `json:"last_system_log_since"`
+	LastOpenRCLogOffset       int64                `json:"last_openrc_log_offset,omitempty"`
+	LastOpenRCSystemLogOffset map[string]int64     `json:"last_openrc_system_log_offset,omitempty"`
+	AppliedConfigHash         string               `json:"applied_config_hash"`
+	PendingTraffic            *model.TrafficReport `json:"pending_traffic,omitempty"`
 	// PendingConnections stages one connection telemetry report across the POST,
 	// exactly as PendingTraffic does. ConnectionSequence is its own counter so
 	// the two reports keep independent, gapless (boot id, sequence) idempotency
@@ -268,6 +271,9 @@ func WriteConfig(path string, config Config) error {
 }
 
 func (c *Config) ApplyDefaults() {
+	if c.InitSystem == "" {
+		c.InitSystem = InitSystemSystemd
+	}
 	if c.InstallDir == "" {
 		c.InstallDir = DefaultInstallDir
 	}
@@ -310,6 +316,9 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
+	if c.InitSystem != "" && c.InitSystem != InitSystemSystemd && c.InitSystem != InitSystemOpenRC {
+		return fmt.Errorf("init_system must be %q or %q", InitSystemSystemd, InitSystemOpenRC)
+	}
 	if c.NodeName == "" {
 		return errors.New("node_name is required")
 	}
@@ -391,22 +400,22 @@ func (a *Agent) Install(ctx context.Context) error {
 	if err := a.ensureAgentGuardBinary(); err != nil {
 		return err
 	}
-	if err := a.InstallSystemdUnits(); err != nil {
+	if err := a.installServiceUnits(); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "daemon-reload"); err != nil {
+	if err := a.reloadServices(ctx); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "enable", a.Config.SingBoxService); err != nil {
+	if err := a.enableService(ctx, a.Config.SingBoxService); err != nil {
 		return err
 	}
 	if err := a.Once(ctx); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "enable", a.Config.AgentService); err != nil {
+	if err := a.enableService(ctx, a.Config.AgentService); err != nil {
 		return err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.AgentService); err != nil {
+	if err := a.restartService(ctx, a.Config.AgentService); err != nil {
 		return err
 	}
 	return nil
@@ -509,14 +518,14 @@ func (a *Agent) lastGoodConfigPath() string {
 	return a.Config.SingBoxConfig + ".last-good"
 }
 
-// restartSingBoxVerified restarts sing-box and waits for the unit to report
-// active. The unit is Type=simple, so `systemctl restart` returns as soon as the
+// restartSingBoxVerified restarts sing-box and waits for the service to report
+// active. A service-manager restart can return as soon as the
 // process execs: a config that passes `sing-box check` but fails at runtime (a
 // bound port, a missing certificate) would otherwise look applied. An unreadable
 // probe stays "unknown" and is never treated as proof of failure, so a D-Bus
 // hiccup cannot trigger a rollback of a healthy config.
 func (a *Agent) restartSingBoxVerified(ctx context.Context) error {
-	if err := a.Runner.Run(ctx, "systemctl", "restart", a.Config.SingBoxService); err != nil {
+	if err := a.restartService(ctx, a.Config.SingBoxService); err != nil {
 		return err
 	}
 	activeErr := a.waitServiceActive(ctx, a.Config.SingBoxService)
@@ -549,15 +558,9 @@ func (a *Agent) rollbackToLastGoodConfig(ctx context.Context, applyErr error, ha
 	return fmt.Errorf("%w; rolled back to the last-good config", applyErr)
 }
 
-// singBoxActiveState returns the unit's ActiveState. `systemctl show` succeeds
-// for any unit state, so an error means the probe itself failed — an unknown
-// state, not a state named "unknown".
+// singBoxActiveState returns the service manager's normalized active state.
 func (a *Agent) singBoxActiveState(ctx context.Context) (string, error) {
-	out, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", a.Config.SingBoxService)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return a.serviceActiveState(ctx, a.Config.SingBoxService)
 }
 
 func (a *Agent) singBoxConfirmedDown(ctx context.Context) bool {
@@ -601,7 +604,7 @@ func (a *Agent) applyDisabled(ctx context.Context, response ConfigResponse) erro
 		if err := a.ReportTraffic(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "boxfleet-agent: stopping disabled node despite traffic flush failure; final interval may be unaccounted: %v\n", err)
 		}
-		if err := a.Runner.Run(ctx, "systemctl", "stop", a.Config.SingBoxService); err != nil {
+		if err := a.stopService(ctx, a.Config.SingBoxService); err != nil {
 			_ = a.ReportHeartbeat(ctx, response, "disabled")
 			return err
 		}
@@ -772,6 +775,9 @@ func (a *Agent) ReportTraffic(ctx context.Context) error {
 }
 
 func (a *Agent) ReportLogs(ctx context.Context) error {
+	if a.Config.InitSystem == InitSystemOpenRC {
+		return a.reportOpenRCNetworkLogs(ctx)
+	}
 	state, err := a.LoadState()
 	if err != nil {
 		return err
@@ -857,6 +863,9 @@ func (a *Agent) ReportLogs(ctx context.Context) error {
 }
 
 func (a *Agent) ReportSystemLogs(ctx context.Context) error {
+	if a.Config.InitSystem == InitSystemOpenRC {
+		return a.reportOpenRCSystemLogs(ctx)
+	}
 	state, err := a.LoadState()
 	if err != nil {
 		return err
@@ -1068,12 +1077,13 @@ func (a *Agent) LoadState() (State, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return State{
-				BootID:              uuid.NewString(),
-				LastCounters:        make(map[string]int64),
-				CounterEpoch:        make(map[string]int64),
-				LastLogLines:        make(map[string]bool),
-				LastSystemLogCursor: make(map[string]string),
-				LastSystemLogSince:  make(map[string]string),
+				BootID:                    uuid.NewString(),
+				LastCounters:              make(map[string]int64),
+				CounterEpoch:              make(map[string]int64),
+				LastLogLines:              make(map[string]bool),
+				LastSystemLogCursor:       make(map[string]string),
+				LastSystemLogSince:        make(map[string]string),
+				LastOpenRCSystemLogOffset: make(map[string]int64),
 			}, nil
 		}
 		return State{}, err
@@ -1099,6 +1109,9 @@ func (a *Agent) LoadState() (State, error) {
 	}
 	if state.LastSystemLogSince == nil {
 		state.LastSystemLogSince = make(map[string]string)
+	}
+	if state.LastOpenRCSystemLogOffset == nil {
+		state.LastOpenRCSystemLogOffset = make(map[string]int64)
 	}
 	return state, nil
 }

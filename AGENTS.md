@@ -7,7 +7,7 @@ not edit both paths separately.
 
 ## What BoxFleet is
 
-A central server (`bfs`, the BoxFleet server) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + `systemd` + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators use the admin Web UI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
+A central server (`bfs`, the BoxFleet server) manages users / nodes / proxies / config versions in SQLite and exposes an admin Web UI and a node API. Edge nodes run only `sing-box` + systemd or OpenRC + a thin `boxfleet-agent` that pulls config, applies it, and reports heartbeats / traffic / logs. Operators use the admin Web UI. Node-side memory pressure is a hard constraint — do not push databases, panels, or Docker onto nodes.
 
 Current target protocols are VLESS-Reality with `xtls-rprx-vision` and
 Shadowsocks 2022. Client publication is modeled as Endpoint (Proxy + Host) and
@@ -49,7 +49,7 @@ npm --prefix web run build
 ### Two binaries, two trust domains
 
 - `cmd/bfs` — central API + admin UI. Owns SQLite, renders sing-box configs, stores published config versions, accepts node reports.
-- `cmd/boxfleet-agent` — runs on each node. Pulls config from server, runs `sing-box check`, atomically writes config, restarts `sing-box` via systemctl, reports back. Talks to server with bearer tokens; never trusts node-supplied identity (server overrides `NodeName` in all decoded payloads).
+- `cmd/boxfleet-agent` — runs on each node. Pulls config from server, runs `sing-box check`, atomically writes config, restarts `sing-box` through the detected systemd/OpenRC manager, and reports back. Talks to server with bearer tokens; never trusts node-supplied identity (server overrides `NodeName` in all decoded payloads).
 
 ### Server-side data flow
 

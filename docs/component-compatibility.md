@@ -12,7 +12,7 @@ installation, wire compatibility, and generated-config compatibility.
 
 ## Current state
 
-For the planned server `v0.11.x` release, agent `v0.7.0`, and sing-box pin
+For the server `v0.12.x` release, agent `v0.8.0`, and sing-box pin
 `v1.14.0-beta.2`:
 
 | Property | Status | Boundary |
@@ -39,7 +39,7 @@ version numbers.
 | agent | server | Authenticated JSON node API: config fetch, apply result, heartbeat, traffic, logs, connection reports, and operations |
 | server | agent | HTTP status, response headers, rendered config bytes, and operation assignments |
 | server | sing-box | Generated JSON configuration schema and semantics |
-| agent | sing-box | `check`, `version`, systemd lifecycle, v2ray stats gRPC, journal format, and optional daemon connection gRPC |
+| agent | sing-box | `check`, `version`, systemd/OpenRC lifecycle, v2ray stats gRPC, journald or OpenRC file logs, and optional daemon connection gRPC |
 
 The server and agent happen to use SemVer-looking product versions, but they
 are different products and their minor numbers have no mathematical
@@ -54,7 +54,8 @@ not a claim that every Cartesian product is continuously tested.
 
 | Server release | Advertised agent target | Advertised sing-box target | Status |
 | --- | --- | --- | --- |
-| `v0.11.x` | `v0.7.0` | `v1.14.0-beta.2` | Planned release tuple; beta accepted explicitly and qualified by the five-check preflight |
+| `v0.12.x` | `v0.8.0` | `v1.14.0-beta.2` | Adds Alpine/OpenRC node lifecycle and log support |
+| `v0.11.x` | `v0.7.0` | `v1.14.0-beta.2` | Previous systemd-only release tuple |
 | `v0.10.x` | `v0.7.0` | `v1.13.14` | Immediate server and sing-box rollback tuple |
 | `v0.6.2`–`v0.9.x` | `v0.6.1` | `v1.13.13` | Historical target tuple; not a current support promise |
 | `v0.5.0`–`v0.6.1` | same version as server | `v1.13.13` | Introduced capability-based managed updates; historical, not a current support promise |
@@ -64,15 +65,14 @@ Feature-level compatibility for the current server is narrower and more useful:
 
 | Feature | Minimum agent contract | sing-box contract | Current status |
 | --- | --- | --- | --- |
-| Config pull/apply, heartbeat, traffic and journal logs | Legacy node API | Exact renderer-qualified beta.2 build | Normal fleet path |
+| Config pull/apply, heartbeat, traffic and service logs | Legacy node API | Exact renderer-qualified beta.2 build | Normal fleet path on systemd and OpenRC |
 | Managed agent update | `operations.v1`, `update.agent.v1`, `download.streaming.v1`, `install.versioned.v1`, `restart_resume.agent.v1` | Not applicable | Negotiated and enforced |
 | Managed sing-box update | `operations.v1`, `update.sing_box.v1`, `download.streaming.v1`, `install.versioned.v1`, `rollback.sing_box.v1` | Candidate version, `with_v2ray_api`, and live config verified by the updater | Negotiated and enforced |
 | Connection stream telemetry | `telemetry.connections.v1` | Qualified sing-box 1.14 daemon API build | Experimental, per-node opt-in, off by default |
 
-The `v0.11.x` release does not change the advertised agent target: `v0.7.0` is
-both the current and immediately previous target. The older `v0.6.1` agent is a
-historical tuple, not a supported transition edge, until cross-version CI proves
-otherwise.
+The `v0.12.x` server advertises agent `v0.8.0`; `v0.7.0` remains the immediate
+rollback target for existing systemd nodes. Alpine/OpenRC nodes require
+`v0.8.0` or later.
 
 An agent with operations support must not be installed against a pre-`v0.5.0`
 server: those servers do not expose the operations endpoints, and a `404` is a

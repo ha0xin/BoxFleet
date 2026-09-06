@@ -213,10 +213,10 @@ func (a *Agent) updateAgent(
 	}); err != nil {
 		return false, err
 	}
-	if err := a.InstallSystemdUnits(); err != nil {
+	if err := a.installServiceUnits(); err != nil {
 		return false, err
 	}
-	if err := a.Runner.Run(ctx, "systemctl", "daemon-reload"); err != nil {
+	if err := a.reloadServices(ctx); err != nil {
 		return false, err
 	}
 	if err := switchVersionedBinary(a.Config.AgentPath, candidate, previous); err != nil {
@@ -230,7 +230,7 @@ func (a *Agent) updateAgent(
 	// its durable outbox will be retried by the new process after systemd restart.
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	_ = a.reportOperationEventWithRetry(reportCtx, state, model.NodeOperationEventReport{
-		Status: "running", Phase: "restarting_agent", Message: "agent switched; restarting under systemd",
+		Status: "running", Phase: "restarting_agent", Message: "agent switched; restarting under service manager",
 		Details: mustJSONObject(map[string]any{"version": asset.Version}),
 	})
 	cancel()
@@ -316,12 +316,12 @@ func (a *Agent) updateSingBox(
 	defer cancel()
 	var activateErr error
 	if disabled {
-		activateErr = a.Runner.Run(criticalCtx, "systemctl", "stop", a.Config.SingBoxService)
+		activateErr = a.stopService(criticalCtx, a.Config.SingBoxService)
 		if activateErr == nil && !a.singBoxConfirmedDown(criticalCtx) {
 			activateErr = errors.New("disabled sing-box service did not stop")
 		}
 	} else {
-		activateErr = a.Runner.Run(criticalCtx, "systemctl", "restart", a.Config.SingBoxService)
+		activateErr = a.restartService(criticalCtx, a.Config.SingBoxService)
 		if activateErr == nil {
 			activateErr = a.waitServiceActive(criticalCtx, a.Config.SingBoxService)
 		}
@@ -330,9 +330,9 @@ func (a *Agent) updateSingBox(
 		rollbackErr := switchVersionedBinary(a.Config.SingBoxPath, previous, candidate)
 		if rollbackErr == nil {
 			if disabled {
-				rollbackErr = a.Runner.Run(criticalCtx, "systemctl", "stop", a.Config.SingBoxService)
+				rollbackErr = a.stopService(criticalCtx, a.Config.SingBoxService)
 			} else {
-				rollbackErr = a.Runner.Run(criticalCtx, "systemctl", "restart", a.Config.SingBoxService)
+				rollbackErr = a.restartService(criticalCtx, a.Config.SingBoxService)
 				if rollbackErr == nil {
 					rollbackErr = a.waitServiceActive(criticalCtx, a.Config.SingBoxService)
 				}
@@ -626,12 +626,12 @@ func (a *Agent) waitServiceActive(ctx context.Context, service string) error {
 	}
 	backoff := retry.WithMaxDuration(wait, retry.NewConstant(time.Second))
 	return retry.Do(ctx, backoff, func(ctx context.Context) error {
-		output, err := a.Runner.Output(ctx, "systemctl", "show", "-p", "ActiveState", "--value", service)
+		state, err := a.serviceActiveState(ctx, service)
 		if err != nil {
 			return retry.RetryableError(err)
 		}
-		if strings.TrimSpace(string(output)) != "active" {
-			return retry.RetryableError(fmt.Errorf("service state is %q", strings.TrimSpace(string(output))))
+		if state != "active" {
+			return retry.RetryableError(fmt.Errorf("service state is %q", state))
 		}
 		return nil
 	})
