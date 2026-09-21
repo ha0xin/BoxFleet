@@ -11,7 +11,7 @@ import (
 
 // CompilerVersion is part of every cache key. Increment it whenever compiler
 // semantics change without changing the input document shape.
-const CompilerVersion = "boxfleet-mihomo-v1"
+const CompilerVersion = "boxfleet-mihomo-v2"
 
 // CompileCache is a bounded, concurrency-safe LRU for successful compilation
 // results. Errors are never cached, so a timeout or cancellation cannot poison

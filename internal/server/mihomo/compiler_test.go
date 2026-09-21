@@ -192,6 +192,42 @@ function main(config) {
 	}
 }
 
+func TestCompileJavaScriptCanAppendToArrays(t *testing.T) {
+	compiler := NewCompiler(DefaultLimits())
+	result, err := compiler.Compile(context.Background(), []byte(`
+proxies:
+  - {name: existing, type: direct}
+rules:
+  - MATCH,DIRECT
+`), []Rewrite{{
+		Name: "append",
+		Kind: RewriteJavaScript,
+		Content: `
+function main(config) {
+  config.proxies.push({name: "added", type: "ss"})
+  config.rules.push("DOMAIN-SUFFIX,example.com,DIRECT")
+  return config
+}
+`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]any
+	if err := yaml.Unmarshal(result.YAML, &got); err != nil {
+		t.Fatal(err)
+	}
+	proxies := got["proxies"].([]any)
+	if len(proxies) != 2 || proxies[1].(map[string]any)["name"] != "added" {
+		t.Fatalf("JavaScript push did not append proxy: %#v", proxies)
+	}
+	rules := got["rules"].([]any)
+	if !reflect.DeepEqual(rules, []any{"MATCH,DIRECT", "DOMAIN-SUFFIX,example.com,DIRECT"}) {
+		t.Fatalf("JavaScript push did not append rule: %#v", rules)
+	}
+}
+
 func TestCompileRejectsInvalidJavaScriptResults(t *testing.T) {
 	compiler := NewCompiler(DefaultLimits())
 	tests := []struct {

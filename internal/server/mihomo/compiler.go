@@ -287,11 +287,11 @@ func (c *Compiler) runJavaScript(
 		return nil, &CompileError{Kind: ErrorInvalidScript, Rewrite: rewrite.Name, Err: errors.New("main(config) is required")}
 	}
 
-	cloned, err := cloneProfile(profile)
+	cloned, err := cloneProfileForJavaScript(vm, profile)
 	if err != nil {
 		return nil, &CompileError{Kind: ErrorInvalidProfile, Rewrite: rewrite.Name, Err: err}
 	}
-	value, err := main(goja.Undefined(), vm.ToValue(cloned))
+	value, err := main(goja.Undefined(), cloned)
 	if err != nil {
 		return nil, scriptExecutionError(runCtx, rewrite.Name, err)
 	}
@@ -327,16 +327,22 @@ func scriptExecutionError(ctx context.Context, rewrite string, err error) error 
 	return &CompileError{Kind: ErrorInvalidScript, Rewrite: rewrite, Err: err}
 }
 
-func cloneProfile(profile map[string]any) (map[string]any, error) {
+// cloneProfileForJavaScript converts the profile through JSON.parse so scripts
+// receive native JavaScript objects and arrays. Passing Go maps and slices
+// directly through Runtime.ToValue creates reflect-backed wrappers: property
+// edits work, but operations that resize an array (for example push) are not
+// preserved when the result is exported.
+func cloneProfileForJavaScript(vm *goja.Runtime, profile map[string]any) (goja.Value, error) {
 	raw, err := json.Marshal(profile)
 	if err != nil {
 		return nil, err
 	}
-	var cloned map[string]any
-	if err := json.Unmarshal(raw, &cloned); err != nil {
-		return nil, err
+	jsonObject := vm.Get("JSON").ToObject(vm)
+	parse, ok := goja.AssertFunction(jsonObject.Get("parse"))
+	if !ok {
+		return nil, errors.New("JSON.parse is unavailable")
 	}
-	return cloned, nil
+	return parse(jsonObject, vm.ToValue(string(raw)))
 }
 
 func (c *Compiler) appendLog(logs *[]LogEntry, used *int, entry LogEntry) {
