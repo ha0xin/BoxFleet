@@ -27,7 +27,7 @@ export function SettingsPage({
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <AppPageHeader title="Settings" description="Admin authentication and data." />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto w-full max-w-[1400px] px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto w-full max-w-[1400px] px-4 pb-8 md:px-8">
           <Grid variant="2up" gap="base">
             <Surface id="admin-token" className="rounded-lg p-5 scroll-mt-4">
               <Text variant="heading3" as="h2">

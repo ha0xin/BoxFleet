@@ -73,14 +73,14 @@ const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage
  * the leftover width and truncate.
  */
 const nodeColumns: TableColumnWidth[] = [
-  { min: 104 }, // Node
+  160, // Node
   144, // Status — "Needs attention" is the widest badge and must not truncate
-  { min: 104 }, // Public host
+  { min: 220 }, // Public host
   112, // Agent
   112, // sing-box
   92, // Config
   108, // Last seen
-  { min: 104 }, // Update
+  160, // Update
   52 // Actions
 ];
 
@@ -287,7 +287,7 @@ export function NodesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           {campaign ? (
             <Banner
               variant={campaign.campaign.status === "paused" ? "error" : "default"}
@@ -303,14 +303,6 @@ export function NodesPage() {
             <Banner variant="alert" title="Managed updates unavailable" description={release.update_error} />
           ) : null}
           <section className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-kumo-default">Node inventory</h2>
-                <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `${total} ${total === 1 ? "node" : "nodes"}` : "No nodes"}
-                </p>
-              </div>
-            </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
@@ -368,7 +360,7 @@ export function NodesPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard>
+            <TableCard tableId="nodes">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
                 <TableColgroup widths={nodeColumns} />
                 <Table.Header variant="compact">

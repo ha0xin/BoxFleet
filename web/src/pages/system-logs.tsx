@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowClockwiseIcon, FunnelIcon, TerminalWindowIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, FunnelIcon } from "@phosphor-icons/react";
 import { Badge, Banner, Button, Collapsible, Combobox, Dialog, Input, Select, Table } from "@cloudflare/kumo";
 
 import type { AdminNode, SystemLog, SystemLogLevelFilter, SystemLogSort, SystemLogsResponse } from "../types";
@@ -21,6 +22,7 @@ import {
   tableMinWidth
 } from "@/components/admin-table";
 import type { TableColumnWidth } from "@/components/admin-table";
+import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
@@ -86,11 +88,12 @@ const levelItems = {
  * there instead of being smeared over the other five.
  */
 const logColumns: TableColumnWidth[] = [
-  152, // Observed
+  36, // Details
+  270, // Observed
   152, // Node
   140, // Service
   112, // Level
-  { min: 228 }, // Message
+  { min: 360 }, // Message
   152 // Ingested
 ];
 
@@ -122,13 +125,7 @@ function formatTimestamp(value: string): string {
   if (!value) return "—";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  }).format(date);
+  return format(date, "yyyy-MM-dd HH:mm:ss.SSS");
 }
 
 function errorMessage(error: unknown): string {
@@ -154,6 +151,7 @@ export function SystemLogsPage() {
   const { filters, page, perPage, offset, setFilters, setPage, setPerPage, resetFilters } =
     useUrlFilters(urlFilterOptions);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<SystemLog | null>(null);
 
   // react-hook-form is the draft layer for the search box only; the facets
@@ -250,14 +248,8 @@ export function SystemLogsPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">Recent logs</h2>
-              <p className="text-sm text-kumo-subtle">
-                {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No logs"}
-              </p>
-            </div>
 
             <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -351,7 +343,7 @@ export function SystemLogsPage() {
 
             {note ? <Banner variant="secondary" title={note} /> : null}
 
-            <TableCard>
+            <TableCard tableId="system-logs" variant="log">
               <Table
                 layout="fixed"
                 style={{ minWidth: tableMinWidth(logColumns) }}
@@ -360,7 +352,8 @@ export function SystemLogsPage() {
                 <TableColgroup widths={logColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <SortHead label="Observed" column="observed_at" sort={filters.sort} direction={filters.direction} setSort={setSort} sticky="left" />
+                    <Table.Head><span className="sr-only">Details</span></Table.Head>
+                    <SortHead label="Timestamp" column="observed_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Node" column="node" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Service" column="service" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <SortHead label="Level" column="level" sort={filters.sort} direction={filters.direction} setSort={setSort} />
@@ -378,9 +371,10 @@ export function SystemLogsPage() {
                       const meta = levelBadge(log.level);
                       const rowKey = `${log.observed_at}|${log.ingested_at}|${log.node}|${log.service}|${log.message.slice(0, 24)}`;
                       return (
-                        <Table.Row key={rowKey}>
-                          <Table.Cell sticky="left">
-                            <span className="block truncate text-kumo-subtle" title={log.observed_at || undefined}>
+                        <Fragment key={rowKey}><Table.Row>
+                          <Table.Cell className="bf-log-expand"><LogExpandButton expanded={expanded === rowKey} onClick={() => setExpanded(expanded === rowKey ? null : rowKey)} label="log entry" /></Table.Cell>
+                          <Table.Cell>
+                            <span className="block truncate font-mono text-xs text-kumo-default" title={log.observed_at || undefined}>
                               {formatTimestamp(log.observed_at)}
                             </span>
                           </Table.Cell>
@@ -391,7 +385,6 @@ export function SystemLogsPage() {
                           </Table.Cell>
                           <Table.Cell>
                             <span className="flex min-w-0 items-center gap-1.5 text-kumo-subtle">
-                              <TerminalWindowIcon className="size-4 shrink-0" />
                               <span className="truncate">{log.service || "—"}</span>
                             </span>
                           </Table.Cell>
@@ -415,6 +408,8 @@ export function SystemLogsPage() {
                             </span>
                           </Table.Cell>
                         </Table.Row>
+                        {expanded === rowKey ? <LogRowDetails value={log} colSpan={COLUMN_COUNT} /> : null}
+                        </Fragment>
                       );
                     })
                   ) : narrowed ? (

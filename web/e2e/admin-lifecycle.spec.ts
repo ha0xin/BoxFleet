@@ -5,21 +5,24 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Nodes", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Enroll", exact: true }).click();
   await page.getByLabel("Node name").fill("edge-ui");
-  await page.getByLabel("Public host").fill("203.0.113.50");
+  await page.getByRole("dialog").getByLabel("Public host").fill("203.0.113.50");
   await page.getByRole("button", { name: "Generate bootstrap" }).click();
   await expect(page.getByText("Install command", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expectRowVisible(page, "edge-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("alice-ui");
   await page.getByRole("button", { name: "Create user" }).click();
   await expectRowVisible(page, "alice-ui");
 
   await page.getByRole("button", { name: "Proxies", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("vless-ui");
   await page.getByLabel("Listen port", { exact: true }).fill("39091");
@@ -27,6 +30,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "vless-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Manage access" }).click();
   await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
@@ -40,6 +44,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await page.getByRole("button", { name: "Done", exact: true }).click();
 
   await page.getByRole("button", { name: "Proxies", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
   await openRowActions(page, "vless-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete proxy" })).toBeVisible();
@@ -49,6 +54,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "vless-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete user" })).toBeVisible();
@@ -58,6 +64,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "alice-ui");
 
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Nodes", exact: true })).toBeVisible();
   await openRowActions(page, "edge-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete node" })).toBeVisible();
@@ -70,6 +77,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
 test("Mihomo configurations use tables, templates, and a two-column processor pipeline", async ({ page }) => {
   await page.goto(".");
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("mihomo-ui");
   await page.getByRole("button", { name: "Create user" }).click();

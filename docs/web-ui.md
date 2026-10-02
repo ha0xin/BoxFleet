@@ -111,8 +111,8 @@ wide as a hostname. The fix is to say what each column is worth:
 ```tsx
 const nodeColumns: TableColumnWidth[] = [{ min: 104 }, 144, /* … */ 52];
 
-<TableCard>
-  <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
+<TableCard tableId="nodes" widths={nodeColumns}>
+  <Table layout="fixed">
     <TableColgroup widths={nodeColumns} />
     …
 ```
@@ -123,15 +123,11 @@ const nodeColumns: TableColumnWidth[] = [{ min: 104 }, 144, /* … */ 52];
   column's natural width — not by guessing.
 - **`{ min }`** marks a flexible column that takes the leftover width. Use it
   only for genuinely open-ended text (names, hosts, endpoints, log messages).
-- Fixed table layout divides the leftover **equally** between flexible columns.
-  That is the one distribution every browser implements identically, so it is
-  what the helpers rely on. Percentage `<col>` widths do bias the split in
-  Chrome but over-constrain the table, and `calc()` percentages are ignored
-  entirely — do not reach for either. A column that must stay narrower than its
-  peers gets a px width instead of being made flexible.
-- `tableMinWidth` therefore reserves the *largest* flexible floor for every
-  flexible column. Below that width `TableCard`'s scroll container takes over,
-  which is the correct behaviour, not a bug.
+- `TableCard` sets explicit column sizes through TanStack, so the browser does
+  not divide spare width equally. The largest flexible column receives spare
+  space by default; resized columns retain the operator's chosen size.
+- `tableMinWidth` / `TableColgroup` remain compatible with older declarations;
+  inside `TableCard` the declared widths are read and replaced by managed sizes.
 - Never put `min-w-[NNNNpx]` on a `<Table>`. It is a page-wide constraint
   wearing a table's clothing — see below.
 
@@ -160,26 +156,40 @@ Verify with geometry, never by eye: the sidebar `<main>` must have
 `scrollWidth - clientWidth === 0` at every viewport, and `.bf-table-scroll` must
 be the element that scrolls when a table is genuinely wider than its card.
 
-### Draggable column resizing
+### Cloudflare table presentation and column preferences
 
-Kumo does ship `Table.ResizeHandle` (`Table.ResizeHandle` in
-`node_modules/@cloudflare/kumo/dist/src/components/table/table.d.ts`;
-`Table.Head` is already `group relative` so the handle positions itself). It is
-an affordance only — no drag logic, no state, no persistence — and Kumo's own
-docs pair it with TanStack Table:
-`refs/kumo/packages/kumo-docs-astro/src/pages/components/table.mdx`. **`npx kumo
-docs Table` lists it with empty props and no example and never mentions
-resizing**, the same CLI blind spot recorded above for charts.
+Resource inventories follow the Domains table: 44px rows and header, 13px
+header labels, 14px cells, canvas header background, line separators, and
+icon-plus-text statuses. Log tables follow Observability: 44px rows, 14px
+headers, monospaced timestamps/messages, a vertically scrolling body with a
+sticky header, a Fields menu, and expandable JSON details. Journal events and
+the opt-in connection stream remain separate datasets and keep their existing
+server-side query and aggregation contracts.
 
-It is deliberately not wired up. Resizing is an escape hatch on top of good
-defaults, not a substitute for them, and it would cost: converting the
-hand-rolled pages to TanStack column definitions, a persistence layer, and a
-keyboard path (`getResizeHandler` binds only mouse and touch, so shipping it
-as-is adds a focusable control per header that does nothing on Enter). If it is
-ever added, `layout="fixed"` plus `TableColgroup` is already the substrate — feed
-the widths from `column.getSize()` — and it should start on a page that is
-already TanStack-driven. Pass `className="bg-kumo-elevated"` to the handle so it
-matches the compact header; Kumo hardcodes `bg-kumo-base`.
+`TableCard` composes native Kumo `Table` elements with TanStack Table's column
+sizing and visibility. Supply a stable `tableId`, plus `widths` or the existing
+`TableColgroup`. It retains page-owned row rendering, server sorting, filtering
+and pagination. Explicit widths prevent the browser from distributing spare
+space equally across name columns; the largest flexible content column takes
+remaining space. Table overflow stays inside `.bf-table-scroll`.
+
+Kumo's `Table.ResizeHandle` provides the styled native button; TanStack supplies
+mouse/touch drag handlers. Arrow keys adjust by 10px, Shift+Arrow by 40px, Home
+or double-click restores that column's default. The column menu can hide fields
+and reset all columns. Width and visibility preferences are stored locally,
+scoped by table ID and column schema; malformed or unavailable storage falls
+back safely. Preferences contain no row data.
+
+The pinned-column gradient is disabled in these tables: Kumo renders it even
+when no content is obscured, so it can cover the next column's label. Pinning
+still uses Kumo's opaque background. Empty/loading/error content renders under
+the horizontally scrolling header at the card's visible width, keeping it
+readable on phones.
+
+Geometry and interaction checks live in `e2e/responsive.spec.ts`: drag and
+keyboard resizing, reload persistence, hide/reset, log detail alignment, and
+390/768/1024/1440/1920px page overflow. Do not rely solely on CLI Table docs:
+they omit the resizing example; verify the actual component source/API.
 
 ## Charts
 

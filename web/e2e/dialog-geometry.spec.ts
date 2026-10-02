@@ -42,7 +42,7 @@ test("dialogs honour their size and never overflow their content", async ({ page
   expect(enroll.overflowing).toEqual([]);
 
   await page.getByLabel("Node name").fill("geometry-node");
-  await page.getByLabel("Public host").fill("203.0.113.50");
+  await page.getByRole("dialog").getByLabel("Public host").fill("203.0.113.50");
   await page.getByRole("button", { name: "Generate bootstrap" }).click();
   await expect(page.getByText("Install command", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();

@@ -17,7 +17,7 @@ import { useIsDarkMode } from "@/components/chart/use-color-mode";
  * The bar's right slot carries the publish strip, a Logs shortcut (hidden on
  * the System Logs page itself), and the page-level `actions`. Every admin page
  * renders this once at the top; page content below owns its own
- * `max-w-[1400px]` container.
+ * responsive content container.
  */
 export function AppPageHeader({
   title,
@@ -85,12 +85,12 @@ export function AppPageHeader({
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[1400px] px-6 md:px-8 lg:px-10">
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-4 pt-6">
+      <div className="mx-auto w-full px-4 md:px-8">
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">
           <div className="flex min-w-0 flex-col">
-            <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-kumo-default md:text-3xl">{title}</h1>
+            <h1 className="mb-2 text-xl font-semibold tracking-tight text-kumo-default">{title}</h1>
             {description ? (
-              <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p>
+              <p className="max-w-2xl text-sm leading-5 text-kumo-subtle">{description}</p>
             ) : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}

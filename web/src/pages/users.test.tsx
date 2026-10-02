@@ -174,7 +174,7 @@ describe("UsersPage", () => {
     expect(screen.getByText("4.0 KB")).toBeTruthy();
     expect(screen.getByText("raw 4.0 KB")).toBeTruthy();
     // The count is the server's total, not the length of this page.
-    expect(screen.getByText("42 users")).toBeTruthy();
+    expect(screen.getByText("of 42 items", { exact: false })).toBeTruthy();
     expect(urls[0]).toContain("/api/admin/users?limit=10");
   });
 

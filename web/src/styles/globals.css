@@ -155,3 +155,106 @@
     background-clip: padding-box;
   }
 }
+
+/* Domains and Observability share 44px rows. Keep Kumo's native controls and
+   semantic palette; only the table presentation differs between the views. */
+.bf-data-table {
+  table-layout: fixed;
+  min-width: 0 !important;
+  font-size: 14px;
+  line-height: 20px;
+}
+.bf-data-table > thead > tr > th {
+  height: 44px;
+  padding: 8px 16px;
+  background: var(--color-kumo-canvas);
+  border-bottom: 1px solid var(--color-kumo-line);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-color-kumo-subtle);
+  white-space: nowrap;
+}
+.bf-table-log .bf-data-table > thead > tr > th {
+  padding-inline: 12px;
+  font-size: 14px;
+}
+.bf-data-table > thead > tr > th > button:not([role="separator"]) {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+}
+.bf-data-table > tbody > tr {
+  background: var(--color-kumo-base);
+  --kumo-table-row-bg: var(--color-kumo-base);
+}
+.bf-data-table > tbody > tr:hover {
+  background: var(--color-kumo-overlay);
+  --kumo-table-row-bg: var(--color-kumo-overlay);
+}
+.bf-data-table > tbody > tr > td {
+  height: 44px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-kumo-line);
+  font-size: 14px;
+  line-height: 20px;
+  overflow: hidden;
+}
+.bf-table-log .bf-data-table > tbody > tr > td { padding-inline: 12px; }
+.bf-data-table > tbody > tr:last-child > td { border-bottom: 0; }
+.bf-data-table td .text-base { font-size: 14px; line-height: 20px; }
+.bf-data-table th::before, .bf-data-table td::before { display: none; }
+.bf-data-table th[aria-sort] svg { opacity: 0.55; }
+.bf-data-table th[aria-sort="ascending"] svg,
+.bf-data-table th[aria-sort="descending"] svg { color: var(--color-kumo-brand); opacity: 1; }
+.bf-data-table > thead > tr > th:has([role="separator"])::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--color-kumo-line);
+  pointer-events: none;
+}
+.bf-data-table th > [role="separator"] {
+  visibility: visible;
+  z-index: 5;
+  width: 8px;
+  background: transparent;
+}
+.bf-data-table th > [role="separator"] > span { opacity: 0; }
+.bf-data-table th > [role="separator"]:hover > span,
+.bf-data-table th > [role="separator"]:focus-visible > span {
+  height: 100%;
+  opacity: 1;
+  background: var(--color-kumo-brand);
+}
+.bf-data-table .bf-table-settings { padding: 4px !important; }
+.bf-table-log .bf-table-scroll { max-height: 65dvh; overflow-y: auto; }
+.bf-table-log thead { position: sticky; top: 0; z-index: 10; }
+.bf-table-log td pre { font-size: 12px; line-height: 20px; }
+.bf-table-resource .bf-status-badge {
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-color-kumo-default);
+  font-size: 14px;
+  line-height: 20px;
+  gap: 6px;
+}
+.bf-table-resource .bf-status-badge > span[aria-hidden="true"] { display: none; }
+.bf-table-resource .bf-status-icon { display: block; }
+.bf-table-resource .bf-status-warning .bf-status-icon { color: var(--text-color-kumo-warning); }
+.bf-table-resource .bf-status-error .bf-status-icon { color: var(--text-color-kumo-danger); }
+.bf-table-resource .bf-status-neutral { color: var(--text-color-kumo-subtle); }
+.bf-table-log .bf-status-badge { font-size: 12px; }
+.bf-table-log td button:not([data-kumo-component]) { font-family: var(--font-mono); font-size: 12px; }
+.bf-data-table .bf-log-expand { padding: 4px !important; }
+.bf-log-detail > td { background: var(--color-kumo-canvas); }
+.bf-table-settings { right: 0; }
+.bf-table-log .bf-data-table td > span.font-mono,
+.bf-table-log .bf-data-table td > div > span { font-size: 12px; }
+.bf-data-table .bf-table-settings > button { margin-left: auto; }

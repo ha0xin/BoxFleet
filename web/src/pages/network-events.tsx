@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -68,6 +68,7 @@ import { useAdminApi } from "@/admin/api";
 import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useAutoRefresh } from "@/admin/use-auto-refresh";
 import { AdminPagination, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RankedBarList, type RankedBarRow } from "@/components/chart/ranked-bar-list";
 import { TimeBarChart, type TimeSeries } from "@/components/chart/time-bar-chart";
@@ -1066,7 +1067,7 @@ export function ConnectionTelemetryPanel({
                 <PanelError>{errorMessage(eventsQuery.error)}</PanelError>
               ) : (
                 <>
-                  <div className="overflow-x-auto overscroll-x-contain">
+                  <TableCard tableId="connection-events" variant="log" widths={[270, 160, 160, 200, 100, 160, { min: 220 }, 100, 120, 160]}>
                     <Table className="min-w-[1400px] table-fixed">
                       <Table.Header variant="compact">
                         {connectionTable.getHeaderGroups().map((headerGroup) => (
@@ -1104,7 +1105,7 @@ export function ConnectionTelemetryPanel({
                         )}
                       </Table.Body>
                     </Table>
-                  </div>
+                  </TableCard>
                   <p className="border-t border-kumo-line px-4 py-2 text-xs text-kumo-subtle">
                     Showing {formatCount(connectionEvents.length)} of{" "}
                     {formatCount(eventsQuery.data?.total ?? connectionEvents.length)} aggregated rows, newest bucket
@@ -1186,6 +1187,7 @@ export function ConnectionTelemetryPanel({
 }
 
 export function NetworkEventsPage() {
+  const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
   const { request } = useAdminApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const [nowAnchor, setNowAnchor] = useState(() => new Date());
@@ -1399,6 +1401,7 @@ export function NetworkEventsPage() {
   }
 
   const columns = useMemo(() => [
+    columnHelper.display({ id: "details", header: "Details", cell: () => null }),
     columnHelper.accessor("window_end", {
       header: "Time",
       cell: (info) => (
@@ -1466,7 +1469,7 @@ export function NetworkEventsPage() {
   });
 
   return (
-    <div className="flex min-h-full flex-col bg-kumo-canvas">
+    <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
         title="Network Events"
         description="Review parsed sing-box connection events, users, nodes, destinations, and raw log context."
@@ -1485,7 +1488,7 @@ export function NetworkEventsPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           <section className="flex flex-col gap-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -1653,7 +1656,7 @@ export function NetworkEventsPage() {
               onServiceChange={(value) => setViewParam("service", value)}
             />
 
-            <TableCard>
+            <TableCard tableId="network-events" variant="log" widths={[36, 270, 120, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
               <Table className="min-w-[1600px] table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (
@@ -1661,7 +1664,7 @@ export function NetworkEventsPage() {
                       {headerGroup.headers.map((header) => (
                         <Table.Head
                           key={header.id}
-                          sticky={header.column.id === "window_end" ? "left" : undefined}
+
                           className={columnClass(header.column, "headClassName")}
                         >
                           {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
@@ -1677,17 +1680,19 @@ export function NetworkEventsPage() {
                     <TableLoading colSpan={columns.length} />
                   ) : table.getRowModel().rows.length > 0 ? (
                     table.getRowModel().rows.map((row) => (
-                      <Table.Row key={row.id}>
+                      <Fragment key={row.id}><Table.Row>
                         {row.getVisibleCells().map((cell) => (
                           <Table.Cell
                             key={cell.id}
-                            sticky={cell.column.id === "window_end" ? "left" : undefined}
+
                             className={columnClass(cell.column, "cellClassName")}
                           >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            {cell.column.id === "details" ? <LogExpandButton expanded={expandedEvent === row.id} onClick={() => setExpandedEvent(expandedEvent === row.id ? null : row.id)} label="network event" /> : flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </Table.Cell>
                         ))}
                       </Table.Row>
+                      {expandedEvent === row.id ? <LogRowDetails value={row.original} colSpan={columns.length} /> : null}
+                      </Fragment>
                     ))
                   ) : (
                     <TableEmpty colSpan={columns.length} description="Adjust the filters or time range to see more events.">

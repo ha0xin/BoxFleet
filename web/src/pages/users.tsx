@@ -129,10 +129,10 @@ export function rawBytes(traffic: TrafficVolume): number {
  * hard content ceiling and are pinned to it.
  */
 const userColumns: TableColumnWidth[] = [
-  { min: 192 }, // User
+  200, // User
   120, // Status
   116, // Traffic
-  { min: 192 }, // Quota — the meter plus its up/down legend
+  { min: 240 }, // Quota — the meter plus its up/down legend
   96, // Access
   116, // Expires
   52 // Actions
@@ -264,14 +264,8 @@ export function UsersPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">User inventory</h2>
-              <p className="text-sm text-kumo-subtle">
-                {total > 0 ? `${total} ${total === 1 ? "user" : "users"}` : "No users"}
-              </p>
-            </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
@@ -318,7 +312,7 @@ export function UsersPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard>
+            <TableCard tableId="users">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(userColumns) }}>
                 <TableColgroup widths={userColumns} />
                 <Table.Header variant="compact">

@@ -3,7 +3,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { TableColgroup, tableMinWidth, type TableColumnWidth } from "./admin-table";
+import { readTablePreferences, TableColgroup, tableMinWidth, type TableColumnWidth } from "./admin-table";
 
 // Vitest runs without globals, so Testing Library never registers auto-cleanup.
 afterEach(cleanup);
@@ -53,5 +53,16 @@ describe("TableColgroup", () => {
   it("leaves flexible columns without a width", () => {
     const [, second] = cols([144, { min: 80 }]);
     expect(second.style.width).toBe("");
+  });
+});
+
+
+describe("stored column preferences", () => {
+  it("ignores corrupted storage and unknown columns, and bounds widths", () => {
+    localStorage.setItem("columns", "invalid json");
+    expect(readTablePreferences("columns", 3)).toEqual({ sizing: {}, visibility: {} });
+    localStorage.setItem("columns", JSON.stringify({ sizing: { 0: -20, 1: 9999, 2: "80", 9: 200 }, visibility: { 0: false, 1: false, 9: false } }));
+    expect(readTablePreferences("columns", 3)).toEqual({ sizing: { 0: 64, 1: 1200 }, visibility: { 1: false } });
+    localStorage.removeItem("columns");
   });
 });

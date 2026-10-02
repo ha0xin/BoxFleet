@@ -59,11 +59,11 @@ const filterSchema = z.object({
  * three columns built from operator-chosen strings flex.
  */
 const proxyColumns: TableColumnWidth[] = [
-  { min: 116 }, // Proxy
-  { min: 116 }, // Node
+  160, // Proxy
+  { min: 180 }, // Node
   104, // Status
-  112, // Protocol
-  { min: 116 }, // Listen
+  200, // Protocol
+  132, // Listen
   104, // Transport
   108, // Multiplier
   108, // Updated
@@ -195,14 +195,8 @@ export function ProxiesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">Proxy inventory</h2>
-              <p className="text-sm text-kumo-subtle">
-                {total === 0 ? "No proxies" : `${total} ${total === 1 ? "proxy" : "proxies"}`}
-              </p>
-            </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
@@ -259,7 +253,7 @@ export function ProxiesPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard>
+            <TableCard tableId="proxies">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(proxyColumns) }}>
                 <TableColgroup widths={proxyColumns} />
                 <Table.Header variant="compact">

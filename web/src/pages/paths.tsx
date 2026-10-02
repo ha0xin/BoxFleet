@@ -30,9 +30,9 @@ const VISIBILITY_LABELS: Record<AdminPath["visibility"], string> = {
  * visibility and status come from a closed vocabulary and are pinned.
  */
 const pathColumns: TableColumnWidth[] = [
-  { min: 160 }, // Published name
-  { min: 160 }, // Endpoint
-  { min: 160 }, // Dialer Path
+  200, // Published name
+  { min: 280 }, // Endpoint
+  180, // Dialer Path
   128, // Visibility
   116, // Status
   52 // Actions
@@ -79,15 +79,9 @@ export function PathsPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
           <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">Published paths</h2>
-              <p className="text-sm text-kumo-subtle">
-                {paths.length === 0 ? "No paths yet" : `${paths.length} ${paths.length === 1 ? "path" : "paths"}`}
-              </p>
-            </div>
-            <TableCard>
+            <TableCard tableId="paths">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(pathColumns) }}>
                 <TableColgroup widths={pathColumns} />
                 <Table.Header variant="compact">

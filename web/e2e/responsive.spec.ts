@@ -34,3 +34,97 @@ test("mobile navigation and wide tables remain reachable", async ({ page }) => {
     message.includes("Query data cannot be undefined") || message.includes("width(-1)") || message.includes("height(-1)")
   )).toEqual([]);
 });
+
+test("column widths resize, survive reload, hide and reset independently", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("proxies");
+  const proxyHead = page.getByRole("columnheader", { name: "Proxy", exact: true });
+  const nodeHead = page.getByRole("columnheader", { name: "Node", exact: true });
+  const original = (await proxyHead.boundingBox())!.width;
+  const nodeWidth = (await nodeHead.boundingBox())!.width;
+  const handle = page.getByRole("separator", { name: "Resize Proxy column", exact: true });
+  const bounds = (await handle.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 60, bounds.y + bounds.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await proxyHead.boundingBox())!.width).toBeCloseTo(original + 60, 0);
+  expect((await nodeHead.boundingBox())!.width).toBeCloseTo(nodeWidth, 0);
+  await page.reload();
+  await expect.poll(async () => (await proxyHead.boundingBox())!.width).toBeCloseTo(original + 60, 0);
+  await handle.focus();
+  await handle.press("ArrowRight");
+  await expect.poll(async () => (await proxyHead.boundingBox())!.width).toBeCloseTo(original + 70, 0);
+  await page.getByRole("button", { name: "Edit columns", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Node", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(nodeHead).toHaveCount(0);
+  await page.reload();
+  await expect(nodeHead).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit columns", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Reset columns", exact: true }).click();
+  await expect(nodeHead).toBeVisible();
+  await expect.poll(async () => (await proxyHead.boundingBox())!.width).toBeCloseTo(original, 0);
+});
+
+for (const width of [390, 768, 1024, 1440, 1920]) {
+  test(`Cloudflare table chrome contains overflow at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    for (const route of ["nodes", "proxies", "paths", "users", "mihomo-profiles", "system-logs", "network-events"]) {
+      await page.goto(route);
+      await expect(page.locator(".bf-table-card").first()).toBeVisible();
+      const geometry = await page.locator(".bf-table-card").first().evaluate((element) => ({
+        viewport: innerWidth,
+        page: document.documentElement.scrollWidth,
+        card: element.getBoundingClientRect().width,
+        headerHeight: element.querySelector("th")?.getBoundingClientRect().height,
+        fade: element.querySelector("th") ? getComputedStyle(element.querySelector("th")!, "::before").display : "none"
+      }));
+      expect(geometry.page, `${route} at ${width}px`).toBe(geometry.viewport);
+      expect(geometry.card).toBeLessThanOrEqual(width);
+      expect(geometry.headerHeight).toBeCloseTo(44, 1);
+      expect(geometry.fade).toBe("none");
+    }
+  });
+}
+
+
+test("log fields and inline details stay aligned after hiding a column", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/admin/system-logs?*", (route) => route.fulfill({ json: {
+    total: 1, services: ["sing-box"], logs: [{ observed_at: "2026-10-03T01:02:03.123Z", ingested_at: "2026-10-03T01:02:04Z", node: "log-test", service: "sing-box", level: "info", message: "full journal detail" }]
+  } }));
+  await page.goto("system-logs");
+  await page.getByRole("button", { name: "Expand log entry", exact: true }).click();
+  await expect(page.getByLabel("Log entry details")).toContainText("full journal detail");
+  await page.screenshot({ path: testInfo.outputPath("logs-desktop.png") });
+  await page.getByRole("button", { name: "Fields", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Message", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("columnheader", { name: "Message", exact: true })).toHaveCount(0);
+  const columns = await page.locator(".bf-data-table thead th").count();
+  expect(await page.locator(".bf-log-detail td").getAttribute("colspan")).toBe(String(columns));
+  await page.getByRole("button", { name: "Collapse log entry", exact: true }).click();
+  await expect(page.getByLabel("Log entry details")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("logs-mobile.png") });
+});
+
+test("resource rows use Domains density with full protocol labels", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/admin/proxies?*", (route) => route.fulfill({ json: { total: 2, proxies: [
+    { id: "preview-reality", name: "SG-Reality", node_name: "Singapore", enabled: true, protocol: "vless_reality", listen: "::", listen_port: 443, transport: "tcp", traffic_multiplier: 1, updated_at: "2026-10-03T01:02:03Z" },
+    { id: "preview-ss", name: "US-Shadowsocks", node_name: "Los Angeles", enabled: false, protocol: "shadowsocks_2022", listen: "::", listen_port: 8080, transport: "tcp_udp", traffic_multiplier: 1, updated_at: "2026-10-03T01:02:03Z" }
+  ] } }));
+  await page.goto("proxies");
+  await expect(page.locator(".bf-data-table tbody tr")).toHaveCount(2);
+  expect((await page.locator(".bf-data-table tbody tr").first().boundingBox())!.height).toBeCloseTo(44, 1);
+  const headerColor = await page.locator(".bf-data-table th").first().evaluate((element) => getComputedStyle(element).color);
+  const subtleColor = await page.locator("header p").evaluate((element) => getComputedStyle(element).color);
+  expect(headerColor).toBe(subtleColor);
+  const protocol = page.locator(".bf-data-table tbody tr").last().locator("td").nth(3);
+  expect(await protocol.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("resources-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("resources-mobile.png") });
+});
