@@ -134,6 +134,75 @@ func TestGrantPathToUserIssuesCredentialsForWholeChain(t *testing.T) {
 	}
 }
 
+func TestGrantPathToUserIgnoresAccessesForDeletedNodes(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNode(ctx, "retired", "192.0.2.40", ""); err != nil {
+		t.Fatal(err)
+	}
+	retiredProxy, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName: "retired", Name: "retired-proxy", Protocol: ProtocolVLESSReality,
+		ListenPort: 4443, Enabled: true, SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredNode, _ := store.GetNode(ctx, "retired")
+	retiredEndpoint, err := store.EnsureEndpoint(ctx, retiredProxy.ID, retiredNode.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredPath, err := store.CreatePath(ctx, CreatePathParams{
+		Name: "retired", DisplayName: "Retired", EndpointID: retiredEndpoint.ID,
+		Enabled: true, Visibility: PathVisibilitySelectable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GrantPathToUser(ctx, "alice", retiredPath.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SoftDeleteNode(ctx, "retired"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.CreateNode(ctx, "live", "192.0.2.41", ""); err != nil {
+		t.Fatal(err)
+	}
+	liveProxy, err := store.CreateProxy(ctx, CreateProxyParams{
+		NodeName: "live", Name: "live-proxy", Protocol: ProtocolVLESSReality,
+		ListenPort: 4444, Enabled: true, SettingsJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveNode, _ := store.GetNode(ctx, "live")
+	liveEndpoint, err := store.EnsureEndpoint(ctx, liveProxy.ID, liveNode.Hosts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	livePath, err := store.CreatePath(ctx, CreatePathParams{
+		Name: "live", DisplayName: "Live", EndpointID: liveEndpoint.ID,
+		Enabled: true, Visibility: PathVisibilitySelectable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GrantPathToUser(ctx, "alice", livePath.ID); err != nil {
+		t.Fatalf("grant after an old node was deleted: %v", err)
+	}
+	accesses, err := store.ListActivePathAccessesByUser(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accesses) != 1 || accesses[0].PathID != livePath.ID {
+		t.Fatalf("active accesses = %#v, want only live path", accesses)
+	}
+}
+
 func TestDeletePathDisablesCredentialsItWasTheLastConsumerOf(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)

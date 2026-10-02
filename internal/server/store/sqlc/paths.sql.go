@@ -142,11 +142,17 @@ func (q *Queries) GetPathByID(ctx context.Context, id string) (Path, error) {
 }
 
 const listActivePathAccessesByUserID = `-- name: ListActivePathAccessesByUserID :many
-SELECT id, path_id, proxy_user_id, enabled, deleted_at, created_at, updated_at FROM path_accesses
-WHERE proxy_user_id = ?1
-  AND enabled = 1
-  AND deleted_at IS NULL
-ORDER BY created_at, id
+SELECT a.id, a.path_id, a.proxy_user_id, a.enabled, a.deleted_at, a.created_at, a.updated_at
+FROM path_accesses AS a
+JOIN paths AS path ON path.id = a.path_id
+JOIN endpoints AS endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details AS proxy ON proxy.id = endpoint.proxy_id
+WHERE a.proxy_user_id = ?1
+  AND a.enabled = 1
+  AND a.deleted_at IS NULL
+  AND proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
+ORDER BY a.created_at, a.id
 `
 
 func (q *Queries) ListActivePathAccessesByUserID(ctx context.Context, proxyUserID string) ([]PathAccess, error) {
@@ -343,9 +349,14 @@ const listUserNamesWithActivePathAccess = `-- name: ListUserNamesWithActivePathA
 SELECT DISTINCT u.name
 FROM path_accesses a
 JOIN proxy_users u ON u.id = a.proxy_user_id
+JOIN paths path ON path.id = a.path_id
+JOIN endpoints endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details proxy ON proxy.id = endpoint.proxy_id
 WHERE a.enabled = 1
   AND a.deleted_at IS NULL
   AND u.deleted_at IS NULL
+  AND proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
 ORDER BY u.name
 `
 

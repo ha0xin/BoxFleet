@@ -78,19 +78,30 @@ WHERE path_id = sqlc.arg(path_id)
   AND deleted_at IS NULL;
 
 -- name: ListActivePathAccessesByUserID :many
-SELECT * FROM path_accesses
-WHERE proxy_user_id = sqlc.arg(proxy_user_id)
-  AND enabled = 1
-  AND deleted_at IS NULL
-ORDER BY created_at, id;
+SELECT a.*
+FROM path_accesses AS a
+JOIN paths AS path ON path.id = a.path_id
+JOIN endpoints AS endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details AS proxy ON proxy.id = endpoint.proxy_id
+WHERE a.proxy_user_id = sqlc.arg(proxy_user_id)
+  AND a.enabled = 1
+  AND a.deleted_at IS NULL
+  AND proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
+ORDER BY a.created_at, a.id;
 
 -- name: ListUserNamesWithActivePathAccess :many
 SELECT DISTINCT u.name
 FROM path_accesses a
 JOIN proxy_users u ON u.id = a.proxy_user_id
+JOIN paths path ON path.id = a.path_id
+JOIN endpoints endpoint ON endpoint.id = path.endpoint_id
+JOIN proxy_details proxy ON proxy.id = endpoint.proxy_id
 WHERE a.enabled = 1
   AND a.deleted_at IS NULL
   AND u.deleted_at IS NULL
+  AND proxy.deleted_at IS NULL
+  AND proxy.node_deleted_at IS NULL
 ORDER BY u.name;
 
 -- name: ListUserNamesByPathID :many
