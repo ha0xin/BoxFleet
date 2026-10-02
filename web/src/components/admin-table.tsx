@@ -1,7 +1,7 @@
 import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { LogRowDetails } from "./log-row-details";
 import { getCoreRowModel, useReactTable, type ColumnSizingState, type VisibilityState } from "@tanstack/react-table";
-import { ArrowsCounterClockwiseIcon, GearSixIcon, SlidersHorizontalIcon, SortAscendingIcon, SortDescendingIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { ArrowsCounterClockwiseIcon, GearSixIcon, SlidersHorizontalIcon, ArrowDownIcon, CaretUpDownIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { Button, DropdownMenu, Empty, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 export type SortDirection = "asc" | "desc";
@@ -272,7 +272,7 @@ export function SortHead<Column extends string>({
   resizeHandle?: ReactNode;
 }) {
   const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
+  const Icon = active ? ArrowDownIcon : CaretUpDownIcon;
   return (
     <Table.Head
       className={className}
@@ -282,11 +282,16 @@ export function SortHead<Column extends string>({
     >
       <button
         type="button"
-        className="inline-flex items-center gap-1 whitespace-nowrap text-left font-medium text-inherit hover:text-kumo-strong"
+        className="bf-sort-button inline-flex min-w-0 items-center gap-1.5 text-left font-medium text-inherit hover:text-kumo-default"
         onClick={() => setSort(column)}
       >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
+        <span className="min-w-0 truncate">{label}</span>
+        <Icon
+          weight="bold"
+          aria-hidden="true"
+          data-sort-indicator={active ? direction : "none"}
+          className={`bf-sort-icon pointer-events-none size-3 shrink-0 opacity-50 ${active ? "transition-transform duration-200 ease-in-out" : ""} ${active && direction === "asc" ? "rotate-180" : ""}`}
+        />
       </button>
       {resizeHandle}
     </Table.Head>

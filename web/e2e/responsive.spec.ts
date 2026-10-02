@@ -128,3 +128,33 @@ test("resource rows use Domains density with full protocol labels", async ({ pag
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("resources-mobile.png") });
 });
+
+
+test("resource sort indicators match Domains and do not recolor column controls", async ({ page }, testInfo) => {
+  await page.goto("proxies?sort=name&direction=asc");
+  const proxy = page.getByRole("columnheader", { name: "Proxy", exact: true });
+  const node = page.getByRole("columnheader", { name: "Node", exact: true });
+  await expect(node.locator(".bf-sort-icon")).toHaveAttribute("data-sort-indicator", "none");
+  await node.getByRole("button", { name: "Node", exact: true }).click();
+  await expect(node).toHaveAttribute("aria-sort", "ascending");
+  await expect(proxy.locator(".bf-sort-icon")).toHaveAttribute("data-sort-indicator", "none");
+  const ascending = await node.locator(".bf-sort-icon").evaluate((icon) => ({
+    width: icon.getBoundingClientRect().width, opacity: getComputedStyle(icon).opacity,
+    transform: getComputedStyle(icon).transform, path: icon.querySelector("path")!.getAttribute("d")
+  }));
+  expect(ascending.width).toBe(12);
+  expect(ascending.opacity).toBe("0.5");
+  await node.getByRole("button", { name: "Node", exact: true }).click();
+  await expect(node).toHaveAttribute("aria-sort", "descending");
+  await expect(node.locator(".bf-sort-icon")).toHaveAttribute("data-sort-indicator", "desc");
+  await expect(node.locator(".bf-sort-icon")).toHaveCSS("transform", "none");
+  expect(await node.locator(".bf-sort-icon path").getAttribute("d")).toBe(ascending.path);
+  await expect(page.getByRole("separator", { name: "Resize Node column", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("resource-sort.png") });
+  await page.goto("system-logs");
+  const timestamp = page.getByRole("columnheader", { name: "Timestamp", exact: true });
+  await expect(timestamp).toHaveAttribute("aria-sort", "descending");
+  const logIcon = await timestamp.locator(".bf-sort-icon").evaluate((icon) => ({ width: icon.getBoundingClientRect().width, opacity: getComputedStyle(icon).opacity }));
+  expect(logIcon).toEqual({ width: 20, opacity: "1" });
+  expect(await timestamp.getByRole("button", { name: "Fields", exact: true }).locator("svg").evaluate((icon) => getComputedStyle(icon).opacity)).toBe("1");
+});

@@ -160,7 +160,11 @@ be the element that scrolls when a table is genuinely wider than its card.
 
 Resource inventories follow the Domains table: 44px rows and header, 13px
 header labels, 14px cells, canvas header background, line separators, and
-icon-plus-text statuses. Log tables follow Observability: 44px rows, 14px
+icon-plus-text statuses. Sort indicators match Domains: 12px bold Phosphor
+CaretUpDown when inactive, ArrowDown when active (rotated for ascending),
+subtle text at 50% opacity, and a 200ms direction transition. Log sort arrows
+are 20px and brand-colored when active; styles target only the sort icon,
+never Fields or other header controls. Log tables follow Observability: 44px rows, 14px
 headers, monospaced timestamps/messages, a vertically scrolling body with a
 sticky header, a Fields menu, and expandable JSON details. Journal events and
 the opt-in connection stream remain separate datasets and keep their existing

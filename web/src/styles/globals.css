@@ -204,9 +204,10 @@
 .bf-data-table > tbody > tr:last-child > td { border-bottom: 0; }
 .bf-data-table td .text-base { font-size: 14px; line-height: 20px; }
 .bf-data-table th::before, .bf-data-table td::before { display: none; }
-.bf-data-table th[aria-sort] svg { opacity: 0.55; }
-.bf-data-table th[aria-sort="ascending"] svg,
-.bf-data-table th[aria-sort="descending"] svg { color: var(--color-kumo-brand); opacity: 1; }
+.bf-sort-icon { color: var(--text-color-kumo-subtle); }
+.bf-table-log .bf-sort-icon { width: 20px; height: 20px; }
+.bf-table-log .bf-sort-icon[data-sort-indicator="asc"],
+.bf-table-log .bf-sort-icon[data-sort-indicator="desc"] { color: var(--color-kumo-brand); opacity: 1; }
 .bf-data-table > thead > tr > th:has([role="separator"])::after {
   content: "";
   position: absolute;
