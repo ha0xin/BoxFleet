@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { MoonIcon, SunIcon } from "@phosphor-icons/react";
-import { Breadcrumbs, Button, Sidebar } from "@cloudflare/kumo";
+import { ListIcon, MoonIcon, SunIcon } from "@phosphor-icons/react";
+import { Breadcrumbs, Button, Sidebar, useSidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
@@ -32,6 +32,7 @@ export function AppPageHeader({
 }) {
   const { status, changesError } = usePublishStatus();
   const navigate = useNavigate();
+  const { openMobile } = useSidebar();
   const isDarkMode = useIsDarkMode();
 
   return (
@@ -40,7 +41,7 @@ export function AppPageHeader({
         className={`bf-page-topbar flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <Sidebar.Trigger className="md:hidden" />
+          <Sidebar.Trigger className="lg:hidden" aria-label="Toggle sidebar navigation" aria-expanded={openMobile}><ListIcon size={20} /></Sidebar.Trigger>
           <Breadcrumbs size="sm">
             <span
               onClickCapture={(event) => {

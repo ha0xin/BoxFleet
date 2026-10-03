@@ -372,3 +372,8 @@ network events with attributable users and destinations currently carry only
 field. Keep drag handles at the right edge of log headers so header text and
 cell content share their left inset. Publication notices sit below the 58px
 breadcrumb bar, rather than wrapping its action cluster into extra rows.
+
+Navigation uses Kumo’s dialog sidebar below 1024px: the desktop rail is hidden,
+a menu button in the breadcrumb bar opens it, and selecting a destination closes
+it. At 1024px and above, the desktop rail keeps its expanded/collapsed preference.
+Resource name controls have no underline, including on hover.

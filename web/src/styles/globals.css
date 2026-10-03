@@ -277,8 +277,8 @@
   .bf-field-catalog { position: fixed; z-index: 30; top: 58px; bottom: 0; left: 0; width: min(288px, 85vw);  overflow-y: auto; }
   .bf-log-toolbar > form { flex-basis: 100%; order: 3; }
 }
-.bf-resource-link { height: auto; min-height: 0; max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; padding: 0; font-size: 14px; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; border: 0; background: transparent; box-shadow: none; }
-.bf-resource-link:disabled { text-decoration: none; }
+.bf-resource-link { height: auto; min-height: 0; max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; padding: 0; font-size: 14px; font-weight: 400; text-decoration: none; border: 0; background: transparent; box-shadow: none; }
+.bf-resource-link:hover { text-decoration: none; }
 
 .bf-column-drag { opacity: 0; }
 .bf-table-log th:hover .bf-column-drag, .bf-column-drag:focus-visible { opacity: 1; }

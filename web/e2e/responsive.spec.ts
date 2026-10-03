@@ -1,5 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+test("tablet navigation hides the rail and closes the drawer after navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 849, height: 824 });
+  await page.goto("network-events");
+  await expect(page.locator("aside")).toHaveCount(0);
+  const trigger = page.locator('main button[aria-label*="sidebar"]').first();
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await page.getByRole("button", { name: "Paths", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Paths", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(page.locator("aside")).toBeVisible();
+  await expect(trigger).toBeHidden();
+});
+
 test("mobile navigation and wide tables remain reachable", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -118,6 +133,10 @@ test("resource rows use Domains density with full protocol labels", async ({ pag
   ] } }));
   await page.goto("proxies");
   await expect(page.locator(".bf-data-table tbody tr")).toHaveCount(2);
+  const resourceLink = page.locator(".bf-resource-link").first();
+  expect(await resourceLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toBe("none");
+  await resourceLink.hover();
+  expect(await resourceLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toBe("none");
   expect((await page.locator(".bf-data-table tbody tr").first().boundingBox())!.height).toBeCloseTo(44, 1);
   const headerColor = await page.locator(".bf-data-table th").first().evaluate((element) => getComputedStyle(element).color);
   const subtleColor = await page.locator("header p").evaluate((element) => getComputedStyle(element).color);
