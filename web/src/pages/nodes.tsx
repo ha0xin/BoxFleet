@@ -9,7 +9,6 @@ import {
   CheckCircleIcon,
   DownloadSimpleIcon,
   FunnelIcon,
-  HardDrivesIcon,
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
@@ -393,8 +392,7 @@ export function NodesPage() {
                         <Table.Row key={node.id}>
                           <Table.Cell sticky="left">
                             <div className="flex min-w-0 items-center gap-2">
-                              <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
-                              <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
+                              <Button variant="ghost" className="bf-resource-link" disabled={!!node.deleted_at} onClick={() => setDialog({ mode: "edit", node })} title={node.name}>{node.name}</Button>
                             </div>
                           </Table.Cell>
                           <Table.Cell>

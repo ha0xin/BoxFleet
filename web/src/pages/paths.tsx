@@ -114,9 +114,7 @@ export function PathsPage() {
                         <Table.Row key={path.id}>
                           <Table.Cell>
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-medium text-kumo-default" title={pathLabel(path)}>
-                                {pathLabel(path)}
-                              </span>
+                              <Button variant="ghost" className="bf-resource-link" onClick={() => setEditor({ path })} title={pathLabel(path)}>{pathLabel(path)}</Button>
                               {path.managed ? <Badge variant="secondary" className="shrink-0">Managed</Badge> : null}
                             </div>
                             <div className="truncate text-xs text-kumo-subtle" title={path.name}>{path.name}</div>

@@ -8,7 +8,6 @@ import {
   CheckCircleIcon,
   DotsThreeIcon,
   FunnelIcon,
-  PathIcon,
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
@@ -283,8 +282,7 @@ export function ProxiesPage() {
                       <Table.Row key={proxy.id}>
                         <Table.Cell sticky="left">
                           <div className="flex min-w-0 items-center gap-2">
-                            <PathIcon className="size-4 shrink-0 text-kumo-subtle" />
-                            <span className="truncate text-base font-medium text-kumo-default" title={proxy.name}>{proxy.name}</span>
+                            <Button variant="ghost" className="bf-resource-link" disabled={!!proxy.deleted_at} onClick={() => setDialog({ mode: "edit", proxy })} title={proxy.name}>{proxy.name}</Button>
                           </div>
                         </Table.Cell>
                         <Table.Cell>

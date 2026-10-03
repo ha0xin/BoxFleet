@@ -14,7 +14,6 @@ import {
   PlusIcon,
   ProhibitIcon,
   TrashIcon,
-  UserIcon
 } from "@phosphor-icons/react";
 import { Badge, Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
 
@@ -338,11 +337,8 @@ export function UsersPage() {
                       <Table.Row key={row.id}>
                         <Table.Cell sticky="left">
                           <div className="flex min-w-0 items-center gap-2">
-                            <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
                             <div className="min-w-0">
-                              <div className="truncate text-base font-medium text-kumo-default" title={row.name}>
-                                {row.name}
-                              </div>
+                              <Button variant="ghost" className="bf-resource-link" disabled={!!row.deleted_at} onClick={() => setDialog({ mode: "edit", user: row })} title={row.name}>{row.name}</Button>
                               {row.display_name ? (
                                 <div className="truncate text-sm text-kumo-subtle">{row.display_name}</div>
                               ) : null}

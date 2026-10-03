@@ -9,7 +9,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   ArrowsClockwiseIcon,
-  BracketsCurlyIcon,
   CodeIcon,
   CopyIcon,
   FunnelIcon,
@@ -29,7 +28,7 @@ import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { copyText, formatDateTime } from "@/utils";
-import { formatRelativeTime, rowLinkClassName } from "./operations-common";
+import { formatRelativeTime } from "./operations-common";
 import type {
   AdminUser,
   MihomoPreview,
@@ -204,7 +203,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
             {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((profile) => {
               const enabled = profile.document.rewrites.filter((rewrite) => rewrite.enabled).length;
               return <Table.Row key={profile.id}>
-                <Table.Cell><div className="flex min-w-0 items-center gap-2"><BracketsCurlyIcon className="size-4 shrink-0 text-kumo-subtle" /><Link to={`/mihomo-profiles/${profile.id}/edit`} className={rowLinkClassName}>{profile.name}</Link></div></Table.Cell>
+                <Table.Cell><div className="flex min-w-0 items-center gap-2"><Link to={`/mihomo-profiles/${profile.id}/edit`} className="bf-resource-link">{profile.name}</Link></div></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{profile.proxy_user_name}</span></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.document.rewrites.length} enabled</span></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(profile.updated_at)}</span></Table.Cell>
@@ -279,7 +278,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
           <Table.Body>
             {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((template) => (
               <Table.Row key={template.id}>
-                <Table.Cell><div className="flex min-w-0 items-center gap-2"><CodeIcon className="size-4 shrink-0 text-kumo-subtle" /><button type="button" className={rowLinkClassName} onClick={() => onOpen(template)}>{template.name}</button></div></Table.Cell>
+                <Table.Cell><div className="flex min-w-0 items-center gap-2"><Button variant="ghost" className="bf-resource-link" onClick={() => onOpen(template)}>{template.name}</Button></div></Table.Cell>
                 <Table.Cell><Badge variant="secondary">{template.kind === "javascript" ? "JavaScript" : "YAML"}</Badge></Table.Cell>
                 <Table.Cell>
                   <div className="flex items-center gap-2 whitespace-nowrap">

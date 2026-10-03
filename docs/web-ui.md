@@ -164,7 +164,7 @@ icon-plus-text statuses. Sort indicators match Domains: 12px bold Phosphor
 CaretUpDown when inactive, ArrowDown when active (rotated for ascending),
 subtle text at 50% opacity, and a 200ms direction transition. Log sort arrows
 are 20px and brand-colored when active; styles target only the sort icon,
-never Fields or other header controls. Log tables follow Observability: 44px rows, 14px
+never Fields or other header controls. Log tables follow Observability: 44px rows, 13px
 headers, monospaced timestamps/messages, a vertically scrolling body with a
 sticky header, a Fields menu, and expandable JSON details. Journal events and
 the opt-in connection stream remain separate datasets and keep their existing
@@ -342,3 +342,20 @@ cleanup. Any component test that renders more than once must call
 `afterEach(cleanup)` itself. ECharts needs a real canvas and `ResizeObserver`,
 neither of which jsdom provides, so chart success paths belong in the Playwright
 pass; unit-test the pure projection helpers instead.
+
+
+### Log workbench
+
+Network Events and System Logs share `LogWorkspace`: compact breadcrumb shell,
+query toolbar, searchable Fields sidebar, local timezone label, inline JSON
+with Kumo clipboard controls, and TanStack column sizing/visibility. Log columns
+can also be reordered with dnd-kit, using pointer or keyboard controls; local
+preferences survive reload. Resource inventories keep the Domains layout.
+Network Events puts the service audit and opt-in connection stream in separate
+URL-linked tabs. These data sources remain separate and retain their existing
+coverage and byte attribution semantics.
+
+System Logs accepts optional RFC3339 `start` and `end` query parameters on the
+server, using an inclusive start and exclusive end. Pagination and counts use
+the same time predicates. Relative time presets are anchored when selected or
+refreshed, rather than filtering the currently fetched page in the browser.

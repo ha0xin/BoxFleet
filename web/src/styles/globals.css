@@ -259,3 +259,29 @@
 .bf-table-log .bf-data-table td > span.font-mono,
 .bf-table-log .bf-data-table td > div > span { font-size: 12px; }
 .bf-data-table .bf-table-settings > button { margin-left: auto; }
+
+/* Observability: compact shell, field catalog, query toolbar, chart and log grid. */
+.bf-log-workspace { display: flex; min-width: 0; min-height: calc(100dvh - 58px); }
+.bf-field-catalog { flex: 0 0 288px; width: 288px; border-right: 1px solid var(--color-kumo-line); }
+.bf-log-workspace-content { flex: 1; min-width: 0; padding: 12px 16px 24px; }
+.bf-log-toolbar { padding-bottom: 12px; border-bottom: 1px solid var(--color-kumo-line); }
+.bf-log-toolbar > form { flex-basis: 240px; }
+.bf-table-log .bf-data-table > thead > tr > th { font-size: 13px; }
+.bf-column-drag { display: inline-flex; vertical-align: middle; margin-left: -8px; margin-right: 2px; color: var(--text-color-kumo-subtle); touch-action: none; }
+.bf-table-log .bf-data-table th { white-space: nowrap; }
+.bf-table-log .bf-data-table td { font-size: 13px; }
+.bf-table-resource .bf-data-table td:first-child .font-medium { font-weight: 400; }
+.bf-log-detail pre { max-height: 360px; overflow: auto; }
+@media (max-width: 767px) {
+  .bf-log-workspace-content { padding: 12px 8px 24px; }
+  .bf-field-catalog { position: fixed; z-index: 30; top: 58px; bottom: 0; left: 0; width: min(288px, 85vw);  overflow-y: auto; }
+  .bf-log-toolbar > form { flex-basis: 100%; order: 3; }
+}
+.bf-resource-link { height: auto; min-height: 0; max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; padding: 0; font-size: 14px; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; border: 0; background: transparent; box-shadow: none; }
+.bf-resource-link:disabled { text-decoration: none; }
+
+.bf-column-drag { opacity: 0; }
+.bf-table-log th:hover .bf-column-drag, .bf-column-drag:focus-visible { opacity: 1; }
+
+.bf-log-detail > td { overflow: visible !important; }
+.bf-log-detail > td > div { position: sticky; left: 0; width: calc(var(--bf-table-viewport-width, 100%) - 24px); }

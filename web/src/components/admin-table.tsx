@@ -1,12 +1,16 @@
 import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, horizontalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { logTimezone, useLogFields } from "./log-workspace";
 import { LogRowDetails } from "./log-row-details";
 import { getCoreRowModel, useReactTable, type ColumnSizingState, type VisibilityState } from "@tanstack/react-table";
-import { ArrowsCounterClockwiseIcon, GearSixIcon, SlidersHorizontalIcon, ArrowDownIcon, CaretUpDownIcon, WarningCircleIcon } from "@phosphor-icons/react";
-import { Button, DropdownMenu, Empty, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { ArrowsCounterClockwiseIcon, GearSixIcon, SlidersHorizontalIcon, ArrowDownIcon, CaretUpDownIcon, DotsSixVerticalIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { Button, DropdownMenu, Empty, Input, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 export type SortDirection = "asc" | "desc";
 
-type TableElement = ReactElement<{ children?: ReactNode; label?: string; widths?: readonly TableColumnWidth[]; className?: string; colSpan?: number; style?: React.CSSProperties; resizeHandle?: ReactNode; "aria-label"?: string }>;
+type TableElement = ReactElement<{ children?: ReactNode; label?: string; widths?: readonly TableColumnWidth[]; className?: string; colSpan?: number; style?: React.CSSProperties; resizeHandle?: ReactNode; dragHandle?: ReactNode; "aria-label"?: string }>;
 const emptyRows: unknown[] = [];
 
 function elements(children: ReactNode): TableElement[] {
@@ -58,6 +62,13 @@ export function readTablePreferences(key: string, count: number): { sizing: Colu
  * Pages still own their rows, query state and server pagination. No DOM mutation
  * or second data model is needed to give every inventory the same table tools.
  */
+function ReorderableHead({ cell, id, label }: { cell: TableElement; id: string; label: string }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const dragHandle = <Button variant="ghost" size="xs" shape="square" icon={DotsSixVerticalIcon} aria-label={`Drag ${label} column`} ref={setActivatorNodeRef} {...attributes} {...listeners} className="bf-column-drag" />;
+  const content = cell.type === SortHead ? cloneElement(cell, { dragHandle }) : cloneElement(cell, {}, dragHandle, cell.props.children);
+  return cloneElement(content, { ref: setNodeRef, style: { transform: CSS.Translate.toString(transform), transition, zIndex: isDragging ? 5 : undefined } } as React.Attributes);
+}
+
 export function TableCard({ children, className = "", tableId, widths, variant = "resource" }: {
   children: ReactNode;
   className?: string;
@@ -66,6 +77,12 @@ export function TableCard({ children, className = "", tableId, widths, variant =
   variant?: "resource" | "log";
 }) {
   const handleId = useId();
+  const logFields = useLogFields();
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    try { const value = JSON.parse(localStorage.getItem(`boxfleet.table.order.${tableId}`) ?? "[]"); return Array.isArray(value) && value.every((id) => typeof id === "string" && /^\d+$/.test(id)) && new Set(value).size === value.length ? value : []; } catch { return []; }
+  });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const headers = findHeaders(children);
   const labels = headers.map((head, index) => head.props.label ?? (textOf(head.props.children).trim() || `Column ${index + 1}`));
   const declared = widths ?? findWidths(children) ?? labels.map((label, index) => label === "Actions" ? 52 : index === 0 ? { min: 220 } : 160);
@@ -100,24 +117,36 @@ export function TableCard({ children, className = "", tableId, widths, variant =
     columns: definitions,
     getCoreRowModel: getCoreRowModel(),
     columnResizeMode: "onChange",
-    state: { columnSizing: preferences.sizing, columnVisibility: preferences.visibility },
+    state: { columnSizing: preferences.sizing, columnVisibility: preferences.visibility, columnOrder: variant === "log" ? columnOrder.filter((id) => Number(id) < definitions.length) : [] },
     onColumnSizingChange: (update) => setPreferences((previous) => ({ ...previous, sizing: typeof update === "function" ? update(previous.sizing) : update })),
     onColumnVisibilityChange: (update) => setPreferences((previous) => ({ ...previous, visibility: typeof update === "function" ? update(previous.visibility) : update }))
   });
+  useEffect(() => {
+    if (tableId) { try { localStorage.setItem(`boxfleet.table.order.${tableId}`, JSON.stringify(columnOrder)); } catch { /* Storage may be unavailable. */ } }
+  }, [columnOrder, tableId]);
+  const registerFields = logFields?.register;
+  useEffect(() => {
+    if (variant !== "log" || !registerFields) return;
+    const spec = JSON.parse(schema) as { labels: string[] };
+    registerFields({ fields: table.getAllLeafColumns().filter((column) => column.getCanHide()).map((column) => ({ id: column.id, label: spec.labels[Number(column.id)], visible: preferences.visibility[column.id] !== false, toggle: (visible: boolean) => setPreferences((previous) => ({ ...previous, visibility: { ...previous.visibility, [column.id]: visible } })) })), reset: () => { setPreferences({ sizing: {}, visibility: {} }); setColumnOrder([]); } });
+    return () => registerFields(null);
+  }, [registerFields, variant, schema, preferences, table]);
+  const timeColumn = labels.findIndex((label) => /^(Timestamp|Time|Bucket)$/.test(label));
   const settings = (
     <DropdownMenu>
       <DropdownMenu.Trigger render={variant === "log" ? <Button variant="secondary" size="xs" icon={SlidersHorizontalIcon} aria-label="Fields">Fields</Button> : <Button variant="ghost" size="sm" shape="square" icon={GearSixIcon} aria-label="Edit columns" />} />
       <DropdownMenu.Content>
         <DropdownMenu.Group>
-          <DropdownMenu.Label>Columns</DropdownMenu.Label>
-          {table.getAllLeafColumns().filter((column) => column.getCanHide()).map((column) => (
+          <DropdownMenu.Label>Fields</DropdownMenu.Label>
+          <Input aria-label="Search table fields" placeholder="Search fields…" value={fieldSearch} onChange={(event) => setFieldSearch(event.target.value)} className="m-1" />
+          {table.getAllLeafColumns().filter((column) => column.getCanHide() && labels[Number(column.id)].toLowerCase().includes(fieldSearch.toLowerCase())).map((column) => (
             <DropdownMenu.CheckboxItem key={column.id} checked={column.getIsVisible()} closeOnClick={false} onCheckedChange={(visible) => column.toggleVisibility(visible)}>
               {labels[Number(column.id)]}
             </DropdownMenu.CheckboxItem>
           ))}
         </DropdownMenu.Group>
         <DropdownMenu.Separator />
-        <DropdownMenu.Item icon={ArrowsCounterClockwiseIcon} onClick={() => setPreferences({ sizing: {}, visibility: {} })}>Reset columns</DropdownMenu.Item>
+        <DropdownMenu.Item icon={ArrowsCounterClockwiseIcon} onClick={() => { setPreferences({ sizing: {}, visibility: {} }); setColumnOrder([]); }}>Reset columns</DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu>
   );
@@ -167,19 +196,28 @@ export function TableCard({ children, className = "", tableId, widths, variant =
       if (element.type === Table.Row) {
         const cells = elements(element.props.children);
         if (cells.length === 1 && cells[0].props.colSpan) return cloneElement(element, {}, cloneElement(cells[0], { colSpan: visibleCount }));
-        return cloneElement(element, {}, cells.map((cell, index) => {
-          if (!table.getColumn(String(index))?.getIsVisible()) return null;
-          if (inHeader && cell.type === SortHead) return cloneElement(cell, { resizeHandle: <>{variant === "log" && index === 1 ? <span className="ml-2 inline-flex align-middle">{settings}</span> : null}{resizeHandle(index)}</> });
-          if (inHeader) return cloneElement(cell, { "aria-label": labels[index] }, cell.props.children, variant === "log" && index === 1 ? <span className="ml-2 inline-flex align-middle">{settings}</span> : null, resizeHandle(index));
-          return cell;
+        return cloneElement(element, {}, table.getVisibleLeafColumns().map((column) => {
+          const index = Number(column.id);
+          const cell = cells[index];
+          if (!cell) return null;
+          const extras = <>{variant === "log" && index === timeColumn ? <>{cell.type !== SortHead ? <ArrowDownIcon size={20} weight="bold" className="ml-1 inline-block align-middle text-kumo-link" aria-label="Newest first" /> : null}<span className="bf-log-timezone ml-1 text-xs text-kumo-subtle">{logTimezone()}</span><span className="ml-2 inline-flex align-middle">{settings}</span></> : null}{resizeHandle(index)}</>;
+          const decorated = inHeader && cell.type === SortHead ? cloneElement(cell, { key: column.id, resizeHandle: extras }) : inHeader ? cloneElement(cell, { key: column.id, "aria-label": labels[index] }, labels[index] === "Details" ? <span className="sr-only">Details</span> : cell.props.children, extras) : cloneElement(cell, { key: column.id });
+          return inHeader && variant === "log" && labels[index] !== "Details" ? <ReorderableHead key={column.id} cell={decorated} id={column.id} label={labels[index]} /> : decorated;
         }), inHeader ? <Table.Head key="settings" sticky="right" className="bf-table-settings">{variant === "resource" ? settings : null}</Table.Head> : <Table.Cell key="settings" sticky="right" className="bf-table-settings" />);
       }
       if (element.props.children) return cloneElement(element, {}, decorate(element.props.children, inHeader));
       return element;
     });
   }
-  return <div className={`bf-table-card bf-table-${variant} overflow-hidden rounded-lg border border-kumo-line bg-kumo-base ${className}`} data-table-id={tableId}>
-    <div ref={scrollRef} className="bf-table-scroll overflow-x-auto overscroll-x-contain">{decorate(children)}</div>
+  return <div className={`bf-table-card bf-table-${variant} overflow-hidden rounded-lg border border-kumo-line bg-kumo-base ${className}`} data-table-id={tableId} style={availableWidth ? { "--bf-table-viewport-width": `${availableWidth}px` } as React.CSSProperties : undefined}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
+      if (!over || active.id === over.id) return;
+      const order = table.getAllLeafColumns().map((column) => column.id);
+      const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
+      setColumnOrder(next);
+    }}><SortableContext items={table.getVisibleLeafColumns().filter((column) => labels[Number(column.id)] !== "Details").map((column) => column.id)} strategy={horizontalListSortingStrategy}>
+      <div ref={scrollRef} className="bf-table-scroll overflow-x-auto overscroll-x-contain">{decorate(children)}</div>
+    </SortableContext></DndContext>
     {feedback ? <Table className="w-full"><Table.Body>{cloneElement(feedback, { colSpan: 1 })}</Table.Body></Table> : null}
   </div>;
 }
@@ -260,7 +298,10 @@ export function SortHead<Column extends string>({
   setSort,
   className,
   sticky,
-  resizeHandle
+  resizeHandle,
+  dragHandle,
+  ref,
+  style
 }: {
   label: string;
   column: Column;
@@ -269,17 +310,22 @@ export function SortHead<Column extends string>({
   setSort: (column: Column) => void;
   className?: string;
   sticky?: "left" | "right";
-  resizeHandle?: ReactNode;
+  resizeHandle?: ReactNode; dragHandle?: ReactNode;
+  ref?: React.Ref<HTMLTableCellElement>;
+  style?: React.CSSProperties;
 }) {
   const active = sort === column;
   const Icon = active ? ArrowDownIcon : CaretUpDownIcon;
   return (
     <Table.Head
       className={className}
+      ref={ref}
+      style={style}
       sticky={sticky}
       aria-label={label}
       aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
     >
+      {dragHandle}
       <button
         type="button"
         className="bf-sort-button inline-flex min-w-0 items-center gap-1.5 text-left font-medium text-inherit hover:text-kumo-default"
@@ -358,6 +404,7 @@ export function AdminPagination({
   if (total <= 0) {
     return <div className="mt-1 text-sm text-kumo-subtle">0 items</div>;
   }
+  if (total <= perPage && page === 1) return <div className="mt-1 text-sm text-kumo-subtle">Showing 1-{total} of {total}</div>;
   return (
     <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
       <Pagination.Info>

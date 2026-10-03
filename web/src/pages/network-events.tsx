@@ -31,7 +31,8 @@ import {
   Loader,
   Popover,
   Select,
-  Table
+  Table,
+  Tabs
 } from "@cloudflare/kumo";
 import {
   endOfDay,
@@ -69,13 +70,13 @@ import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useAutoRefresh } from "@/admin/use-auto-refresh";
 import { AdminPagination, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
+import { LogWorkspace, LogFieldsToggle } from "@/components/log-workspace";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RankedBarList, type RankedBarRow } from "@/components/chart/ranked-bar-list";
 import { TimeBarChart, type TimeSeries } from "@/components/chart/time-bar-chart";
 import { Sparkline } from "@/components/sparkline";
 import { StatusBadge } from "@/components/status-badge";
 import { formatBytes } from "../utils";
-import { formatRelativeTime } from "./operations-common";
 
 type RangePreset = "1h" | "24h" | "7d" | "30d" | "custom" | "all";
 
@@ -490,7 +491,7 @@ export function ActivityPanel({
           <TimeBarChart
             series={series}
             bucket={bucket}
-            height={200}
+            height={150}
             loading={query.isLoading}
             valueFormat={formatCount}
             yAxisName="Connections"
@@ -892,8 +893,7 @@ export function ConnectionTelemetryPanel({
           className="flex min-w-0 items-baseline justify-between gap-3 whitespace-nowrap"
           title={`Reported ${info.row.original.window_start} to ${info.row.original.window_end}`}
         >
-          <span className="text-kumo-default">{formatEventTime(info.getValue())}</span>
-          <span className="text-xs text-kumo-subtle">{formatRelativeTime(info.getValue())}</span>
+          <span className="font-mono text-xs text-kumo-default">{parseDateParam(info.getValue()) ? format(parseDateParam(info.getValue())!, "yyyy-MM-dd HH:mm:ss.SSS") : "—"}</span>
         </div>
       ),
       meta: { headClassName: "w-56", cellClassName: "w-56" }
@@ -1212,6 +1212,7 @@ export function NetworkEventsPage() {
   // `service` drills into the journal audit, `chost` into the byte ranking.
   const connectionHost = searchParams.get("chost") ?? "";
   const connectionSort = validConnectionSort(searchParams.get("csort"));
+  const view = searchParams.get("view") === "services" || searchParams.get("view") === "connections" ? searchParams.get("view")! : "logs";
 
   const form = useForm<FilterValues>({
     resolver: zodResolver(filterSchema),
@@ -1244,7 +1245,7 @@ export function NetworkEventsPage() {
       if (nextEnd) next.set("end", nextEnd);
     }
     // View preferences survive a filter change; only an explicit reset drops them.
-    for (const key of ["bucket", "breakdown", "service", "chost", "csort"] as const) {
+    for (const key of ["bucket", "breakdown", "service", "chost", "csort", "view"] as const) {
       const carried = searchParams.get(key);
       if (carried) next.set(key, carried);
     }
@@ -1253,7 +1254,7 @@ export function NetworkEventsPage() {
     setSearchParams(next);
   }
 
-  function setViewParam(key: "bucket" | "breakdown" | "service" | "chost" | "csort", value: string) {
+  function setViewParam(key: "bucket" | "breakdown" | "service" | "chost" | "csort" | "view", value: string) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
@@ -1409,8 +1410,7 @@ export function NetworkEventsPage() {
           className="flex min-w-0 items-baseline justify-between gap-3 whitespace-nowrap"
           title={info.row.original.created_at}
         >
-          <span className="text-kumo-default">{formatEventTime(info.getValue())}</span>
-          <span className="text-xs text-kumo-subtle">{formatRelativeTime(info.getValue())}</span>
+          <span className="font-mono text-xs text-kumo-default">{parseDateParam(info.getValue()) ? format(parseDateParam(info.getValue())!, "yyyy-MM-dd HH:mm:ss.SSS") : "—"}</span>
         </div>
       ),
       meta: { headClassName: "w-56", cellClassName: "w-56" }
@@ -1471,6 +1471,7 @@ export function NetworkEventsPage() {
   return (
     <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
+        compact
         title="Network Events"
         description="Review parsed sing-box connection events, users, nodes, destinations, and raw log context."
         actions={
@@ -1488,26 +1489,21 @@ export function NetworkEventsPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
+        <LogWorkspace>
+        <div className="flex w-full min-w-0 flex-col gap-4">
           <section className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-kumo-default">Network events</h2>
-                <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `Showing ${offset + 1}-${Math.min(offset + perPage, total)} of ${total}` : "No events"}
-                </p>
-              </div>
-              <p className="text-sm text-kumo-subtle">{timeRange.label}</p>
-            </div>
+            <Tabs variant="underline" value={view} onValueChange={(value) => setViewParam("view", value === "logs" ? "" : value)} tabs={[{ value: "logs", label: "Logs" }, { value: "services", label: "Service activity" }, { value: "connections", label: "Connection stream" }]} />
 
             <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="bf-log-toolbar flex flex-wrap items-center gap-2">
+                <LogFieldsToggle />
+                <Collapsible.Trigger render={<Button type="button" variant="secondary" icon={FunnelIcon} />}>Add filter{activeFilterCount > 0 ? <Badge variant="secondary" className="ml-1.5">{activeFilterCount}</Badge> : null}</Collapsible.Trigger>
                 <form
                   className="flex min-w-0 flex-1 gap-2"
                   onSubmit={form.handleSubmit(applyFilters)}
                 >
                   <Input
-                    placeholder="Search words or prefixes across user, node, IP, destination, action, or message"
+                    placeholder="Search logs…"
                     aria-label="Search network events"
                     className="min-w-0 flex-1"
                     {...form.register("search")}
@@ -1562,12 +1558,7 @@ export function NetworkEventsPage() {
                     </Popover.Content>
                   </Popover>
 
-                  <Collapsible.Trigger render={<Button type="button" variant="secondary" icon={FunnelIcon} />}>
-                    Filter
-                    {activeFilterCount > 0 ? (
-                      <Badge variant="secondary" className="ml-1.5">{activeFilterCount}</Badge>
-                    ) : null}
-                  </Collapsible.Trigger>
+
                 </div>
               </div>
 
@@ -1638,6 +1629,7 @@ export function NetworkEventsPage() {
               </Collapsible.Panel>
             </Collapsible.Root>
 
+            {view === "logs" ? <>
             <ActivityPanel
               scope={scope}
               scopeKey={scopeKey}
@@ -1645,15 +1637,6 @@ export function NetworkEventsPage() {
               hourAllowed={hourAllowed}
               onBucketChange={(value) => setViewParam("bucket", value)}
               onTimeRangeChange={applyChartRange}
-            />
-
-            <ServiceAuditPanel
-              scope={scope}
-              scopeKey={scopeKey}
-              breakdown={breakdown}
-              onBreakdownChange={(value) => setViewParam("breakdown", value === "service" ? "" : value)}
-              service={service}
-              onServiceChange={(value) => setViewParam("service", value)}
             />
 
             <TableCard tableId="network-events" variant="log" widths={[36, 270, 120, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
@@ -1704,6 +1687,18 @@ export function NetworkEventsPage() {
             </TableCard>
 
             <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            </> : null}
+            {view === "services" ? <>
+            <ServiceAuditPanel
+              scope={scope}
+              scopeKey={scopeKey}
+              breakdown={breakdown}
+              onBreakdownChange={(value) => setViewParam("breakdown", value === "service" ? "" : value)}
+              service={service}
+              onServiceChange={(value) => setViewParam("service", value)}
+            />
+
+            </> : null}
           </section>
 
           {/*
@@ -1713,7 +1708,7 @@ export function NetworkEventsPage() {
             stream. Merging them into one table or one chart would require
             faking half of every row.
           */}
-          <section className="flex flex-col gap-4 border-t border-kumo-line pt-6">
+          {view === "connections" ? <section className="flex flex-col gap-4">
             <div>
               <h2 className="text-base font-semibold text-kumo-default">Connection stream</h2>
               <p className="text-sm text-kumo-subtle">
@@ -1734,8 +1729,9 @@ export function NetworkEventsPage() {
               sort={connectionSort}
               onSortChange={(value) => setViewParam("csort", value === "bytes" ? "" : value)}
             />
-          </section>
+          </section> : null}
         </div>
+      </LogWorkspace>
       </main>
     </div>
   );

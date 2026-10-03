@@ -1551,6 +1551,8 @@ func adminNodeRawNetworkLogsHandler(store *db.DB) http.HandlerFunc {
 func adminSystemLogsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, err := store.ListSystemLogsPage(r.Context(), db.SystemLogFilter{
+			Start:     strings.TrimSpace(r.URL.Query().Get("start")),
+			End:       strings.TrimSpace(r.URL.Query().Get("end")),
 			NodeName:  strings.TrimSpace(r.URL.Query().Get("node")),
 			Service:   strings.TrimSpace(r.URL.Query().Get("service")),
 			Level:     strings.TrimSpace(r.URL.Query().Get("level")),

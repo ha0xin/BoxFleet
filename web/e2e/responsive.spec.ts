@@ -19,7 +19,7 @@ test("mobile navigation and wide tables remain reachable", async ({ page }) => {
   // Page-size controls are hidden while the table is empty, so drive the
   // URL-synced limit directly and assert the empty pagination state.
   await page.goto("network-events?limit=50");
-  await expect(page.getByRole("button", { name: "Filter", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add filter", exact: true })).toBeVisible();
   await expect(page.getByText("0 items", { exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Page size", exact: true })).toHaveCount(0);
   const tableGeometry = await page.locator(".bf-table-scroll").evaluate((element) => ({
@@ -157,4 +157,54 @@ test("resource sort indicators match Domains and do not recolor column controls"
   const logIcon = await timestamp.locator(".bf-sort-icon").evaluate((icon) => ({ width: icon.getBoundingClientRect().width, opacity: getComputedStyle(icon).opacity }));
   expect(logIcon).toEqual({ width: 20, opacity: "1" });
   expect(await timestamp.getByRole("button", { name: "Fields", exact: true }).locator("svg").evaluate((icon) => getComputedStyle(icon).opacity)).toBe("1");
+});
+
+test("log workbench fields, column order and time query persist", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const queries: URL[] = [];
+  await page.route("**/api/admin/system-logs?*", (route) => {
+    queries.push(new URL(route.request().url()));
+    return route.fulfill({ json: { total: 1, services: ["sing-box"], logs: [{ observed_at: "2026-10-03T01:02:03.123Z", ingested_at: "2026-10-03T01:02:04Z", node: "workbench-node", service: "sing-box", level: "info", message: "workbench journal" }] } });
+  });
+  await page.goto("system-logs");
+  await expect(page.getByText("workbench journal", { exact: true })).toBeVisible();
+  const drag = page.getByRole("button", { name: "Drag Node column", exact: true });
+  await drag.focus();
+  await drag.press("Space");
+  // dnd-kit measures droppable headers on animation frames after activation.
+  await expect(page.getByRole("status")).toContainText("over droppable area 2");
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await drag.press("ArrowRight");
+  await expect(page.getByRole("status")).toContainText("over droppable area 3");
+  await drag.press("Space");
+  const headLabels = () => page.locator(".bf-data-table thead th").evaluateAll((heads) => heads.map((head) => head.getAttribute("aria-label")));
+  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested", null]);
+  const cells = page.locator(".bf-data-table tbody tr").first().locator("td");
+  await expect(cells.nth(2)).toHaveText("sing-box");
+  await expect(cells.nth(3)).toHaveText("workbench-node");
+  await page.reload();
+  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested", null]);
+  await page.getByRole("button", { name: "Toggle fields sidebar", exact: true }).click();
+  const fields = page.getByRole("complementary", { name: "Log fields", exact: true });
+  await fields.getByLabel("Search fields", { exact: true }).fill("Node");
+  await fields.getByRole("checkbox", { name: "Node", exact: true }).uncheck();
+  await expect(page.getByRole("columnheader", { name: "Node", exact: true })).toHaveCount(0);
+  await fields.getByRole("button", { name: "Reset columns", exact: true }).click();
+  await fields.getByRole("button", { name: "Close fields", exact: true }).click();
+  await page.getByRole("combobox", { name: "Time range", exact: true }).click();
+  await page.getByRole("option", { name: "Last 1 hour", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.searchParams.has("start")).toBe(true);
+  const request = queries.at(-1)!;
+  expect(Date.parse(request.searchParams.get("end")!) - Date.parse(request.searchParams.get("start")!)).toBe(3600000);
+  await expect(page).toHaveURL(/range=1h/);
+  await page.getByRole("button", { name: "Expand log entry", exact: true }).click();
+  await expect(page.getByLabel("Log entry details")).toContainText("workbench journal");
+  await expect(page.locator(".bf-log-detail button")).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("workbench-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Toggle fields sidebar", exact: true }).click();
+  await expect(fields.getByRole("button", { name: "Close fields", exact: true })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await fields.getByRole("button", { name: "Close fields", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("workbench-mobile.png") });
 });

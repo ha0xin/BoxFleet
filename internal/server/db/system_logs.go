@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,6 +39,8 @@ type SystemLogInput = model.SystemLogInput
 // means "no filter"; there is no "all" sentinel, because a node may legitimately
 // be named "all".
 type SystemLogFilter struct {
+	Start     string
+	End       string
 	NodeName  string
 	Service   string
 	Level     string
@@ -171,6 +174,40 @@ func (db *DB) ListRecentSystemLogs(ctx context.Context, nodeName string, limit i
 }
 
 func (db *DB) ListSystemLogsPage(ctx context.Context, filter SystemLogFilter) (SystemLogPage, error) {
+	var start, end time.Time
+	for _, bound := range []struct {
+		name, value string
+		target      *time.Time
+	}{{"start", filter.Start, &start}, {"end", filter.End, &end}} {
+		if bound.value == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, bound.value)
+		if err != nil {
+			return SystemLogPage{}, fmt.Errorf("invalid %s time: expected RFC3339", bound.name)
+		}
+		*bound.target = parsed
+	}
+	if filter.Start != "" && filter.End != "" && !start.Before(end) {
+		return SystemLogPage{}, fmt.Errorf("start must be before end")
+	}
+
+	// Stored observation times have millisecond precision in canonical UTC.
+	// Round bounds upward to preserve [start,end) semantics at that precision,
+	// while comparing the indexed column directly rather than applying a SQL function.
+	canonicalBound := func(value time.Time) string {
+		if value.Nanosecond()%int(time.Millisecond) != 0 {
+			value = value.Truncate(time.Millisecond).Add(time.Millisecond)
+		}
+		return value.UTC().Format(systemLogTimeFormat)
+	}
+	if filter.Start != "" {
+		filter.Start = canonicalBound(start)
+	}
+	if filter.End != "" {
+		filter.End = canonicalBound(end)
+	}
+
 	nodeID := ""
 	if strings.TrimSpace(filter.NodeName) != "" {
 		// Resolve the name so an unknown node surfaces as an error instead of an
@@ -278,8 +315,20 @@ func (db *DB) listSystemLogServices(ctx context.Context) ([]string, error) {
 }
 
 func systemLogPageWhere(filter SystemLogFilter, nodeID string) ([]string, []any) {
-	where := make([]string, 0, 4)
-	args := make([]any, 0, 6)
+	where := make([]string, 0, 6)
+	if filter.Start != "" {
+		where = append(where, "l.observed_at >= ?")
+	}
+	if filter.End != "" {
+		where = append(where, "l.observed_at < ?")
+	}
+	args := make([]any, 0, 8)
+	if filter.Start != "" {
+		args = append(args, filter.Start)
+	}
+	if filter.End != "" {
+		args = append(args, filter.End)
+	}
 	if nodeID != "" {
 		where = append(where, "l.node_id = ?")
 		args = append(args, nodeID)

@@ -22,11 +22,13 @@ import { useIsDarkMode } from "@/components/chart/use-color-mode";
 export function AppPageHeader({
   title,
   description,
-  actions
+  actions,
+  compact = false
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
+  compact?: boolean;
 }) {
   const { status } = usePublishStatus();
   const navigate = useNavigate();
@@ -57,6 +59,7 @@ export function AppPageHeader({
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <PublishStrip />
+          {compact ? actions : null}
           {!onSystemLogs ? (
             <LinkButton
               variant="ghost"
@@ -85,7 +88,7 @@ export function AppPageHeader({
         </div>
       </div>
 
-      <div className="mx-auto w-full px-4 md:px-8">
+      {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4 md:px-8">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">
           <div className="flex min-w-0 flex-col">
             <h1 className="mb-2 text-xl font-semibold tracking-tight text-kumo-default">{title}</h1>
@@ -95,7 +98,7 @@ export function AppPageHeader({
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
         </header>
-      </div>
+      </div>}
     </div>
   );
 }

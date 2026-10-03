@@ -23,6 +23,7 @@ import {
 } from "@/components/admin-table";
 import type { TableColumnWidth } from "@/components/admin-table";
 import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
+import { LogWorkspace, LogFieldsToggle } from "@/components/log-workspace";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
@@ -52,7 +53,8 @@ const filterSchema = z.object({
   node: z.string(),
   service: z.string(),
   sort: z.enum(sortColumns),
-  direction: z.enum(["asc", "desc"])
+  direction: z.enum(["asc", "desc"]),
+  range: z.enum(["all", "1h", "24h", "7d"])
 });
 
 type FilterValues = z.infer<typeof filterSchema>;
@@ -64,7 +66,8 @@ const defaultFilters: FilterValues = {
   node: "all",
   service: "all",
   sort: "observed_at",
-  direction: "desc"
+  direction: "desc",
+  range: "all"
 };
 
 const urlFilterOptions: UseUrlFiltersOptions<FilterValues> = {
@@ -152,6 +155,10 @@ export function SystemLogsPage() {
     useUrlFilters(urlFilterOptions);
   const [filterOpen, setFilterOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [timeAnchor, setTimeAnchor] = useState(() => Date.now());
+  const rangeHours = filters.range === "1h" ? 1 : filters.range === "24h" ? 24 : filters.range === "7d" ? 168 : 0;
+  const timeStart = rangeHours ? new Date(timeAnchor - rangeHours * 3600000).toISOString() : undefined;
+  const timeEnd = rangeHours ? new Date(timeAnchor).toISOString() : undefined;
   const [detail, setDetail] = useState<SystemLog | null>(null);
 
   // react-hook-form is the draft layer for the search box only; the facets
@@ -166,7 +173,9 @@ export function SystemLogsPage() {
     node: filters.node === "all" ? undefined : filters.node,
     service: filters.service === "all" ? undefined : filters.service,
     sort: filters.sort,
-    direction: filters.direction
+    direction: filters.direction,
+    start: timeStart,
+    end: timeEnd
   });
   const logsQuery = useQuery({
     queryKey: adminKeys.systemLogs(
@@ -177,7 +186,9 @@ export function SystemLogsPage() {
       filters.node,
       filters.service,
       filters.sort,
-      filters.direction
+      filters.direction,
+      timeStart,
+      timeEnd
     ),
     queryFn: ({ signal }) => request<SystemLogsResponse>(path, { signal }),
     placeholderData: (previous) => previous,
@@ -234,6 +245,7 @@ export function SystemLogsPage() {
     // of the table.
     <div className="flex min-h-full min-w-0 flex-col bg-kumo-canvas">
       <AppPageHeader
+        compact
         title="System Logs"
         description="Inspect recent agent, sing-box, and service journal entries reported by nodes."
         actions={
@@ -241,24 +253,27 @@ export function SystemLogsPage() {
             variant="secondary"
             icon={ArrowClockwiseIcon}
             disabled={logsQuery.isFetching}
-            onClick={() => void logsQuery.refetch()}
+            onClick={() => { setTimeAnchor(Date.now()); void logsQuery.refetch(); }}
           >
             Refresh
           </Button>
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
+        <LogWorkspace>
+        <div className="flex w-full min-w-0 flex-col gap-4">
           <section className="flex flex-col gap-3">
 
             <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="bf-log-toolbar flex flex-wrap items-center gap-2">
+                <LogFieldsToggle />
+                <Collapsible.Trigger render={<Button type="button" variant="secondary" icon={FunnelIcon} />}>Add filter{activeFilterCount > 0 ? <Badge variant="secondary" className="ml-1.5">{activeFilterCount}</Badge> : null}</Collapsible.Trigger>
                 <form
                   className="flex min-w-0 flex-1 gap-2"
                   onSubmit={form.handleSubmit((values) => setFilters({ search: values.search.trim() }))}
                 >
                   <Input
-                    placeholder="Search by node, service, level, or message"
+                    placeholder="Search logs…"
                     aria-label="Search system logs"
                     className="min-w-0 flex-1"
                     {...form.register("search")}
@@ -267,14 +282,8 @@ export function SystemLogsPage() {
                     Search
                   </Button>
                 </form>
-                <Collapsible.Trigger render={<Button type="button" variant="secondary" icon={FunnelIcon} />}>
-                  Filter
-                  {activeFilterCount > 0 ? (
-                    <Badge variant="secondary" className="ml-1.5">
-                      {activeFilterCount}
-                    </Badge>
-                  ) : null}
-                </Collapsible.Trigger>
+                <Select aria-label="Time range" value={filters.range} onValueChange={(value) => { setTimeAnchor(Date.now()); setFilters({ range: (value ?? "all") as FilterValues["range"] }); }} items={[{value:"all", label:"All time"}, {value:"1h", label:"Last 1 hour"}, {value:"24h", label:"Last 24 hours"}, {value:"7d", label:"Last 7 days"}]} />
+
               </div>
 
               <Collapsible.Panel className="rounded-lg bg-kumo-tint p-3">
@@ -434,6 +443,7 @@ export function SystemLogsPage() {
             <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
           </section>
         </div>
+      </LogWorkspace>
       </main>
       {detail ? <LogDetailDialog log={detail} onClose={() => setDetail(null)} /> : null}
     </div>
