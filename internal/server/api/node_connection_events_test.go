@@ -284,6 +284,10 @@ func openConnectionAPITestDB(t *testing.T) (*db.DB, *sql.DB) {
 	if err := store.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	// Endpoint fixtures use fixed historical windows; retention has dedicated tests.
+	if err := store.SetConnectionEventRetentionDays(context.Background(), db.MaxConnectionEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)

@@ -21,6 +21,10 @@ import (
 func seedConnectionEvents(t *testing.T, ctx context.Context, store *db.DB) {
 	t.Helper()
 	seedAPITestNode(t, ctx, store)
+	// Keep historical query fixtures independent of the default retention window.
+	if err := store.SetConnectionEventRetentionDays(ctx, db.MaxConnectionEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.SetNodeConnectionTelemetry(ctx, db.SetNodeConnectionTelemetryParams{NodeName: "azus", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

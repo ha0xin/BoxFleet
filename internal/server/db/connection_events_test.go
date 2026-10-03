@@ -657,6 +657,11 @@ func countConnectionReports(t *testing.T, ctx context.Context, db *DB) int64 {
 // resolves through proxy_accesses the same way it does in production.
 func seedConnectionIngestFixture(t *testing.T, ctx context.Context, db *DB) {
 	t.Helper()
+	// Fixed historical buckets exercise normalization and ordering, not retention.
+	// Retention tests explicitly select their own shorter window.
+	if err := db.SetConnectionEventRetentionDays(ctx, MaxConnectionEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}

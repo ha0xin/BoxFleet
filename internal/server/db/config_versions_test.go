@@ -258,6 +258,10 @@ func TestParseSingBoxLogEvent(t *testing.T) {
 
 func seedTrafficFixture(t *testing.T, ctx context.Context, store *DB) {
 	t.Helper()
+	// Historical parser fixtures test report aggregation, not retention expiry.
+	if err := store.SetNetworkEventRetentionDays(ctx, MaxNetworkEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}

@@ -473,6 +473,10 @@ func TestAdminProxyProviderRequiresAuth(t *testing.T) {
 func TestAdminNetworkEventsPaginationAndFilters(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
+	// Pagination fixtures must outlive the production default retention period.
+	if err := store.SetNetworkEventRetentionDays(ctx, db.MaxNetworkEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	seedAPITestNode(t, ctx, store)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})
 	if err := store.RecordLogEvents(ctx, db.LogEventReport{
