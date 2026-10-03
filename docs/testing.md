@@ -83,7 +83,7 @@ behavior. Treat a failure as a real signal before adjusting the assertion.
 
 - **Upstream proto conformance.** `internal/singboxapi/daemonpb` diffs the
   vendored descriptor against
-  `testdata/upstream-v1.14.0-beta.2.descriptorset.binpb`, a committed copy of the
+  `testdata/upstream-v1.14.2.descriptorset.binpb`, a committed copy of the
   real compiled upstream descriptor. See
   [connection telemetry](#connection-telemetry).
 
