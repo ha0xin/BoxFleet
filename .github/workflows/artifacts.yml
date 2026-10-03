@@ -160,6 +160,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
           gh release create "$GITHUB_REF_NAME" \
             dist/boxfleet-${{ steps.version.outputs.value }}-linux-amd64.tar.gz \
             dist/SHA256SUMS \
@@ -168,4 +172,4 @@ jobs:
             dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64 \
             dist/artifacts/sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64 \
             --verify-tag \
-            --generate-notes
+            --generate-notes "${release_flags[@]}"
