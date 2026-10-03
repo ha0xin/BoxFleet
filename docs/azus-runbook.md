@@ -49,7 +49,9 @@ Use one remote `set -Eeuo pipefail` script with an `ERR` trap.
 
 1. Create `/opt/boxfleet/backups/pre-<version>-<UTC timestamp>/`.
 2. Back up the current server binary and `boxfleet-server.service` unit.
-3. Back up DB, WAL, and SHM files while the service is stopped.
+3. If schema or existing stored data changes, back up DB, WAL, and SHM files
+   while the service is stopped. A binary/UI-only replacement does not back up
+   the database; verify this from the release diff before deployment.
 4. Stop `boxfleet-server`, install the candidate as `/opt/boxfleet/bin/bfs`
    with mode `0755`, update `ExecStart`, run `systemctl daemon-reload`, and start it.
 5. Run all smoke checks before removing the trap.
@@ -61,7 +63,8 @@ service. After a successful migration to `bfs`, remove the legacy
 
 Keep exactly one rollback backup: the `pre-<version>-<UTC timestamp>` directory
 created by the latest successful deployment, which contains the immediately
-previous server version and database state. Only after every smoke check has
+previous server version, plus database state only when the deployment changed
+schema or stored data. Only after every smoke check has
 passed and the rollback trap has been disarmed, delete all older directories
 under `/opt/boxfleet/backups/`. Never prune backups before or during the smoke
 checks, and do not prune them on a failed deployment. If backup pruning fails,

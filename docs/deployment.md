@@ -57,11 +57,15 @@ Before replacement:
 
 1. Verify local and remote SHA256 values.
 2. Run the server candidate with `--help`.
-3. Prepare a backup directory for the server binary and SQLite files.
+3. Compare migrations and database-writing behavior with the deployed release.
+   Prepare one rollback directory for the old binary and unit. Copy SQLite
+   DB/WAL/SHM only when the deployment changes schema or existing stored data.
 
 Stop, replace, restart, and smoke-test inside an `ERR`-trapped script that
-backs up the binary plus DB/WAL/SHM files after stopping the service and restores
-them on failure. Startup applies embedded migrations. A
+backs up the binary and unit and restores them on failure. When schema or stored
+data changes, also back up DB/WAL/SHM after stopping the service and restore that
+snapshot on failure. A binary/UI-only replacement does not copy the database.
+Startup applies embedded migrations. A
 server-only release replaces only `bfs`; never update node
 components on the management host.
 
