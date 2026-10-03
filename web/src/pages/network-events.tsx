@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   createColumnHelper,
   flexRender,
@@ -12,7 +12,6 @@ import { useSearchParams } from "react-router-dom";
 import type { DateRange } from "react-day-picker";
 import { z } from "zod";
 import {
-  ArrowClockwiseIcon,
   ArrowLeftIcon,
   CalendarBlankIcon,
   FunnelIcon,
@@ -65,11 +64,10 @@ import type {
   ServiceUsageResponse
 } from "../types";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
-import { useAutoRefresh } from "@/admin/use-auto-refresh";
-import { AdminPagination, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
+import { adminKeys, queryString } from "@/admin/query";
+import { TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
-import { LogWorkspace, LogFieldsToggle } from "@/components/log-workspace";
+import { LogWorkspace, LogFieldsToggle, LogActions, LogResults, manualLogQueryOptions } from "@/components/log-workspace";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RankedBarList, type RankedBarRow } from "@/components/chart/ranked-bar-list";
 import { TimeBarChart, type TimeSeries } from "@/components/chart/time-bar-chart";
@@ -402,6 +400,7 @@ export function ActivityPanel({
     group: "total"
   });
   const query = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.networkEventSeries({ ...scopeKey, bucket, offsetMinutes }),
     queryFn: ({ signal }) => request<NetworkEventSeriesResponse>(path, { signal }),
     placeholderData: (previous) => previous,
@@ -509,6 +508,7 @@ export function ServiceAuditPanel({
     limit: AUDIT_SERVICE_ROWS
   });
   const servicesQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.networkEventServices({ ...scopeKey, group: breakdown }),
     queryFn: ({ signal }) => request<ServiceUsageResponse>(servicesPath, { signal }),
     placeholderData: (previous) => previous
@@ -520,6 +520,7 @@ export function ServiceAuditPanel({
     limit: AUDIT_HOST_ROWS
   });
   const hostsQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.networkEventHosts({ ...scopeKey, service }),
     queryFn: ({ signal }) => request<NetworkEventHostsResponse>(hostsPath, { signal }),
     placeholderData: (previous) => previous,
@@ -777,6 +778,7 @@ export function ConnectionTelemetryPanel({
   const { request } = useAdminApi();
 
   const nodesQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.connectionTelemetryNodes,
     queryFn: ({ signal }) =>
       request<ConnectionTelemetryNodesResponse>("/api/admin/connection-events/nodes", { signal })
@@ -802,6 +804,7 @@ export function ConnectionTelemetryPanel({
     limit: CONNECTION_HOST_ROWS
   });
   const hostsQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.connectionHosts({ ...scopeKey, host, sort }),
     queryFn: ({ signal }) => request<ConnectionHostsResponse>(hostsPath, { signal }),
     placeholderData: (previous) => previous,
@@ -816,6 +819,7 @@ export function ConnectionTelemetryPanel({
     offset_minutes: offsetMinutes
   });
   const seriesQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.connectionSeries({ ...scopeKey, host, bucket, offsetMinutes }),
     queryFn: ({ signal }) => request<ConnectionSeriesResponse>(seriesPath, { signal }),
     placeholderData: (previous) => previous,
@@ -823,6 +827,7 @@ export function ConnectionTelemetryPanel({
   });
 
   const eventsQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.connectionEvents({ ...scopeKey, host, limit: CONNECTION_EVENT_ROWS }),
     queryFn: ({ signal }) =>
       request<ConnectionEventsResponse>(
@@ -1164,7 +1169,6 @@ export function NetworkEventsPage() {
   const endParam = searchParams.get("end");
   const perPage = Math.max(1, Math.min(Number(searchParams.get("limit") ?? 25) || 25, 100));
   const offset = Math.max(0, Number(searchParams.get("offset") ?? 0) || 0);
-  const page = Math.floor(offset / perPage) + 1;
   const timeRange = useMemo(() => resolveTimeRange(filters, startParam, endParam, nowAnchor), [endParam, filters, nowAnchor, startParam]);
   const [draftRange, setDraftRange] = useState<DateRange>(() => dateRangeFromParams(filters, startParam, endParam, nowAnchor));
   const { bucket, hourAllowed } = resolveSeriesBucket(
@@ -1188,14 +1192,6 @@ export function NetworkEventsPage() {
   useEffect(() => {
     setDraftRange(dateRangeFromParams(filters, startParam, endParam, nowAnchor));
   }, [endParam, filters, nowAnchor, startParam]);
-
-  // Replays the header Refresh button on a cadence: advancing the anchor slides
-  // preset windows forward and bumping the generation re-keys every query.
-  // Paused while the range popover is open so a tick cannot reset the draft.
-  useAutoRefresh(refreshIntervals.telemetry, !rangeOpen, () => {
-    setNowAnchor(new Date());
-    setRefreshGeneration((value) => value + 1);
-  });
 
   function writeParams(values: FilterValues, nextLimit = perPage, nextOffset = 0, nextStart = startParam, nextEnd = endParam) {
     if (values.range !== "custom") setNowAnchor(new Date());
@@ -1224,14 +1220,6 @@ export function NetworkEventsPage() {
     if (value) next.set(key, value);
     else next.delete(key);
     setSearchParams(next);
-  }
-
-  function setPage(value: number) {
-    writeParams(filters, perPage, Math.max(0, (value - 1) * perPage));
-  }
-
-  function setPageSize(value: number) {
-    writeParams(filters, value, 0);
   }
 
   function applyFilters(values: FilterValues) {
@@ -1320,23 +1308,29 @@ export function NetworkEventsPage() {
     return names;
   }, [filters.action, filters.search]);
 
-  const path = "/api/admin/network-events" + queryString({ ...scope, limit: perPage, offset });
-  const eventsQuery = useQuery({
-    queryKey: adminKeys.networkEvents({ ...scopeKey, limit: perPage, offset }),
-    queryFn: ({ signal }) => request<NetworkEventsResponse>(path, { signal }),
-    placeholderData: (previous) => previous
+  const eventsQuery = useInfiniteQuery({
+    ...manualLogQueryOptions,
+    queryKey: [...adminKeys.networkEvents({ ...scopeKey, limit: perPage, offset }), "infinite"],
+    initialPageParam: offset,
+    queryFn: ({ signal, pageParam }) => request<NetworkEventsResponse>("/api/admin/network-events" + queryString({ ...scope, limit: perPage, offset: pageParam }), { signal }),
+    getNextPageParam: (last, _pages, previousOffset) => {
+      const next = previousOffset + last.events.length;
+      return last.events.length && next < last.total ? next : undefined;
+    }
   });
   const nodesQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.nodes,
     queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
   const usersQuery = useQuery({
+    ...manualLogQueryOptions,
     queryKey: adminKeys.users(false),
     queryFn: ({ signal }) => request<AdminUser[]>("/api/admin/users", { signal })
   });
 
-  const events = useMemo(() => eventsQuery.data?.events ?? [], [eventsQuery.data?.events]);
-  const total = eventsQuery.data?.total ?? 0;
+  const events = useMemo(() => eventsQuery.data?.pages.flatMap((page) => page.events) ?? [], [eventsQuery.data]);
+  const total = eventsQuery.data?.pages[0]?.total ?? 0;
   const nodeChoices = useMemo(() => ["all", ...(nodesQuery.data ?? []).map((node) => node.name)], [nodesQuery.data]);
   const userChoices = useMemo(() => ["all", ...(usersQuery.data ?? []).map((user) => user.name)], [usersQuery.data]);
   const activeFilterCount = [
@@ -1425,19 +1419,7 @@ export function NetworkEventsPage() {
         compact
         title="Network Events"
         description="Review parsed sing-box connection events, users, nodes, destinations, and raw log context."
-        actions={
-          <Button
-            variant="secondary"
-            icon={ArrowClockwiseIcon}
-            loading={eventsQuery.isFetching}
-            onClick={() => {
-              setNowAnchor(new Date());
-              setRefreshGeneration((value) => value + 1);
-            }}
-          >
-            Refresh
-          </Button>
-        }
+
       />
       <main className="w-full grow bg-kumo-canvas">
         <LogWorkspace>
@@ -1463,7 +1445,7 @@ export function NetworkEventsPage() {
                     Search
                   </Button>
                 </form>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                   <Popover open={rangeOpen} onOpenChange={setRangeOpen}>
                     <Popover.Trigger
                       render={
@@ -1508,6 +1490,7 @@ export function NetworkEventsPage() {
                       </div>
                     </Popover.Content>
                   </Popover>
+                  <LogActions busy={eventsQuery.isFetching} refresh={() => { setExpandedEvent(null); setNowAnchor(new Date()); setRefreshGeneration((value) => value + 1); }} />
 
 
                 </div>
@@ -1580,7 +1563,7 @@ export function NetworkEventsPage() {
               onTimeRangeChange={applyChartRange}
             />
 
-            <TableCard tableId="network-events-connect" variant="log" widths={[36, 270, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
+            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-connect" variant="log" widths={[36, 270, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
               <Table className="min-w-[1600px] table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (
@@ -1598,7 +1581,7 @@ export function NetworkEventsPage() {
                   ))}
                 </Table.Header>
                 <Table.Body>
-                  {eventsQuery.error ? (
+                  {eventsQuery.error && !events.length ? (
                     <TableError colSpan={columns.length}>{errorMessage(eventsQuery.error)}</TableError>
                   ) : eventsQuery.isLoading ? (
                     <TableLoading colSpan={columns.length} />
@@ -1627,7 +1610,7 @@ export function NetworkEventsPage() {
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPageSize} total={total} />
+            <LogResults loaded={events.length} total={total} loading={eventsQuery.isFetchingNextPage} error={eventsQuery.isFetchNextPageError} retry={() => { void eventsQuery.fetchNextPage(); }} />
             </> : null}
             {view === "services" ? <>
             <ServiceAuditPanel

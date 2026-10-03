@@ -1,18 +1,17 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowClockwiseIcon, FunnelIcon } from "@phosphor-icons/react";
+import { FunnelIcon } from "@phosphor-icons/react";
 import { Badge, Banner, Button, Collapsible, Combobox, Dialog, Input, Select, Table } from "@cloudflare/kumo";
 
 import type { AdminNode, SystemLog, SystemLogLevelFilter, SystemLogSort, SystemLogsResponse } from "../types";
 import { useAdminApi } from "@/admin/api";
-import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
+import { adminKeys, queryString } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import {
-  AdminPagination,
   SortHead,
   TableCard,
   TableColgroup,
@@ -23,7 +22,7 @@ import {
 } from "@/components/admin-table";
 import type { TableColumnWidth } from "@/components/admin-table";
 import { LogExpandButton, LogRowDetails } from "@/components/log-row-details";
-import { LogWorkspace, LogFieldsToggle } from "@/components/log-workspace";
+import { LogWorkspace, LogFieldsToggle, LogActions, LogResults, manualLogQueryOptions } from "@/components/log-workspace";
 import { AppPageHeader } from "@/components/app-page-header";
 import { StatusBadge, type StatusTone } from "@/components/status-badge";
 
@@ -151,10 +150,11 @@ export function choiceList(options: readonly string[] | undefined, active: strin
 
 export function SystemLogsPage() {
   const { request } = useAdminApi();
-  const { filters, page, perPage, offset, setFilters, setPage, setPerPage, resetFilters } =
+  const { filters, perPage, offset, setFilters, resetFilters } =
     useUrlFilters(urlFilterOptions);
   const [filterOpen, setFilterOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [refreshGeneration, setRefreshGeneration] = useState(0);
   const [timeAnchor, setTimeAnchor] = useState(() => Date.now());
   const rangeHours = filters.range === "1h" ? 1 : filters.range === "24h" ? 24 : filters.range === "7d" ? 168 : 0;
   const timeStart = rangeHours ? new Date(timeAnchor - rangeHours * 3600000).toISOString() : undefined;
@@ -165,34 +165,21 @@ export function SystemLogsPage() {
   // commit on change. `values: filters` re-syncs the draft on Back/Forward.
   const form = useForm<FilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
-  const path = "/api/admin/system-logs" + queryString({
-    limit: perPage,
-    offset,
-    search: filters.search,
-    level: filters.level === "all" ? undefined : filters.level,
-    node: filters.node === "all" ? undefined : filters.node,
-    service: filters.service === "all" ? undefined : filters.service,
-    sort: filters.sort,
-    direction: filters.direction,
-    start: timeStart,
-    end: timeEnd
-  });
-  const logsQuery = useQuery({
-    queryKey: adminKeys.systemLogs(
-      perPage,
-      offset,
-      filters.search,
-      filters.level,
-      filters.node,
-      filters.service,
-      filters.sort,
-      filters.direction,
-      timeStart,
-      timeEnd
-    ),
-    queryFn: ({ signal }) => request<SystemLogsResponse>(path, { signal }),
-    placeholderData: (previous) => previous,
-    refetchInterval: refreshIntervals.live
+  const logsQuery = useInfiniteQuery({
+    ...manualLogQueryOptions,
+    queryKey: [...adminKeys.systemLogs(perPage, offset, filters, timeStart, timeEnd, refreshGeneration), "infinite"],
+    initialPageParam: offset,
+    queryFn: ({ signal, pageParam }) => request<SystemLogsResponse>("/api/admin/system-logs" + queryString({
+      limit: perPage, offset: pageParam, search: filters.search,
+      level: filters.level === "all" ? undefined : filters.level,
+      node: filters.node === "all" ? undefined : filters.node,
+      service: filters.service === "all" ? undefined : filters.service,
+      sort: filters.sort, direction: filters.direction, start: timeStart, end: timeEnd
+    }), { signal }),
+    getNextPageParam: (last, _pages, previousOffset) => {
+      const next = previousOffset + last.logs.length;
+      return last.logs.length && next < last.total ? next : undefined;
+    }
   });
   // Node options are the full node list, not the names on this page, for the
   // same reason the server sends the full service list.
@@ -201,12 +188,12 @@ export function SystemLogsPage() {
     queryFn: ({ signal }) => request<AdminNode[]>("/api/admin/nodes", { signal })
   });
 
-  const logs = useMemo(() => logsQuery.data?.logs ?? [], [logsQuery.data?.logs]);
-  const note = logsQuery.data?.note ?? "";
-  const total = logsQuery.data?.total ?? 0;
+  const logs = useMemo(() => logsQuery.data?.pages.flatMap((page) => page.logs) ?? [], [logsQuery.data]);
+  const note = logsQuery.data?.pages[0]?.note ?? "";
+  const total = logsQuery.data?.pages[0]?.total ?? 0;
   const serviceChoices = useMemo(
-    () => choiceList(logsQuery.data?.services, filters.service),
-    [filters.service, logsQuery.data?.services]
+    () => choiceList(logsQuery.data?.pages[0]?.services, filters.service),
+    [filters.service, logsQuery.data]
   );
   const nodeChoices = useMemo(
     () => choiceList(nodesQuery.data?.map((node) => node.name), filters.node),
@@ -219,15 +206,6 @@ export function SystemLogsPage() {
     .filter(Boolean).length;
   const narrowed = filters.search !== "" || activeFilterCount > 0;
 
-  // The hook never sees `total`, so the upper clamp lives here, in an effect —
-  // calling setSearchParams during render is a navigation. It waits for a
-  // response: `total` is 0 during the first fetch, and clamping then would
-  // rewrite a shared `?page=3` before its rows ever arrive.
-  const lastPage = Math.max(1, Math.ceil(total / perPage));
-  useEffect(() => {
-    if (logsQuery.data && page > lastPage) setPage(lastPage, "replace");
-  }, [lastPage, logsQuery.data, page, setPage]);
-
   function setSort(column: LogSort) {
     setFilters((current) =>
       current.sort === column
@@ -237,7 +215,7 @@ export function SystemLogsPage() {
     );
   }
 
-  const isRefreshing = logsQuery.isFetching && !logsQuery.isLoading;
+  const isRefreshing = logsQuery.isFetching && !logsQuery.isLoading && !logsQuery.isFetchingNextPage;
 
   return (
     // `min-w-0`: this div is a grid item, and without it the table's min-width
@@ -248,16 +226,7 @@ export function SystemLogsPage() {
         compact
         title="System Logs"
         description="Inspect recent agent, sing-box, and service journal entries reported by nodes."
-        actions={
-          <Button
-            variant="secondary"
-            icon={ArrowClockwiseIcon}
-            disabled={logsQuery.isFetching}
-            onClick={() => { setTimeAnchor(Date.now()); void logsQuery.refetch(); }}
-          >
-            Refresh
-          </Button>
-        }
+
       />
       <main className="w-full grow bg-kumo-canvas">
         <LogWorkspace>
@@ -282,8 +251,10 @@ export function SystemLogsPage() {
                     Search
                   </Button>
                 </form>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                 <Select aria-label="Time range" value={filters.range} onValueChange={(value) => { setTimeAnchor(Date.now()); setFilters({ range: (value ?? "all") as FilterValues["range"] }); }} items={[{value:"all", label:"All time"}, {value:"1h", label:"Last 1 hour"}, {value:"24h", label:"Last 24 hours"}, {value:"7d", label:"Last 7 days"}]} />
-
+                <LogActions busy={logsQuery.isFetching} refresh={() => { setExpanded(null); setTimeAnchor(Date.now()); setRefreshGeneration((value) => value + 1); }} />
+                </div>
               </div>
 
               <Collapsible.Panel className="rounded-lg bg-kumo-tint p-3">
@@ -352,7 +323,7 @@ export function SystemLogsPage() {
 
             {note ? <Banner variant="secondary" title={note} /> : null}
 
-            <TableCard tableId="system-logs" variant="log">
+            <TableCard key={JSON.stringify([filters, timeStart, timeEnd, refreshGeneration])} loadMore={{ hasMore: !!logsQuery.hasNextPage && !logsQuery.isFetchNextPageError, loading: logsQuery.isFetching, fetch: () => { void logsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="system-logs" variant="log">
               <Table
                 layout="fixed"
                 style={{ minWidth: tableMinWidth(logColumns) }}
@@ -371,7 +342,7 @@ export function SystemLogsPage() {
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {logsQuery.error ? (
+                  {logsQuery.error && !logs.length ? (
                     <TableError colSpan={COLUMN_COUNT}>{errorMessage(logsQuery.error)}</TableError>
                   ) : logsQuery.isLoading ? (
                     <TableLoading colSpan={COLUMN_COUNT} />
@@ -440,7 +411,7 @@ export function SystemLogsPage() {
               </Table>
             </TableCard>
 
-            <AdminPagination page={page} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={total} />
+            <LogResults loaded={logs.length} total={total} loading={logsQuery.isFetchingNextPage} error={logsQuery.isFetchNextPageError} retry={() => { void logsQuery.fetchNextPage(); }} />
           </section>
         </div>
       </LogWorkspace>

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { Button, Checkbox, Input } from "@cloudflare/kumo";
-import { SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
+import { Button, Checkbox, DropdownMenu, Input, Loader } from "@cloudflare/kumo";
+import { ArrowClockwiseIcon, DotsThreeIcon, SidebarSimpleIcon, XIcon } from "@phosphor-icons/react";
 
 export type LogField = { id: string; label: string; visible: boolean; toggle: (visible: boolean) => void };
 type FieldCatalog = { fields: LogField[]; reset: () => void };
@@ -41,4 +41,30 @@ export function LogFieldsToggle() {
 export function logTimezone() {
   const minutes = -new Date().getTimezoneOffset();
   return `GMT${minutes < 0 ? "−" : "+"}${Math.floor(Math.abs(minutes) / 60)}${Math.abs(minutes) % 60 ? `:${String(Math.abs(minutes) % 60).padStart(2, "0")}` : ""}`;
+}
+
+
+/** Logs refresh only on an explicit action or a query change. */
+export const manualLogQueryOptions = {
+  staleTime: Infinity,
+  refetchInterval: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false
+} as const;
+
+export function LogActions({ busy, refresh }: { busy: boolean; refresh: () => void }) {
+  return <DropdownMenu>
+    <DropdownMenu.Trigger render={<Button variant="secondary" shape="square" icon={DotsThreeIcon} aria-label="Log actions" />} />
+    <DropdownMenu.Content>
+      <DropdownMenu.Item icon={ArrowClockwiseIcon} disabled={busy} onClick={refresh}>Refresh</DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu>;
+}
+
+export function LogResults({ loaded, total, loading, error, retry }: { loaded: number; total: number; loading: boolean; error: boolean; retry: () => void }) {
+  return <div className="flex items-center gap-3 text-xs text-kumo-subtle" aria-live="polite">
+    <span>{total ? `${loaded} rows · ${total} total` : "0 items"}</span>
+    {loading ? <><Loader size={14} /><span>Loading more…</span></> : null}
+    {error ? <><span>Could not load more logs.</span><Button variant="secondary" size="sm" onClick={retry}>Retry</Button></> : null}
+  </div>;
 }

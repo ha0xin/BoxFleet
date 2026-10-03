@@ -173,7 +173,12 @@ server-side query and aggregation contracts.
 `TableCard` composes native Kumo `Table` elements with TanStack Table's column
 sizing and visibility. Supply a stable `tableId`, plus `widths` or the existing
 `TableColgroup`. It retains page-owned row rendering, server sorting, filtering
-and pagination. Explicit widths prevent the browser from distributing spare
+and resource pagination. Network Events and System Logs use TanStack Query infinite
+queries backed by the existing offset API; a sentinel inside the table scroller
+loads and appends the next batch. Failed batches retain loaded rows and expose
+Retry. Refresh lives in the query toolbar’s Log actions menu and starts a new
+query snapshot at the top of the table. Log data does not refresh on a timer,
+window focus, or reconnect. Explicit widths prevent the browser from distributing spare
 space equally across name columns; the largest flexible content column takes
 remaining space. Table overflow stays inside `.bf-table-scroll`.
 

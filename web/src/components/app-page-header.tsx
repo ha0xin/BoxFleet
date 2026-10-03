@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { FileTextIcon, MoonIcon, SunIcon } from "@phosphor-icons/react";
-import { Breadcrumbs, Button, LinkButton, Sidebar } from "@cloudflare/kumo";
+import { useNavigate } from "react-router-dom";
+import { MoonIcon, SunIcon } from "@phosphor-icons/react";
+import { Breadcrumbs, Button, Sidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
@@ -14,8 +14,7 @@ import { useIsDarkMode } from "@/components/chart/use-color-mode";
  * `Sidebar.Header` (both `min-h-[58px]` with a bottom hairline, so the two
  * borders read as one continuous line) followed by the page title block.
  *
- * The bar's right slot carries a Logs shortcut (hidden on System Logs) and
- * compact page actions. Publication notices occupy a separate row so pending
+ * The bar's right slot carries compact page actions and the color mode toggle. Publication notices occupy a separate row so pending
  * changes cannot stretch the navigation bar. Every admin page
  * renders this once at the top; page content below owns its own
  * responsive content container.
@@ -33,8 +32,6 @@ export function AppPageHeader({
 }) {
   const { status, changesError } = usePublishStatus();
   const navigate = useNavigate();
-  const location = useLocation();
-  const onSystemLogs = location.pathname.startsWith("/system-logs");
   const isDarkMode = useIsDarkMode();
 
   return (
@@ -60,21 +57,6 @@ export function AppPageHeader({
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           {compact ? actions : null}
-          {!onSystemLogs ? (
-            <LinkButton
-              variant="ghost"
-              size="sm"
-              icon={FileTextIcon}
-              href={`${adminBasename()}/system-logs`}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-                navigate("/system-logs");
-              }}
-            >
-              <span className="hidden md:inline">Logs</span>
-            </LinkButton>
-          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -88,7 +70,7 @@ export function AppPageHeader({
         </div>
       </div>
 
-      {status !== "idle" || changesError ? <div className={`bf-page-publish border-b border-kumo-line px-4 py-2 sm:px-6 ${publishBarToneClass(status)}`}><PublishStrip /></div> : null}
+      {status !== "idle" || changesError ? <div className={`bf-page-publish transition-colors duration-300 border-b border-kumo-line px-4 py-2 sm:px-6 ${publishBarToneClass(status)}`}><PublishStrip /></div> : null}
 
       {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4 md:px-8">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">

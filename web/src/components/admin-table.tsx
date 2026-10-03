@@ -69,12 +69,13 @@ function ReorderableHead({ cell, id, label }: { cell: TableElement; id: string; 
   return cloneElement(content, { ref: setNodeRef, style: { transform: CSS.Translate.toString(transform), transition, zIndex: isDragging ? 5 : undefined } } as React.Attributes);
 }
 
-export function TableCard({ children, className = "", tableId, widths, variant = "resource" }: {
+export function TableCard({ children, className = "", tableId, widths, variant = "resource", loadMore }: {
   children: ReactNode;
   className?: string;
   tableId?: string;
   widths?: readonly TableColumnWidth[];
   variant?: "resource" | "log";
+  loadMore?: { hasMore: boolean; loading: boolean; fetch: () => void };
 }) {
   const handleId = useId();
   const logFields = useLogFields();
@@ -90,6 +91,18 @@ export function TableCard({ children, className = "", tableId, widths, variant =
   const storageKey = `boxfleet.table.v1.${tableId ?? "anonymous"}.${schema}`;
   const [preferences, setPreferences] = useState(() => tableId ? readTablePreferences(storageKey, labels.length) : { sizing: {}, visibility: {} });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
+  const fetchMore = loadMore?.fetch;
+  const hasMore = loadMore?.hasMore;
+  const loadingMore = loadMore?.loading;
+  useEffect(() => {
+    if (!hasMore || loadingMore || !fetchMore || !tailRef.current || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) fetchMore();
+    }, { root: scrollRef.current, rootMargin: "0px 0px 80px 0px" });
+    observer.observe(tailRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, fetchMore]);
   const [availableWidth, setAvailableWidth] = useState(0);
   useEffect(() => {
     const element = scrollRef.current;
@@ -216,7 +229,7 @@ export function TableCard({ children, className = "", tableId, widths, variant =
       const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
       setColumnOrder(next);
     }}><SortableContext items={table.getVisibleLeafColumns().filter((column) => labels[Number(column.id)] !== "Details").map((column) => column.id)} strategy={horizontalListSortingStrategy}>
-      <div ref={scrollRef} className="bf-table-scroll overflow-x-auto overscroll-x-contain">{decorate(children)}</div>
+      <div ref={scrollRef} className="bf-table-scroll overflow-x-auto overscroll-x-contain">{decorate(children)}{loadMore?.hasMore ? <div ref={tailRef} className="h-px" aria-hidden="true" /> : null}</div>
     </SortableContext></DndContext>
     {feedback ? <Table className="w-full"><Table.Body>{cloneElement(feedback, { colSpan: 1 })}</Table.Body></Table> : null}
   </div>;
