@@ -41,9 +41,10 @@ function findWidths(node: ReactNode): readonly TableColumnWidth[] | undefined {
 }
 
 /** Stored preferences are local to a table and its column schema, never its data. */
-export function readTablePreferences(key: string, count: number): { sizing: ColumnSizingState; visibility: VisibilityState } {
+export function readTablePreferences(key: string, count: number, fallbackKeys: string[] = []): { sizing: ColumnSizingState; visibility: VisibilityState } {
   try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "{}");
+    const storedKey = [key, ...fallbackKeys].find((candidate) => localStorage.getItem(candidate) !== null);
+    const value = JSON.parse(storedKey ? localStorage.getItem(storedKey)! : "{}");
     const sizing: ColumnSizingState = {};
     const visibility: VisibilityState = {};
     for (let index = 0; index < count; index++) {
@@ -55,6 +56,19 @@ export function readTablePreferences(key: string, count: number): { sizing: Colu
   } catch {
     return { sizing: {}, visibility: {} };
   }
+}
+
+/** Width defaults can change without discarding manually sized/hidden columns. */
+function legacyPreferenceKeys(tableId: string, labels: string[], exactKey: string): string[] {
+  try {
+    const prefix = `boxfleet.table.v1.${tableId}.`;
+    const matches = Object.keys(localStorage).filter((key) => {
+      if (!key.startsWith(prefix)) return false;
+      try { return JSON.stringify(JSON.parse(key.slice(prefix.length)).labels) === JSON.stringify(labels); }
+      catch { return false; }
+    });
+    return [exactKey, ...matches.reverse().filter((key) => key !== exactKey)];
+  } catch { return []; }
 }
 
 /**
@@ -88,8 +102,9 @@ export function TableCard({ children, className = "", tableId, widths, variant =
   const labels = headers.map((head, index) => head.props.label ?? (textOf(head.props.children).trim() || `Column ${index + 1}`));
   const declared = widths ?? findWidths(children) ?? labels.map((label, index) => label === "Actions" ? 52 : index === 0 ? { min: 220 } : 160);
   const schema = JSON.stringify({ labels, declared });
-  const storageKey = `boxfleet.table.v1.${tableId ?? "anonymous"}.${schema}`;
-  const [preferences, setPreferences] = useState(() => tableId ? readTablePreferences(storageKey, labels.length) : { sizing: {}, visibility: {} });
+  const storageKey = `boxfleet.table.v2.${tableId ?? "anonymous"}.${JSON.stringify(labels)}`;
+  const legacyKey = `boxfleet.table.v1.${tableId ?? "anonymous"}.${schema}`;
+  const [preferences, setPreferences] = useState(() => tableId ? readTablePreferences(storageKey, labels.length, legacyPreferenceKeys(tableId, labels, legacyKey)) : { sizing: {}, visibility: {} });
   const scrollRef = useRef<HTMLDivElement>(null);
   const tailRef = useRef<HTMLDivElement>(null);
   const fetchMore = loadMore?.fetch;
@@ -122,9 +137,9 @@ export function TableCard({ children, className = "", tableId, widths, variant =
     // Spare space belongs to the widest flexible content column, rather than
     // making every name column equally wide. Manual widths override this default.
     const flexible = spec.declared.reduce<number>((best, width, index) => typeof width !== "number" && (best < 0 || sizes[index] > sizes[best]) ? index : best, -1);
-    if (flexible >= 0) sizes[flexible] += Math.max(0, availableWidth - 44 - sizes.reduce((sum, size) => sum + size, 0));
+    if (flexible >= 0) sizes[flexible] += Math.max(0, availableWidth - (variant === "resource" ? 44 : 0) - sizes.reduce((sum, size) => sum + size, 0));
     return spec.labels.map((label, index) => ({ id: String(index), header: label, size: sizes[index], minSize: sizes[index] < 64 ? sizes[index] : 64, maxSize: 1200, enableResizing: label !== "Actions" && label !== "Details", enableHiding: index > 0 && label !== "Actions" && label !== "Details" }));
-  }, [schema, availableWidth]);
+  }, [schema, availableWidth, variant]);
   const table = useReactTable({
     data: emptyRows,
     columns: definitions,
@@ -186,8 +201,9 @@ export function TableCard({ children, className = "", tableId, widths, variant =
       }}
     /></>;
   }
-  const fillerWidth = Math.max(44, availableWidth - table.getTotalSize());
-  const visibleCount = table.getVisibleLeafColumns().length + 1;
+  const fillerWidth = Math.max(variant === "resource" ? 44 : 0, availableWidth - table.getTotalSize());
+  const hasFiller = variant === "resource" || fillerWidth > 0;
+  const visibleCount = table.getVisibleLeafColumns().length + (hasFiller ? 1 : 0);
   function findFeedback(node: ReactNode): TableElement | undefined {
     for (const child of elements(node)) {
       if (child.type === TableEmpty || child.type === TableError || child.type === TableLoading) return child;
@@ -202,7 +218,7 @@ export function TableCard({ children, className = "", tableId, widths, variant =
       const element = child as TableElement;
       if (element.type === TableColgroup) return null;
       if (element.type === Table) return cloneElement(element, { style: { ...element.props.style, minWidth: undefined, width: table.getTotalSize() + fillerWidth }, className: `${element.props.className ?? ""} bf-data-table` },
-        <colgroup>{table.getVisibleLeafColumns().map((column) => <col key={column.id} style={{ width: column.getSize() }} />)}<col style={{ width: fillerWidth }} /></colgroup>, decorate(element.props.children));
+        <colgroup>{table.getVisibleLeafColumns().map((column) => <col key={column.id} style={{ width: column.getSize() }} />)}{hasFiller ? <col style={{ width: fillerWidth }} /> : null}</colgroup>, decorate(element.props.children));
       if (element.type === Table.Header) return cloneElement(element, {}, decorate(element.props.children, true));
       if (feedback && element.type === feedback.type) return null;
       if (element.type === LogRowDetails) return cloneElement(element, { colSpan: visibleCount });
@@ -216,7 +232,7 @@ export function TableCard({ children, className = "", tableId, widths, variant =
           const extras = <>{variant === "log" && index === timeColumn ? <>{cell.type !== SortHead ? <ArrowDownIcon size={20} weight="bold" className="ml-1 inline-block align-middle text-kumo-link" aria-label="Newest first" /> : null}<span className="bf-log-timezone ml-1 text-xs text-kumo-subtle">{logTimezone()}</span><span className="ml-2 inline-flex align-middle">{settings}</span></> : null}{resizeHandle(index)}</>;
           const decorated = inHeader && cell.type === SortHead ? cloneElement(cell, { key: column.id, resizeHandle: extras }) : inHeader ? cloneElement(cell, { key: column.id, "aria-label": labels[index] }, labels[index] === "Details" ? <span className="sr-only">Details</span> : cell.props.children, extras) : cloneElement(cell, { key: column.id });
           return inHeader && variant === "log" && labels[index] !== "Details" ? <ReorderableHead key={column.id} cell={decorated} id={column.id} label={labels[index]} /> : decorated;
-        }), inHeader ? <Table.Head key="settings" sticky="right" className="bf-table-settings">{variant === "resource" ? settings : null}</Table.Head> : <Table.Cell key="settings" sticky="right" className="bf-table-settings" />);
+        }), hasFiller ? inHeader ? <Table.Head key="settings" sticky="right" className="bf-table-settings">{variant === "resource" ? settings : null}</Table.Head> : <Table.Cell key="settings" sticky="right" className="bf-table-settings" /> : null);
       }
       if (element.props.children) return cloneElement(element, {}, decorate(element.props.children, inHeader));
       return element;

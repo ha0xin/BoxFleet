@@ -186,7 +186,8 @@ Kumo's `Table.ResizeHandle` provides the styled native button; TanStack supplies
 mouse/touch drag handlers. Arrow keys adjust by 10px, Shift+Arrow by 40px, Home
 or double-click restores that column's default. The column menu can hide fields
 and reset all columns. Width and visibility preferences are stored locally,
-scoped by table ID and column schema; malformed or unavailable storage falls
+scoped by table ID and column labels rather than width defaults. Previous schema-keyed
+preferences migrate without discarding manually sized or hidden columns; malformed or unavailable storage falls
 back safely. Preferences contain no row data.
 
 The pinned-column gradient is disabled in these tables: Kumo renders it even
@@ -377,6 +378,7 @@ Navigation uses Kumo’s dialog sidebar below 1024px: the desktop rail is hidden
 a menu button in the breadcrumb bar opens it, and selecting a destination closes
 it. At 1024px and above, the desktop rail keeps its expanded/collapsed preference.
 Resource name controls have no underline, including on hover.
-Page titles and resource content use 16px side gutters, matching the log workspace
-at tablet/desktop widths. Log disclosure cells have no horizontal padding; their
+Page titles and resource content use 16px side gutters, matching log toolbars and charts
+at tablet/desktop widths. Main log grids retain the left gutter and extend flush to
+the right viewport edge, with no fixed blank settings column in overflowing log tables. Log disclosure cells have no horizontal padding; their
 26px buttons sit inside the narrow rail without clipping.

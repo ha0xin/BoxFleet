@@ -104,7 +104,7 @@ for (const width of [390, 768, 1024, 1440, 1920]) {
           return { left: card.left - main.left, right: main.right - card.right };
         });
         expect(inset.left).toBeCloseTo(16, 0);
-        expect(inset.right).toBeCloseTo(16, 0);
+        expect(inset.right).toBeCloseTo(["system-logs", "network-events"].includes(route) ? 0 : 16, 0);
       }
       expect(geometry.headerHeight).toBeCloseTo(44, 1);
       expect(geometry.fade).toBe("none");
@@ -206,12 +206,12 @@ test("log workbench fields, column order and time query persist", async ({ page 
   await expect(page.getByRole("status")).toContainText("over droppable area 3");
   await drag.press("Space");
   const headLabels = () => page.locator(".bf-data-table thead th").evaluateAll((heads) => heads.map((head) => head.getAttribute("aria-label")));
-  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested", null]);
+  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested"]);
   const cells = page.locator(".bf-data-table tbody tr").first().locator("td");
   await expect(cells.nth(2)).toHaveText("sing-box");
   await expect(cells.nth(3)).toHaveText("workbench-node");
   await page.reload();
-  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested", null]);
+  await expect.poll(headLabels).toEqual(["Details", "Timestamp", "Service", "Node", "Level", "Message", "Ingested"]);
   await page.getByRole("button", { name: "Toggle fields sidebar", exact: true }).click();
   const fields = page.getByRole("complementary", { name: "Log fields", exact: true });
   await fields.getByLabel("Search fields", { exact: true }).fill("Node");
@@ -269,4 +269,30 @@ test("connection log chrome stays compact with pending publication at 849px", as
   await expand.click();
   await expect(page.getByLabel("Log entry details")).toContainText("connection detail");
   await page.screenshot({path:testInfo.outputPath("network-refined-849.png")});
+});
+
+test("log grids reach the right edge and migrate manually saved widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    const labels = ["Details", "Time", "User", "Node", "Source IP", "Destination", "Count", "Auth", "Message"];
+    const declared = [36, 270, 160, 160, 200, 260, 100, 180, { min: 360 }];
+    localStorage.setItem(`boxfleet.table.v1.network-events-connect.${JSON.stringify({ labels, declared })}`, JSON.stringify({ sizing: { 2: 210 }, visibility: { 7: false } }));
+  });
+  await page.goto("network-events");
+  const card = page.locator('[data-table-id="network-events-connect"]');
+  await expect(card).toBeVisible();
+  const user = card.getByRole("columnheader", { name: "User", exact: true });
+  await expect.poll(async () => (await user.boundingBox())!.width).toBeCloseTo(210, 0);
+  await expect(card.getByRole("columnheader", { name: "Auth", exact: true })).toHaveCount(0);
+  await expect.poll(async () => (await card.getByRole("columnheader", { name: "Node", exact: true }).boundingBox())!.width).toBeCloseTo(136, 0);
+  await expect.poll(async () => (await card.getByRole("columnheader", { name: "Count", exact: true }).boundingBox())!.width).toBeCloseTo(80, 0);
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const geometry = await card.locator(".bf-table-scroll").evaluate(element => ({ right: element.getBoundingClientRect().right, viewport: innerWidth, page: document.documentElement.scrollWidth, trailing: element.querySelector(".bf-table-settings") !== null }));
+    expect(geometry.right).toBeCloseTo(width, 0);
+    expect(geometry.page).toBe(geometry.viewport);
+    expect(geometry.trailing).toBe(false);
+  }
+  await page.reload();
+  await expect.poll(async () => (await user.boundingBox())!.width).toBeCloseTo(210, 0);
 });

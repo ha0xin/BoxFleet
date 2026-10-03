@@ -323,7 +323,7 @@ export function SystemLogsPage() {
 
             {note ? <Banner variant="secondary" title={note} /> : null}
 
-            <TableCard key={JSON.stringify([filters, timeStart, timeEnd, refreshGeneration])} loadMore={{ hasMore: !!logsQuery.hasNextPage && !logsQuery.isFetchNextPageError, loading: logsQuery.isFetching, fetch: () => { void logsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="system-logs" variant="log">
+            <TableCard key={JSON.stringify([filters, timeStart, timeEnd, refreshGeneration])} loadMore={{ hasMore: !!logsQuery.hasNextPage && !logsQuery.isFetchNextPageError, loading: logsQuery.isFetching, fetch: () => { void logsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="system-logs" variant="log" className="bf-log-edge">
               <Table
                 layout="fixed"
                 style={{ minWidth: tableMinWidth(logColumns) }}
