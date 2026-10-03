@@ -166,7 +166,7 @@
 }
 .bf-data-table > thead > tr > th {
   height: 44px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   background: var(--color-kumo-canvas);
   border-bottom: 1px solid var(--color-kumo-line);
   font-size: 13px;
@@ -194,7 +194,7 @@
 }
 .bf-data-table > tbody > tr > td {
   height: 44px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--color-kumo-line);
   font-size: 14px;
   line-height: 20px;
@@ -293,3 +293,8 @@
 .bf-page-publish > div { flex-wrap: wrap; gap: 8px; }
 .bf-page-publish > div > span { min-width: 0; }
 @media (min-width: 768px) { .bf-page-topbar { flex-wrap: nowrap; } }
+
+/* The disclosure rail has its own narrow width, without content-column padding. */
+.bf-table-log .bf-data-table > thead > tr > th:first-child,
+.bf-table-log .bf-data-table > tbody > tr > td:first-child:has(> .bf-log-expand) { padding-inline: 0; }
+.bf-table-log .bf-data-table > tbody > tr > td:first-child > .bf-log-expand { margin-inline: auto; }

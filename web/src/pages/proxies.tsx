@@ -194,7 +194,7 @@ export function ProxiesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <section className="flex flex-col gap-3">
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

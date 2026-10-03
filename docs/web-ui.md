@@ -159,7 +159,7 @@ be the element that scrolls when a table is genuinely wider than its card.
 ### Cloudflare table presentation and column preferences
 
 Resource inventories follow the Domains table: 44px rows and header, 13px
-header labels, 14px cells, canvas header background, line separators, and
+header labels, 14px cells, 12px horizontal cell padding, canvas header background, line separators, and
 icon-plus-text statuses. Sort indicators match Domains: 12px bold Phosphor
 CaretUpDown when inactive, ArrowDown when active (rotated for ascending),
 subtle text at 50% opacity, and a 200ms direction transition. Log sort arrows
@@ -377,3 +377,6 @@ Navigation uses Kumo’s dialog sidebar below 1024px: the desktop rail is hidden
 a menu button in the breadcrumb bar opens it, and selecting a destination closes
 it. At 1024px and above, the desktop rail keeps its expanded/collapsed preference.
 Resource name controls have no underline, including on hover.
+Page titles and resource content use 16px side gutters, matching the log workspace
+at tablet/desktop widths. Log disclosure cells have no horizontal padding; their
+26px buttons sit inside the narrow rail without clipping.

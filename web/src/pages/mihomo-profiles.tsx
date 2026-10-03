@@ -109,7 +109,7 @@ export function MihomoProfilesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <div className="border-b border-kumo-line">
             <Tabs
               variant="underline"
@@ -384,7 +384,7 @@ function ConfigurationPageShell({ title, description, actions, children }: {
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <AppPageHeader title={title} description={description} actions={actions} />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8 md:px-8">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           {children}
         </div>
       </main>

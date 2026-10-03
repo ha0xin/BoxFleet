@@ -73,7 +73,7 @@ export function AppPageHeader({
 
       {status !== "idle" || changesError ? <div className={`bf-page-publish transition-colors duration-300 border-b border-kumo-line px-4 py-2 sm:px-6 ${publishBarToneClass(status)}`}><PublishStrip /></div> : null}
 
-      {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4 md:px-8">
+      {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">
           <div className="flex min-w-0 flex-col">
             <h1 className="mb-2 text-xl font-semibold tracking-tight text-kumo-default">{title}</h1>

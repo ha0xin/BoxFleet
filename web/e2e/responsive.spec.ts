@@ -97,6 +97,15 @@ for (const width of [390, 768, 1024, 1440, 1920]) {
       }));
       expect(geometry.page, `${route} at ${width}px`).toBe(geometry.viewport);
       expect(geometry.card).toBeLessThanOrEqual(width);
+      if (width >= 768) {
+        const inset = await page.locator(".bf-table-card").first().evaluate(element => {
+          const main = document.querySelector(".bf-page-topbar")!.getBoundingClientRect();
+          const card = element.getBoundingClientRect();
+          return { left: card.left - main.left, right: main.right - card.right };
+        });
+        expect(inset.left).toBeCloseTo(16, 0);
+        expect(inset.right).toBeCloseTo(16, 0);
+      }
       expect(geometry.headerHeight).toBeCloseTo(44, 1);
       expect(geometry.fade).toBe("none");
     }
@@ -250,6 +259,13 @@ test("connection log chrome stays compact with pending publication at 849px", as
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(849);
   const expand = page.getByRole("button",{name:"Expand network event",exact:true});
   expect((await expand.boundingBox())!.width).toBe(26);
+  const disclosureGeometry = await expand.evaluate(button => {
+    const cell = button.closest("td")!.getBoundingClientRect();
+    const bounds = button.getBoundingClientRect();
+    return { left: bounds.left - cell.left, right: cell.right - bounds.right };
+  });
+  expect(disclosureGeometry.left).toBeGreaterThanOrEqual(0);
+  expect(disclosureGeometry.right).toBeGreaterThanOrEqual(0);
   await expand.click();
   await expect(page.getByLabel("Log entry details")).toContainText("connection detail");
   await page.screenshot({path:testInfo.outputPath("network-refined-849.png")});
