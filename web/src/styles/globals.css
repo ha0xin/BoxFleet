@@ -285,3 +285,11 @@
 
 .bf-log-detail > td { overflow: visible !important; }
 .bf-log-detail > td > div { position: sticky; left: 0; width: calc(var(--bf-table-viewport-width, 100%) - 24px); }
+
+/* Drag controls belong at the right edge; labels share the cells' 12px inset. */
+.bf-column-drag { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); margin: 0; }
+.bf-table-log .bf-data-table th { padding-right: 36px; }
+.bf-log-expand { width: 26px; height: 26px; border-radius: 4px; }
+.bf-page-publish > div { flex-wrap: wrap; gap: 8px; }
+.bf-page-publish > div > span { min-width: 0; }
+@media (min-width: 768px) { .bf-page-topbar { flex-wrap: nowrap; } }

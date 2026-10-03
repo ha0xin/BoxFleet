@@ -208,3 +208,30 @@ test("log workbench fields, column order and time query persist", async ({ page 
   await fields.getByRole("button", { name: "Close fields", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("workbench-mobile.png") });
 });
+
+test("connection log chrome stays compact with pending publication at 849px", async ({ page }, testInfo) => {
+  await page.setViewportSize({width:849,height:824});
+  await page.route("**/api/admin/config/changes", (route) => route.fulfill({json:{changed:[{node_name:"test-edge"}],unchanged:[]}}));
+  await page.route("**/api/admin/network-events?*", (route) => route.fulfill({json:{total:1,events:[{
+    node_name:"test-edge",user_name:"alignment-user",auth_name:"test-auth",source_ip:"192.0.2.1",target_host:"example.com",target_port:443,action:"connect",raw_message:"connection detail",count:1,
+    window_start:new Date().toISOString(),window_end:new Date().toISOString(),created_at:new Date().toISOString()
+  }]}}));
+  await page.goto("network-events");
+  await expect(page.getByRole("button",{name:"Review & apply",exact:true})).toBeVisible();
+  await expect(page.getByRole("columnheader",{name:"Action",exact:true})).toHaveCount(0);
+  await expect(page.getByText("Connect",{exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"Add filter",exact:true}).click();
+  await expect(page.getByRole("combobox",{name:"Action",exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"Add filter",exact:true}).click();
+  const head = page.getByRole("columnheader",{name:"User",exact:true});
+  const cell = page.getByText("alignment-user",{exact:true});
+  const headX = await head.evaluate((element) => { const text = Array.from(element.childNodes).find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() === "User")!; const range = document.createRange(); range.selectNodeContents(text); return range.getBoundingClientRect().x; });
+  expect((await cell.boundingBox())!.x).toBeCloseTo(headX,0);
+  expect((await page.locator(".bf-page-topbar").boundingBox())!.height).toBe(58);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(849);
+  const expand = page.getByRole("button",{name:"Expand network event",exact:true});
+  expect((await expand.boundingBox())!.width).toBe(26);
+  await expand.click();
+  await expect(page.getByLabel("Log entry details")).toContainText("connection detail");
+  await page.screenshot({path:testInfo.outputPath("network-refined-849.png")});
+});

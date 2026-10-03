@@ -30,7 +30,6 @@ import {
   Input,
   Loader,
   Popover,
-  Select,
   Table,
   Tabs
 } from "@cloudflare/kumo";
@@ -150,7 +149,6 @@ const defaultFilters: FilterValues = {
   range: "24h"
 };
 
-const commonActions = ["connect", "outbound_connect", "invalid_connection", "accept", "reject"] as const;
 
 const HOUR_MS = 60 * 60 * 1000;
 /** Span at or below which the server derives hour buckets when `bucket` is absent. */
@@ -323,28 +321,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed.";
 }
 
-function actionLabel(action: string): string {
-  if (action === "outbound_connect") return "Outbound";
-  if (action === "invalid_connection") return "Invalid";
-  if (!action) return "Unknown";
-  const text = action.replace(/_/g, " ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function actionTone(action: string): "success" | "warning" | "error" | "neutral" {
-  const value = action.toLowerCase();
-  if (value === "connect" || value === "outbound_connect" || value === "accept") {
-    return "success";
-  }
-  if (value === "reject" || value === "block" || value === "blocked") {
-    return "error";
-  }
-  if (value === "invalid_connection") {
-    return "warning";
-  }
-  return "neutral";
-}
-
 function sourceLabel(source: string): string {
   if (source === "publicsuffix") return "Public suffix";
   if (source === "ip") return "IP literal";
@@ -442,7 +418,6 @@ export function ActivityPanel({
     }];
   }, [query.data]);
 
-  const actions = query.data?.actions ?? [];
   const connections = query.data?.series[0]?.total ?? 0;
   const granularity = bucket === "hour" ? "hour" : "day";
 
@@ -501,16 +476,6 @@ export function ActivityPanel({
         </div>
       )}
 
-      {actions.length > 0 ? (
-        <div className="flex flex-wrap gap-x-6 gap-y-1 border-t border-kumo-line px-4 py-2">
-          {actions.map((entry) => (
-            <span key={entry.action} className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-kumo-default">
-              <StatusBadge tone={actionTone(entry.action)}>{actionLabel(entry.action)}</StatusBadge>
-              <span className="font-semibold tabular-nums">{formatCount(entry.count)}</span>
-            </span>
-          ))}
-        </div>
-      ) : null}
     </Panel>
   );
 }
@@ -1372,13 +1337,6 @@ export function NetworkEventsPage() {
 
   const events = useMemo(() => eventsQuery.data?.events ?? [], [eventsQuery.data?.events]);
   const total = eventsQuery.data?.total ?? 0;
-  const actionOptions = useMemo(() => {
-    const values = new Set<string>(commonActions);
-    for (const event of events) {
-      if (event.action) values.add(event.action);
-    }
-    return [...values].sort();
-  }, [events]);
   const nodeChoices = useMemo(() => ["all", ...(nodesQuery.data ?? []).map((node) => node.name)], [nodesQuery.data]);
   const userChoices = useMemo(() => ["all", ...(usersQuery.data ?? []).map((user) => user.name)], [usersQuery.data]);
   const activeFilterCount = [
@@ -1414,13 +1372,6 @@ export function NetworkEventsPage() {
         </div>
       ),
       meta: { headClassName: "w-56", cellClassName: "w-56" }
-    }),
-    columnHelper.accessor("action", {
-      header: "Action",
-      cell: (info) => (
-        <StatusBadge tone={actionTone(info.getValue())}>{actionLabel(info.getValue())}</StatusBadge>
-      ),
-      meta: { headClassName: "w-36", cellClassName: "w-36" }
     }),
     columnHelper.accessor("user_name", {
       header: "User",
@@ -1564,16 +1515,6 @@ export function NetworkEventsPage() {
 
               <Collapsible.Panel className="rounded-lg bg-kumo-tint p-3">
                 <div className="grid gap-3 md:grid-cols-3">
-                  <Select
-                    label="Action"
-                    value={formValues.action}
-                    onValueChange={(value) => form.setValue("action", value ?? "all")}
-                    items={[
-                      { value: "all", label: "All actions" },
-                      ...actionOptions.map((value) => ({ value, label: actionLabel(value) }))
-                    ]}
-                  />
-
                   <Combobox
                     label="Node"
                     value={formValues.node}
@@ -1639,7 +1580,7 @@ export function NetworkEventsPage() {
               onTimeRangeChange={applyChartRange}
             />
 
-            <TableCard tableId="network-events" variant="log" widths={[36, 270, 120, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
+            <TableCard tableId="network-events-connect" variant="log" widths={[36, 270, 160, 160, 200, 260, 100, 180, { min: 360 }]}>
               <Table className="min-w-[1600px] table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (

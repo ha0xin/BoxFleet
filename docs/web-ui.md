@@ -359,3 +359,11 @@ System Logs accepts optional RFC3339 `start` and `end` query parameters on the
 server, using an inclusive start and exclusive end. Pagination and counts use
 the same time predicates. Relative time presets are anchored when selected or
 refreshed, rather than filtering the currently fetched page in the browser.
+
+
+Connection log inventories omit Action and its legend/filter because journal
+network events with attributable users and destinations currently carry only
+`connect`. Mocks follow that same data shape. Raw JSON retains the original
+field. Keep drag handles at the right edge of log headers so header text and
+cell content share their left inset. Publication notices sit below the 58px
+breadcrumb bar, rather than wrapping its action cluster into extra rows.

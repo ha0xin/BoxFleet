@@ -14,8 +14,9 @@ import { useIsDarkMode } from "@/components/chart/use-color-mode";
  * `Sidebar.Header` (both `min-h-[58px]` with a bottom hairline, so the two
  * borders read as one continuous line) followed by the page title block.
  *
- * The bar's right slot carries the publish strip, a Logs shortcut (hidden on
- * the System Logs page itself), and the page-level `actions`. Every admin page
+ * The bar's right slot carries a Logs shortcut (hidden on System Logs) and
+ * compact page actions. Publication notices occupy a separate row so pending
+ * changes cannot stretch the navigation bar. Every admin page
  * renders this once at the top; page content below owns its own
  * responsive content container.
  */
@@ -30,7 +31,7 @@ export function AppPageHeader({
   actions?: ReactNode;
   compact?: boolean;
 }) {
-  const { status } = usePublishStatus();
+  const { status, changesError } = usePublishStatus();
   const navigate = useNavigate();
   const location = useLocation();
   const onSystemLogs = location.pathname.startsWith("/system-logs");
@@ -39,7 +40,7 @@ export function AppPageHeader({
   return (
     <div className="flex flex-col">
       <div
-        className={`flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6 ${publishBarToneClass(status)}`}
+        className={`bf-page-topbar flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6`}
       >
         <div className="flex min-w-0 items-center gap-2">
           <Sidebar.Trigger className="md:hidden" />
@@ -58,7 +59,6 @@ export function AppPageHeader({
           </Breadcrumbs>
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <PublishStrip />
           {compact ? actions : null}
           {!onSystemLogs ? (
             <LinkButton
@@ -87,6 +87,8 @@ export function AppPageHeader({
           />
         </div>
       </div>
+
+      {status !== "idle" || changesError ? <div className={`bf-page-publish border-b border-kumo-line px-4 py-2 sm:px-6 ${publishBarToneClass(status)}`}><PublishStrip /></div> : null}
 
       {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4 md:px-8">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">

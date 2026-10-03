@@ -601,7 +601,7 @@ const networkTargets = [
   "go.dev"
 ];
 
-const networkActions = ["connect", "outbound_connect", "invalid_connection", "reject"] as const;
+const networkActions = ["connect"] as const;
 
 const networkEvents: NetworkEvent[] = Array.from({ length: 96 }, (_, i) => {
   const u = users[i % users.length];

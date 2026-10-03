@@ -5,7 +5,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { logTimezone, useLogFields } from "./log-workspace";
 import { LogRowDetails } from "./log-row-details";
 import { getCoreRowModel, useReactTable, type ColumnSizingState, type VisibilityState } from "@tanstack/react-table";
-import { ArrowsCounterClockwiseIcon, GearSixIcon, SlidersHorizontalIcon, ArrowDownIcon, CaretUpDownIcon, DotsSixVerticalIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { ArrowsCounterClockwiseIcon, GearSixIcon, PencilSimpleIcon, ArrowDownIcon, CaretUpDownIcon, DotsSixVerticalIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { Button, DropdownMenu, Empty, Input, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 export type SortDirection = "asc" | "desc";
@@ -134,7 +134,7 @@ export function TableCard({ children, className = "", tableId, widths, variant =
   const timeColumn = labels.findIndex((label) => /^(Timestamp|Time|Bucket)$/.test(label));
   const settings = (
     <DropdownMenu>
-      <DropdownMenu.Trigger render={variant === "log" ? <Button variant="secondary" size="xs" icon={SlidersHorizontalIcon} aria-label="Fields">Fields</Button> : <Button variant="ghost" size="sm" shape="square" icon={GearSixIcon} aria-label="Edit columns" />} />
+      <DropdownMenu.Trigger render={variant === "log" ? <Button variant="secondary" size="xs" icon={PencilSimpleIcon} aria-label="Fields">Fields</Button> : <Button variant="ghost" size="sm" shape="square" icon={GearSixIcon} aria-label="Edit columns" />} />
       <DropdownMenu.Content>
         <DropdownMenu.Group>
           <DropdownMenu.Label>Fields</DropdownMenu.Label>

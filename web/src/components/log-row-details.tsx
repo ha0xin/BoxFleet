@@ -1,9 +1,9 @@
 import { Button, ClipboardText, Code, Table } from "@cloudflare/kumo";
-import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
+import { CaretRightIcon } from "@phosphor-icons/react";
 
 export function LogExpandButton({ expanded, onClick, label }: { expanded: boolean; onClick: () => void; label: string }) {
-  return <Button variant="ghost" size="sm" shape="square" icon={expanded ? CaretDownIcon : CaretRightIcon}
-    aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`} aria-expanded={expanded} onClick={onClick} />;
+  return <Button variant="ghost" size="xs" shape="square" className="bf-log-expand"
+    aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`} aria-expanded={expanded} onClick={onClick}><CaretRightIcon size={16} className={`text-kumo-subtle transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} /></Button>;
 }
 
 export function LogRowDetails({ value, colSpan }: { value: unknown; colSpan: number }) {
