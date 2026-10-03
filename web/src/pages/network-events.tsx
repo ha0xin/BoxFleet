@@ -1563,7 +1563,7 @@ export function NetworkEventsPage() {
               onTimeRangeChange={applyChartRange}
             />
 
-            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-connect" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 192, 220, 80, 160, { min: 320 }]}>
+            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-connect" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 180, 220, 80, 160, { min: 320 }]}>
               <Table className="table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (
