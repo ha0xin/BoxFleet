@@ -172,4 +172,5 @@ jobs:
             dist/artifacts/boxfleet-agent-${AGENT_REVISION}-linux-amd64 \
             dist/artifacts/sing-box-${{ steps.version.outputs.sing_box }}-linux-amd64 \
             --verify-tag \
+            --target "$GITHUB_SHA" \
             --generate-notes "${release_flags[@]}"
