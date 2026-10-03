@@ -90,3 +90,23 @@ Also verify:
 
 Only status codes and non-secret version fields may be printed. Never output
 `server.env`, tokens, subscription URLs, or database contents.
+
+## Connection history maintenance
+
+Connection telemetry history can be cleared independently of billing. Stop the
+management service, retain one pre-cleanup DB/WAL/SHM snapshot, and clear only
+`connection_events` and `connection_reports`. Keep `node_connection_telemetry`
+so collection resumes with the same node settings and secret. Keep legacy
+`log_events` until the fleet-wide source migration is complete.
+
+Before and after cleanup, compare the contents of traffic reports, usage deltas,
+usage totals, users, credentials, user-node bindings, proxies, nodes, paths and
+access grants. Existing foreign-key violations must not increase. Run `VACUUM`
+to reclaim deleted pages, then repeat the protected-data comparisons and SQLite
+integrity checks before restarting. Management UI/API are unavailable during the
+maintenance window; node data-plane services continue independently.
+
+On failure restore the one snapshot before restarting. After success verify
+health, authenticated APIs and continuing traffic/connection reports, and prune
+older backups. A subsequent binary-only deployment can move this existing
+snapshot into its single rollback directory without copying the database again.
