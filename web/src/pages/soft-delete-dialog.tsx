@@ -81,7 +81,6 @@ export function SoftDeleteDialog({
                 </Table>
               </div>
             ) : null}
-            <p className="mt-2 text-xs text-kumo-subtle">Traffic history is retained.</p>
           </section>
         ) : null}
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}

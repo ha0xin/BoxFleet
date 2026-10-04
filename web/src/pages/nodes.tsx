@@ -67,8 +67,8 @@ const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage
 /**
  * Column widths, in table order. The px values are each column's measured
  * max-content need — including the widest state, so an "0.4.1 → 0.5.0" upgrade
- * arrow still fits without truncating a version number. Node, public host and
- * update label are the only columns whose content has no ceiling, so they take
+ * arrow still fits without truncating a version number. Node and public host
+ * labels are the columns whose content has no ceiling, so they take
  * the leftover width and truncate.
  */
 const nodeColumns: TableColumnWidth[] = [
@@ -79,7 +79,6 @@ const nodeColumns: TableColumnWidth[] = [
   112, // sing-box
   92, // Config
   108, // Last seen
-  160, // Update
   52 // Actions
 ];
 
@@ -161,8 +160,7 @@ function ConfigVersion({ node }: { node: AdminNode }) {
   );
 }
 
-// Single source of truth for a node's update eligibility: the Update cell and
-// the kebab menu items both read this, so they can never disagree.
+// Shared eligibility for component updates in the row actions menu.
 export function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
   label: string;
   available: boolean;
@@ -356,7 +354,7 @@ export function NodesPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard tableId="nodes">
+            <TableCard tableId="nodes-v2">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
                 <TableColgroup widths={nodeColumns} />
                 <Table.Header variant="compact">
@@ -368,7 +366,6 @@ export function NodesPage() {
                     <SortHead label="sing-box" column="sing_box_version" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Config</Table.Head>
                     <SortHead label="Last seen" column="last_seen_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
-                    <Table.Head>Update</Table.Head>
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
                     </Table.Head>
@@ -376,9 +373,9 @@ export function NodesPage() {
                 </Table.Header>
                 <Table.Body>
                   {nodesQuery.error ? (
-                    <TableError colSpan={9}>{error}</TableError>
+                    <TableError colSpan={8}>{error}</TableError>
                   ) : nodesQuery.isLoading ? (
-                    <TableLoading colSpan={9} />
+                    <TableLoading colSpan={8} />
                   ) : nodes.length > 0 ? (
                     nodes.map((node) => {
                       const health = node.deleted_at
@@ -419,15 +416,6 @@ export function NodesPage() {
                             <span className="block truncate text-kumo-subtle" title={nodeTimestamp(node) || undefined}>
                               {formatRelativeTime(nodeTimestamp(node))}
                             </span>
-                          </Table.Cell>
-                          <Table.Cell>
-                            {updateStatus.available ? (
-                              <StatusBadge tone="info">Update available</StatusBadge>
-                            ) : (
-                              <span className="block truncate text-kumo-subtle" title={updateStatus.label}>
-                                {updateStatus.label}
-                              </span>
-                            )}
                           </Table.Cell>
                           <Table.Cell className="text-right">
                             <RowActionsMenu label={`Actions for ${node.name}`}>
@@ -497,7 +485,7 @@ export function NodesPage() {
                       );
                     })
                   ) : (
-                    <TableEmpty colSpan={9}>No nodes match this filter.</TableEmpty>
+                    <TableEmpty colSpan={8}>No nodes match this filter.</TableEmpty>
                   )}
                 </Table.Body>
               </Table>

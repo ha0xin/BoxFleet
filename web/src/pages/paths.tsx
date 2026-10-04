@@ -8,11 +8,12 @@ import { CheckCircleIcon, PencilSimpleIcon, PlusIcon, ProhibitIcon, TrashIcon } 
 
 import { useAdminApi } from "@/admin/api";
 import { adminKeys, refreshIntervals } from "@/admin/query";
+import { useUrlFilters } from "@/admin/use-url-filters";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
-import { TableCard, TableColgroup, TableEmpty, TableError, TableLoading, tableMinWidth } from "@/components/admin-table";
+import { AdminPagination, TableCard, TableColgroup, TableEmpty, TableError, TableLoading, tableMinWidth } from "@/components/admin-table";
 import type { TableColumnWidth } from "@/components/admin-table";
 import type { AdminNode, AdminPath, AdminProxiesResponse } from "../types";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
@@ -24,16 +25,17 @@ const VISIBILITY_LABELS: Record<AdminPath["visibility"], string> = {
   dependency: "Dependency only"
 };
 
+const pathUrlFilters = { schema: z.object({}), defaults: {}, perPage: 10 };
+
 /**
  * Column widths, in table order. Published name, endpoint and dialer are all
  * composed from user-chosen names and hosts, so they flex and truncate;
- * visibility and status come from a closed vocabulary and are pinned.
+ * status comes from a closed vocabulary and is pinned.
  */
 const pathColumns: TableColumnWidth[] = [
   200, // Published name
   { min: 280 }, // Endpoint
   180, // Dialer Path
-  128, // Visibility
   116, // Status
   52 // Actions
 ];
@@ -63,6 +65,13 @@ export function PathsPage() {
     })
   );
   const paths = pathsQuery.data ?? [];
+  const { page, perPage, setPage, setPerPage } = useUrlFilters(pathUrlFilters);
+  const lastPage = Math.max(1, Math.ceil(paths.length / perPage));
+  const currentPage = Math.min(page, lastPage);
+  const visiblePaths = paths.slice((currentPage - 1) * perPage, currentPage * perPage);
+  useEffect(() => {
+    if (pathsQuery.isSuccess && page > lastPage) setPage(lastPage, "replace");
+  }, [pathsQuery.isSuccess, page, lastPage, setPage]);
 
   return (
     // `min-w-0`: this div is a grid item, and without it the table's min-width
@@ -81,7 +90,7 @@ export function PathsPage() {
       <main className="w-full grow bg-kumo-canvas">
         <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <section className="flex flex-col gap-3">
-            <TableCard tableId="paths">
+            <TableCard tableId="paths-v2">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(pathColumns) }}>
                 <TableColgroup widths={pathColumns} />
                 <Table.Header variant="compact">
@@ -89,7 +98,6 @@ export function PathsPage() {
                     <Table.Head>Published name</Table.Head>
                     <Table.Head>Endpoint</Table.Head>
                     <Table.Head>Dialer Path</Table.Head>
-                    <Table.Head>Visibility</Table.Head>
                     <Table.Head>Status</Table.Head>
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
@@ -98,26 +106,25 @@ export function PathsPage() {
                 </Table.Header>
                 <Table.Body>
                   {pathsQuery.error ? (
-                    <TableError colSpan={6}>
+                    <TableError colSpan={5}>
                       {pathsQuery.error instanceof Error ? pathsQuery.error.message : "Request failed."}
                     </TableError>
                   ) : pathsQuery.isLoading ? (
-                    <TableLoading colSpan={6} />
+                    <TableLoading colSpan={5} />
                   ) : paths.length === 0 ? (
-                    <TableEmpty colSpan={6} description="Create a Path to publish a Proxy to users.">
+                    <TableEmpty colSpan={5} description="Create a Path to publish a Proxy to users.">
                       No Paths yet
                     </TableEmpty>
                   ) : (
-                    paths.map((path) => {
+                    visiblePaths.map((path) => {
                       const dialer = paths.find((candidate) => candidate.id === path.dialer_path_id);
                       return (
                         <Table.Row key={path.id}>
                           <Table.Cell>
                             <div className="flex min-w-0 items-center gap-2">
                               <Button variant="ghost" className="bf-resource-link" onClick={() => setEditor({ path })} title={pathLabel(path)}>{pathLabel(path)}</Button>
-                              {path.managed ? <Badge variant="secondary" className="shrink-0">Managed</Badge> : null}
+                              {path.managed ? <Badge variant="secondary" className="shrink-0">Auto</Badge> : null}
                             </div>
-                            <div className="truncate text-xs text-kumo-subtle" title={path.name}>{path.name}</div>
                           </Table.Cell>
                           <Table.Cell>
                             <span className="block truncate text-kumo-subtle" title={pathEndpoint(path)}>
@@ -128,9 +135,6 @@ export function PathsPage() {
                             <span className="block truncate text-kumo-subtle" title={dialer ? pathLabel(dialer) : "Direct"}>
                               {dialer ? pathLabel(dialer) : "Direct"}
                             </span>
-                          </Table.Cell>
-                          <Table.Cell>
-                            <span className="block truncate text-kumo-subtle">{VISIBILITY_LABELS[path.visibility]}</span>
                           </Table.Cell>
                           <Table.Cell>
                             <StatusBadge tone={path.enabled ? "success" : "neutral"}>
@@ -164,6 +168,7 @@ export function PathsPage() {
                 </Table.Body>
               </Table>
             </TableCard>
+            <AdminPagination page={currentPage} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={paths.length} />
           </section>
         </div>
       </main>
@@ -175,8 +180,7 @@ export function PathsPage() {
           title="Delete path"
           description={
             <>
-              Delete <span className="font-medium text-kumo-default">{pathLabel(deleteTarget)}</span>? This permanently
-              removes the Path and any client selections that use it.
+              Permanently delete <span className="font-medium text-kumo-default">{pathLabel(deleteTarget)}</span>?
             </>
           }
           endpoint={`/api/admin/paths/${encodeURIComponent(deleteTarget.id)}`}

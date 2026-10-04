@@ -373,7 +373,7 @@ export function ProxiesPage() {
           title="Delete proxy"
           description={
             <>
-              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? It will disappear from the default inventory and can be restored from the Deleted filter.
+              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>?
             </>
           }
           endpoint={`/api/admin/nodes/${encodeURIComponent(deleteTarget.node_name)}/proxies/${encodeURIComponent(deleteTarget.id)}`}

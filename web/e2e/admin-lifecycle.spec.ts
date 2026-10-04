@@ -179,7 +179,7 @@ test("deleted node name can be enrolled with a fresh identity on narrow screens"
   await openRowActions(page, "reused-ui");
   await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Delete node" });
-  await expect(dialog).toContainText("Enroll again to create a new node");
+  await expect(dialog).toContainText("Delete reused-ui and revoke its agent token?");
   const box = await dialog.boundingBox();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
@@ -236,4 +236,34 @@ test("deletion previews dependencies, handles narrow screens, and rechecks chang
   await dialog.getByRole("button", {name: "Delete", exact: true}).click();
   await expect(dialog).toBeHidden();
   expect((await page.request.get(`/api/admin/nodes/${node.id}`)).status()).toBe(422);
+});
+
+test("Paths pagination survives refresh and keeps cross-page dialers on narrow screens", async ({ page }) => {
+  const paths = Array.from({ length: 11 }, (_, index) => ({
+    id: `path-${index}`, name: `route-${index}`, display_name: `Published ${index}`,
+    endpoint_id: `endpoint-${index}`, proxy_id: `proxy-${index}`, proxy_name: `Proxy ${index}`,
+    node_name: "edge", host_id: "host", host: "192.0.2.1", host_tag: "",
+    dialer_path_id: index === 10 ? "path-0" : "", enabled: true,
+    visibility: "selectable", managed: true, sort_order: index, created_at: "", updated_at: ""
+  }));
+  await page.route("**/api/admin/paths", (route) => route.fulfill({ json: paths }));
+  await page.goto("paths");
+  await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Published 10", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Auto", { exact: true })).toHaveCount(10);
+  await expect(page.getByRole("columnheader", { name: "Visibility", exact: true })).toHaveCount(0);
+  await expect(page.getByText("route-0", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(page).toHaveURL(/page=2/);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Published 0", exact: true })).toBeVisible();
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({ width, height: 824 });
+    await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+  await page.screenshot({ path: "/tmp/boxfleet-paths-pagination-390.png" });
+  await page.getByRole("button", { name: "Previous page", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
 });

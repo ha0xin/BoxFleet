@@ -442,7 +442,7 @@ export function UsersPage() {
           title="Delete user"
           description={
             <>
-              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? The user and its credentials will disappear from the default inventory and can be restored from the Deleted filter.
+              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>?
             </>
           }
           endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.id)}`}

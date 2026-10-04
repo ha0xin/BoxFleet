@@ -380,7 +380,6 @@ export function DeleteNodeDialog({
       description={
         <>
           Delete <span className="font-medium text-kumo-default">{node.name}</span> and revoke its agent token?
-          Enroll again to create a new node, or use <span className="font-medium text-kumo-default">Disable</span> to pause it.
         </>
       }
       onClose={onClose}
