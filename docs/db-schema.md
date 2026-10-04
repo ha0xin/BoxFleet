@@ -28,6 +28,16 @@ Only `internal/server/db` may import sqlc-generated types.
   ID-based foreign keys retain old traffic, credentials and configuration history;
   a same-name replacement inherits none of them. Node deletion archives its proxies
   and releases the node/proxy aliases. Paths still reference the archived proxy IDs.
+- Deleting a node or proxy also disables its endpoints and every dependent Path,
+  including transitive `dialer_path_id` chains, and soft-deletes their PathAccess
+  grants and retired proxy credentials in the same transaction. Deleted-node
+  bindings are disabled as well. Credentials on surviving proxies are disabled only when no surviving granted Path needs them.
+  Migration 029 applies this repair to existing retired-resource dependencies;
+  IDs, credential secrets and traffic ledger rows are retained.
+- Deletion previews identify affected resources and their resulting state before
+  confirmation. Direct Path deletion remains blocked while another Path references
+  it. Restoring a proxy makes its endpoints usable, but does not restore revoked
+  access or enable disabled paths automatically.
 - Canonical node/proxy renames retain aliases so old references resolve without
   changing stable IDs or credentials.
 - `proxy_details` and `proxy_access_details` flatten joins. New access/proxy

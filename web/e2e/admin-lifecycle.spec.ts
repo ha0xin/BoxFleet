@@ -196,3 +196,47 @@ test("deleted node name can be enrolled with a fresh identity on narrow screens"
   await expectRowVisible(page, "reused-ui");
   await expect(page.getByText("192.0.2.81", { exact: true })).toBeVisible();
 });
+
+test("deletion previews dependencies, handles narrow screens, and rechecks changes", async ({ page }) => {
+  const enrolled = await page.request.post("/api/admin/nodes/bootstrap", {data: {name: "impact-ui", public_host: "192.0.2.90"}});
+  expect(enrolled.ok()).toBeTruthy();
+  const node = (await enrolled.json()).node;
+  const created = await page.request.post(`/api/admin/nodes/${node.id}/proxies`, {data: {name: "impact-proxy", protocol: "vless_reality", listen_port: 443, enabled: true, settings_json: "{}"}});
+  expect(created.ok()).toBeTruthy();
+  const proxy = await created.json();
+  const allPaths = await (await page.request.get("/api/admin/paths")).json();
+  const path = allPaths.find((p: {proxy_id: string}) => p.proxy_id === proxy.id);
+  expect(path).toBeTruthy();
+  const user = await page.request.post("/api/admin/users", {data: {name: "impact-user"}});
+  expect(user.ok()).toBeTruthy();
+  const grant = await page.request.post("/api/admin/users/impact-user/paths", {data: {path_id: path.id}});
+  expect(grant.ok()).toBeTruthy();
+  await page.goto("nodes?search=impact-ui");
+  await openRowActions(page, "impact-ui");
+  await page.getByRole("menuitem", {name: "Delete", exact: true}).click();
+  const dialog = page.getByRole("dialog", {name: "Delete node"});
+  await expect(dialog.getByText("Affected resources")).toBeVisible();
+  await expect(dialog.getByText("impact-proxy", {exact: true}).first()).toBeVisible();
+  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`, {exact: true})).toBeVisible();
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({width, height: 824});
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBeTruthy();
+  }
+  await page.screenshot({path: "/tmp/boxfleet-deletion-impact-390.png"});
+  const accessGroup = dialog.getByRole("button", {name: "Access · 1", exact: true});
+  await accessGroup.click();
+  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`)).toBeHidden();
+  await accessGroup.click();
+  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`)).toBeVisible();
+  expect((await page.request.post("/api/admin/users", {data: {name: "impact-user-2"}})).ok()).toBeTruthy();
+  expect((await page.request.post("/api/admin/users/impact-user-2/paths", {data: {path_id: path.id}})).ok()).toBeTruthy();
+  await dialog.getByRole("button", {name: "Delete", exact: true}).click();
+  await expect(dialog).toContainText("Affected resources changed");
+  expect((await page.request.get(`/api/admin/nodes/${node.id}`)).ok()).toBeTruthy();
+  await dialog.getByRole("button", {name: "Delete", exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect((await page.request.get(`/api/admin/nodes/${node.id}`)).status()).toBe(422);
+});

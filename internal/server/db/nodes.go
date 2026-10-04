@@ -625,6 +625,9 @@ func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 		if err := qtx.DeleteArchivedProxyAliases(ctx); err != nil {
 			return err
 		}
+		if err := retireResourceDependenciesTx(ctx, qtx); err != nil {
+			return err
+		}
 		return qtx.RevokeNodeTokensByNodeID(ctx, node.ID)
 	})
 	if err != nil {

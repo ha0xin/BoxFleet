@@ -2199,3 +2199,14 @@ func adminRotateUserCredentialsHandler(store *db.DB) http.HandlerFunc {
 		writeJSON(w, map[string]int{"rotated": count})
 	}
 }
+
+func adminDeletionImpactHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := store.ResourceDeletionImpact(r.Context(), r.URL.Query().Get("kind"), r.URL.Query().Get("id"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, result)
+	}
+}

@@ -375,6 +375,7 @@ export function DeleteNodeDialog({
     <SoftDeleteDialog
       request={request}
       endpoint={`/api/admin/nodes/${encodeURIComponent(node.id)}`}
+      resource={{ kind: "node", id: node.id }}
       title="Delete node"
       description={
         <>

@@ -86,6 +86,8 @@ JOIN proxy_details AS proxy ON proxy.id = endpoint.proxy_id
 WHERE a.proxy_user_id = sqlc.arg(proxy_user_id)
   AND a.enabled = 1
   AND a.deleted_at IS NULL
+  AND path.enabled = 1
+  AND endpoint.enabled = 1
   AND proxy.deleted_at IS NULL
   AND proxy.node_deleted_at IS NULL
 ORDER BY a.created_at, a.id;

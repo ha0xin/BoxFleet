@@ -171,6 +171,7 @@ export function PathsPage() {
       {deleteTarget ? (
         <SoftDeleteDialog
           request={request}
+          resource={{ kind: "path", id: deleteTarget.id }}
           title="Delete path"
           description={
             <>

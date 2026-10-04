@@ -369,6 +369,7 @@ export function ProxiesPage() {
       {deleteTarget ? (
         <SoftDeleteDialog
           request={request}
+          resource={{ kind: "proxy", id: deleteTarget.id }}
           title="Delete proxy"
           description={
             <>

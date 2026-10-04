@@ -639,7 +639,10 @@ func (db *DB) SoftDeleteProxy(ctx context.Context, nodeName, name string) (Proxy
 		if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
 			return err
 		}
-		return q.DeleteProxyAliases(ctx, proxy.ID)
+		if err := q.DeleteProxyAliases(ctx, proxy.ID); err != nil {
+			return err
+		}
+		return retireResourceDependenciesTx(ctx, q)
 	})
 	if err != nil {
 		return Proxy{}, err
@@ -672,7 +675,8 @@ func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, e
 			return err
 		}
 		restoredName = proxy.Name
-		return nil
+		// Restore endpoint usability, but require explicit path/access grants again.
+		return qtx.RestoreProxyEndpoints(ctx, proxy.ID)
 	})
 	if err != nil {
 		return Proxy{}, err

@@ -689,3 +689,7 @@ export type Page =
   | "network-events"
   | "system-logs"
   | "settings";
+
+export type DeletionResourceKind = "node" | "proxy" | "user" | "path";
+export type DeletionImpactItem = { kind: string; id: string; name: string; effect: string };
+export type DeletionImpact = { items: DeletionImpactItem[]; blocked?: string };

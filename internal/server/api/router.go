@@ -80,6 +80,7 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/config/changes", adminConfigChangesHandler(options.DB))
 		r.Post("/config/publish", adminPublishChangedConfigsHandler(options.DB))
 		r.Get("/proxies", adminProxiesHandler(options.DB))
+		r.Get("/deletion-impact", adminDeletionImpactHandler(options.DB))
 		r.Get("/paths", adminPathsHandler(options.DB))
 		r.Post("/paths", adminCreatePathHandler(options.DB))
 		r.Patch("/paths/{path}", adminUpdatePathHandler(options.DB))

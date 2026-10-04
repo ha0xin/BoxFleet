@@ -1466,7 +1466,58 @@ function systemLogsResponse(query: URLSearchParams): SystemLogsResponse {
 type Handler = (ctx: { req: Connect.IncomingMessage; match: RegExpMatchArray | null; query: URLSearchParams; body?: any }) => unknown;
 type Route = { method: string; pattern: RegExp; handler: Handler };
 
+function mockDeletionImpact(kind: string, id: string) {
+  const items: {kind: string; id: string; name: string; effect: string}[] = [];
+  const node = nodes.find((n) => n.id === id);
+  const user = users.find((u) => u.id === id);
+  const targetProxies = new Set(proxies.filter((p) => kind === "node" ? p.node_name === node?.name : kind === "proxy" && p.id === id).map((p) => p.id));
+  const affectedPaths = new Set(paths.filter((p) => targetProxies.has(p.proxy_id) || kind === "path" && p.id === id).map((p) => p.id));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const path of paths) if (affectedPaths.has(path.dialer_path_id) && !affectedPaths.has(path.id)) { affectedPaths.add(path.id); changed = true; }
+  }
+  let blocked = "";
+  if (kind === "node") for (const p of proxies) if (targetProxies.has(p.id)) items.push({kind: "Proxy", id: p.id, name: p.name, effect: "Archived"});
+  for (const path of paths) if (affectedPaths.has(path.id)) {
+    if (kind === "path" && path.id !== id) {blocked = "Other paths reference this path. Change their dialer path before deleting it.";items.push({kind: "Path", id: path.id, name: path.display_name || path.name, effect: "Blocks deletion"});}
+    else if (kind !== "path" && path.enabled) items.push({kind: "Path", id: path.id, name: path.display_name || path.name, effect: "Disabled"});
+    if (kind === "path" && path.id === id && path.managed) blocked = "Managed paths must be removed through their proxy.";
+  }
+  for (const u of users) for (const a of pathAccessFor(u.name)) if (!a.deleted_at && (affectedPaths.has(a.path_id) || kind === "user" && u.id === user?.id)) {
+    const path = paths.find((p) => p.id === a.path_id);
+    items.push({kind: "Access", id: a.id, name: `${u.name} → ${path?.display_name || path?.name}`, effect: kind === "user" ? "Unavailable" : kind === "path" ? "Removed" : "Revoked"});
+  }
+  const seenEndpoints = new Set<string>();
+  for (const path of paths) if (targetProxies.has(path.proxy_id) && !seenEndpoints.has(path.endpoint_id)) {
+    seenEndpoints.add(path.endpoint_id);
+    items.push({kind: "Endpoint", id: path.endpoint_id, name: `${path.proxy_name} @ ${path.host}`, effect: "Disabled"});
+  }
+  for (const u of users) {
+    const grants = pathAccessFor(u.name).filter((a) => !a.deleted_at && a.enabled);
+    const affected = grants.some((a) => affectedPaths.has(a.path_id));
+    const required = new Set<string>();
+    const visit = (id: string, seen = new Set<string>()) => {
+      if (seen.has(id) || affectedPaths.has(id)) return;
+      seen.add(id);
+      const path = paths.find((p) => p.id === id);
+      if (!path?.enabled) return;
+      required.add(path.proxy_id);
+      if (path.dialer_path_id) visit(path.dialer_path_id, seen);
+    };
+    for (const grant of grants) if (!affectedPaths.has(grant.path_id)) visit(grant.path_id);
+    for (const credential of accessFor(u.name)) {
+      const proxy = proxies.find((p) => p.name === credential.proxy_name && p.node_name === credential.node_name);
+      if (credential.deleted_at || !proxy) continue;
+      if (targetProxies.has(proxy.id) || kind === "user" && u.id === id || credential.enabled && affected && !required.has(proxy.id)) {
+        items.push({kind: "Credential", id: credential.id, name: `${u.name} @ ${proxy.name}`, effect: kind === "user" ? "Unavailable" : targetProxies.has(proxy.id) ? "Archived" : "Disabled"});
+      }
+    }
+  }
+  return {items: items.sort((a,b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)), blocked};
+}
+
 const routes: Route[] = [
+  {method: "GET", pattern: /^\/api\/admin\/deletion-impact$/, handler: ({query}) => mockDeletionImpact(query.get("kind") ?? "", query.get("id") ?? "")},
   { method: "GET", pattern: /^\/api\/admin\/overview$/, handler: () => overview },
   {
     method: "GET",

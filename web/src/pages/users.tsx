@@ -438,13 +438,14 @@ export function UsersPage() {
       {deleteTarget ? (
         <SoftDeleteDialog
           request={request}
+          resource={{ kind: "user", id: deleteTarget.id }}
           title="Delete user"
           description={
             <>
               Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? The user and its credentials will disappear from the default inventory and can be restored from the Deleted filter.
             </>
           }
-          endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.name)}`}
+          endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.id)}`}
           onClose={() => setDeleteTarget(null)}
         />
       ) : null}
