@@ -26,7 +26,7 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = ?1 AND n.name = ?2
+WHERE (u.id = ?1 OR (u.name = ?1 AND u.deleted_at IS NULL)) AND (n.id = ?2 OR (n.name = ?2 AND n.deleted_at IS NULL))
 `
 
 type GetUserNodeBindingParams struct {
@@ -151,7 +151,7 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = ?1
+WHERE (u.id = ?1 OR (u.name = ?1 AND u.deleted_at IS NULL))
 ORDER BY u.name, n.name
 `
 

@@ -21,7 +21,13 @@ Only `internal/server/db` may import sqlc-generated types.
 - The Go binary uses its bundled SQLite amalgamation; no host SQLite library is
   required.
 - User, node, ProxyCredential, and PathAccess deletion is soft. Default queries exclude
-  `deleted_at`; admin deleted views may restore rows.
+  `deleted_at`. Deleted nodes are historical identities and cannot be restored;
+  enrolling the same name creates a new ID and fresh token. Users and proxies
+  may be restored only if their name is still available.
+- Names are unique among undeleted nodes/users/proxies, not across history.
+  ID-based foreign keys retain old traffic, credentials and configuration history;
+  a same-name replacement inherits none of them. Node deletion archives its proxies
+  and releases the node/proxy aliases. Paths still reference the archived proxy IDs.
 - Canonical node/proxy renames retain aliases so old references resolve without
   changing stable IDs or credentials.
 - `proxy_details` and `proxy_access_details` flatten joins. New access/proxy

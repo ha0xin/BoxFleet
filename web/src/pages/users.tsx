@@ -205,13 +205,13 @@ export function UsersPage() {
   const form = useForm<UserFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminUser>(request, (req, user) =>
-    req(`/api/admin/users/${encodeURIComponent(user.name)}`, {
+    req(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ status: user.status === "disabled" ? "active" : "disabled" })
     })
   );
   const restore = useAdminMutation<AdminUser>(request, (req, user) =>
-    req(`/api/admin/users/${encodeURIComponent(user.name)}/restore`, { method: "POST" })
+    req(`/api/admin/users/${encodeURIComponent(user.id)}/restore`, { method: "POST" })
   );
 
   // One request per page carries the rows, the derived status and the traffic

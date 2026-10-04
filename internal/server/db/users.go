@@ -328,14 +328,18 @@ func (db *DB) DisableProxyUser(ctx context.Context, name string) (ProxyUser, err
 }
 
 func (db *DB) SoftDeleteProxyUser(ctx context.Context, name string) (ProxyUser, error) {
-	affected, err := db.q.SoftDeleteProxyUser(ctx, normalizeName(name))
+	user, err := db.GetProxyUser(ctx, name)
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	affected, err := db.q.SoftDeleteProxyUser(ctx, user.ID)
 	if err != nil {
 		return ProxyUser{}, err
 	}
 	if err := requireAffected(affected, "proxy user", name); err != nil {
 		return ProxyUser{}, err
 	}
-	return db.getProxyUserIncludingDeleted(ctx, name)
+	return db.getProxyUserIncludingDeleted(ctx, user.ID)
 }
 
 func (db *DB) RestoreProxyUser(ctx context.Context, name string) (ProxyUser, error) {

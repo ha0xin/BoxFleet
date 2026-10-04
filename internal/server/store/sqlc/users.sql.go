@@ -57,7 +57,7 @@ SELECT
   created_at,
   updated_at
 FROM proxy_users
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1)
   AND deleted_at IS NULL
 `
 
@@ -81,7 +81,8 @@ func (q *Queries) GetProxyUserByName(ctx context.Context, name string) (ProxyUse
 const getProxyUserByNameIncludingDeleted = `-- name: GetProxyUserByNameIncludingDeleted :one
 SELECT id, name, display_name, status, global_quota_bytes, expire_at, deleted_at, created_at, updated_at
 FROM proxy_users
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1)
+ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1
 `
 
 func (q *Queries) GetProxyUserByNameIncludingDeleted(ctx context.Context, name string) (ProxyUser, error) {
@@ -305,7 +306,7 @@ UPDATE proxy_users
 SET
   deleted_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1)
   AND deleted_at IS NOT NULL
 `
 
@@ -322,7 +323,7 @@ UPDATE proxy_users
 SET
   display_name = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
+WHERE (id = ?2 OR name = ?2)
   AND deleted_at IS NULL
 `
 
@@ -344,7 +345,7 @@ UPDATE proxy_users
 SET
   expire_at = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
+WHERE (id = ?2 OR name = ?2)
   AND deleted_at IS NULL
 `
 
@@ -366,7 +367,7 @@ UPDATE proxy_users
 SET
   global_quota_bytes = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
+WHERE (id = ?2 OR name = ?2)
   AND deleted_at IS NULL
 `
 
@@ -388,7 +389,7 @@ UPDATE proxy_users
 SET
   status = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
+WHERE (id = ?2 OR name = ?2)
   AND deleted_at IS NULL
 `
 
@@ -411,7 +412,7 @@ SET
   status = 'disabled',
   deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1)
   AND deleted_at IS NULL
 `
 

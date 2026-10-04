@@ -183,6 +183,15 @@ func (db *DB) issueProxyCredential(
 		return ProxyCredential{}, err
 	}
 	authName := proxy.Name + "@" + user.Name
+	// Retired resource names can be reused, but a sing-box counter identity
+	// cannot: its previous value may still exist on the running daemon.
+	used, err := db.q.ProxyAuthNameExists(ctx, authName)
+	if err != nil {
+		return ProxyCredential{}, err
+	}
+	if used {
+		authName = accessID
+	}
 	if err := db.q.CreateProxyAccess(ctx, store.CreateProxyAccessParams{
 		ID:             accessID,
 		ProxyID:        proxy.ID,

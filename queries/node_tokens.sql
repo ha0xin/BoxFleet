@@ -30,7 +30,7 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE (
-    n.name = sqlc.arg(node_name)
+    (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
     OR n.id = (
       SELECT node_id
       FROM node_name_aliases
@@ -53,7 +53,7 @@ SELECT
 FROM node_tokens t
 JOIN nodes n ON n.id = t.node_id
 WHERE (
-    n.name = sqlc.arg(node_name)
+    (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
     OR n.id = (
       SELECT node_id
       FROM node_name_aliases

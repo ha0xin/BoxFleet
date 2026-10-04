@@ -207,13 +207,10 @@ export function NodesPage() {
   const form = useForm<NodeFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
-    req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
+    req(`/api/admin/nodes/${encodeURIComponent(node.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ status: node.status === "disabled" ? "active" : "disabled" })
     })
-  );
-  const restore = useAdminMutation<AdminNode>(request, (req, node) =>
-    req(`/api/admin/nodes/${encodeURIComponent(node.name)}/restore`, { method: "POST" })
   );
 
   // The updater form reads the committed filters rather than this render's
@@ -435,13 +432,7 @@ export function NodesPage() {
                           <Table.Cell className="text-right">
                             <RowActionsMenu label={`Actions for ${node.name}`}>
                               {node.deleted_at ? (
-                                <DropdownMenu.Item
-                                  icon={ArrowsClockwiseIcon}
-                                  disabled={restore.isPending}
-                                  onClick={() => restore.mutate(node)}
-                                >
-                                  Restore
-                                </DropdownMenu.Item>
+                                <DropdownMenu.Item disabled>Deleted</DropdownMenu.Item>
                               ) : (
                                 <>
                                   {node.active_operation ? (

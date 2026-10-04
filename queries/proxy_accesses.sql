@@ -113,3 +113,6 @@ UPDATE proxy_accesses
 SET credential_json = sqlc.arg(credential_json),
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- name: ProxyAuthNameExists :one
+SELECT EXISTS(SELECT 1 FROM proxy_accesses WHERE auth_name = sqlc.arg(auth_name));

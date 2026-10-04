@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ const (
 )
 
 type Options struct {
+	MaintenanceContext context.Context
 	DB                 *db.DB
 	ArtifactDir        string
 	AdminToken         string
@@ -50,6 +52,9 @@ func NewRouter(options Options) http.Handler {
 	operationNotifier := newNodeOperationNotifier()
 	updateCatalog := newUpdateCatalog(options)
 	updateCampaigns := newUpdateCampaignController(options.DB, operationNotifier)
+	if options.MaintenanceContext != nil {
+		go updateCampaigns.run(options.MaintenanceContext)
+	}
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")

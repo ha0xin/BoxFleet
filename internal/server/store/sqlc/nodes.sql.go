@@ -61,6 +61,15 @@ func (q *Queries) CreateNodeNameAlias(ctx context.Context, arg CreateNodeNameAli
 	return err
 }
 
+const deleteNodeAliases = `-- name: DeleteNodeAliases :exec
+DELETE FROM node_name_aliases WHERE node_id = ?1
+`
+
+func (q *Queries) DeleteNodeAliases(ctx context.Context, nodeID string) error {
+	_, err := q.db.ExecContext(ctx, deleteNodeAliases, nodeID)
+	return err
+}
+
 const deleteNodeNameAlias = `-- name: DeleteNodeNameAlias :exec
 DELETE FROM node_name_aliases
 WHERE alias = ?1 AND node_id = ?2
@@ -91,7 +100,7 @@ SELECT
   updated_at
 FROM nodes
 WHERE deleted_at IS NULL
-  AND (name = ?1
+  AND (id = ?1 OR name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -121,12 +130,13 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 const getNodeByNameIncludingDeleted = `-- name: GetNodeByNameIncludingDeleted :one
 SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at
 FROM nodes
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
      WHERE alias = ?1
-   )
+   ))
+ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1
 `
 
 func (q *Queries) GetNodeByNameIncludingDeleted(ctx context.Context, name string) (Node, error) {
@@ -151,12 +161,12 @@ func (q *Queries) GetNodeByNameIncludingDeleted(ctx context.Context, name string
 const getNodeIDByNameOrAlias = `-- name: GetNodeIDByNameOrAlias :one
 SELECT id
 FROM nodes
-WHERE name = ?1
+WHERE (id = ?1 OR name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
      WHERE alias = ?1
-   )
+   )) AND deleted_at IS NULL
 `
 
 func (q *Queries) GetNodeIDByNameOrAlias(ctx context.Context, name string) (string, error) {
@@ -280,7 +290,7 @@ UPDATE nodes
 SET
   status = ?1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?2
+WHERE id = ?2
   AND deleted_at IS NULL
 `
 
@@ -303,7 +313,7 @@ SET
   status = 'disabled',
   deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?1
+WHERE id = ?1
   AND deleted_at IS NULL
 `
 

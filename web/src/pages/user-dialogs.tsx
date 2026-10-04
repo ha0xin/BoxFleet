@@ -132,7 +132,7 @@ export function UserFormDialog({
           })
         });
       }
-      return req(`/api/admin/users/${encodeURIComponent(state.user.name)}`, {
+      return req(`/api/admin/users/${encodeURIComponent(state.user.id)}`, {
         method: "PATCH",
         body: JSON.stringify({
           display_name: values.display_name.trim(),
@@ -265,7 +265,7 @@ function AccessRow({
               on the next publish.
             </>
           }
-          endpoint={`/api/admin/users/${encodeURIComponent(user.name)}/paths/${encodeURIComponent(access.path_id)}`}
+          endpoint={`/api/admin/users/${encodeURIComponent(user.id)}/paths/${encodeURIComponent(access.path_id)}`}
           onClose={() => setConfirming(false)}
         />
       ) : null}
@@ -287,7 +287,7 @@ export function ManageAccessDialog({
 
   const accessQuery = useQuery({
     queryKey: adminKeys.userAccess(user.name),
-    queryFn: () => request<AdminPathAccess[]>(`/api/admin/users/${encodeURIComponent(user.name)}/paths`)
+    queryFn: () => request<AdminPathAccess[]>(`/api/admin/users/${encodeURIComponent(user.id)}/paths`)
   });
   const pathsQuery = useQuery({
     queryKey: adminKeys.paths,
@@ -315,7 +315,7 @@ export function ManageAccessDialog({
     async (req, paths) => {
       const results = await Promise.allSettled(
         paths.map((path) =>
-          req(`/api/admin/users/${encodeURIComponent(user.name)}/paths`, {
+          req(`/api/admin/users/${encodeURIComponent(user.id)}/paths`, {
             method: "POST",
             body: JSON.stringify({ path_id: path.id })
           })
@@ -528,7 +528,7 @@ export function ConnectionInfoDialog({
   const [copyError, setCopyError] = useState("");
   const [confirmation, setConfirmation] = useState<ConfirmationAction | null>(null);
   const copiedResetTimer = useRef<number | null>(null);
-  const encodedUser = encodeURIComponent(user.name);
+  const encodedUser = encodeURIComponent(user.id);
 
   useEffect(() => {
     return () => {

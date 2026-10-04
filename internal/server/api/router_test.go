@@ -770,27 +770,34 @@ func TestAdminNodeReenroll(t *testing.T) {
 		t.Fatal("active node's token should survive a rejected re-enroll")
 	}
 
-	// Delete hides the node and revokes its token. Restore makes the disabled
-	// record visible again, then re-enroll returns it to pending.
-	delReq := adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/edge-r", nil)
+	// Deletion ends this identity. A same-name enrollment creates a new ID.
+	oldNode, err := store.GetNode(ctx, "edge-r")
+	if err != nil {
+		t.Fatal(err)
+	}
 	delRec := httptest.NewRecorder()
-	router.ServeHTTP(delRec, delReq)
+	router.ServeHTTP(delRec, adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/"+oldNode.ID, nil))
 	if delRec.Code != http.StatusOK {
-		t.Fatalf("decommission status = %d, body = %s", delRec.Code, delRec.Body.String())
+		t.Fatalf("delete: %d %s", delRec.Code, delRec.Body.String())
 	}
-	restoreReq := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/edge-r/restore", nil)
 	restoreRec := httptest.NewRecorder()
-	router.ServeHTTP(restoreRec, restoreReq)
-	if restoreRec.Code != http.StatusOK {
-		t.Fatalf("restore status = %d, body = %s", restoreRec.Code, restoreRec.Body.String())
+	router.ServeHTTP(restoreRec, adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/"+oldNode.ID+"/restore", nil))
+	if restoreRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("restore: %d", restoreRec.Code)
 	}
-	restored, thirdCfg := decodeBootstrap(t, reenroll())
-	if restored.Status != "pending" {
-		t.Fatalf("status after restore re-enroll = %q, want pending", restored.Status)
+	freshRec := httptest.NewRecorder()
+	router.ServeHTTP(freshRec, adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/bootstrap", map[string]string{"name": "edge-r", "public_host": "192.0.2.9"}))
+	fresh, freshCfg := decodeBootstrap(t, freshRec)
+	if fresh.ID == oldNode.ID {
+		t.Fatal("enrollment reused deleted identity")
 	}
-	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", thirdCfg.Token); !ok {
-		t.Fatal("restored token did not verify")
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", secondCfg.Token); ok {
+		t.Fatal("old token authenticated replacement")
 	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", freshCfg.Token); !ok {
+		t.Fatal("new token did not authenticate")
+	}
+
 }
 
 func TestAdminNodePatchMultiHost(t *testing.T) {
@@ -1592,13 +1599,13 @@ func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	req = adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/azus/restore", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("restore node status = %d, body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("deleted node restore = %d", rec.Code)
 	}
-	node, err := store.GetNode(ctx, "azus")
-	if err != nil || node.Status != "disabled" {
-		t.Fatalf("restored node = %#v, err = %v; want visible and disabled", node, err)
+	if _, err := store.GetNode(ctx, "azus"); err == nil {
+		t.Fatal("restore revived deleted node")
 	}
+
 }
 
 func TestNodeSystemLogsEndpointDiscardsReports(t *testing.T) {

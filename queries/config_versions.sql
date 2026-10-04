@@ -64,7 +64,7 @@ SELECT
   cv.published_at
 FROM config_versions cv
 JOIN nodes n ON n.id = cv.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
 ORDER BY cv.version DESC;
 
 -- name: SupersedePublishedConfigVersions :exec
@@ -130,7 +130,7 @@ FROM nodes n
 LEFT JOIN node_config_status s ON s.node_id = n.id
 LEFT JOIN config_versions target ON target.id = s.target_config_version_id
 LEFT JOIN config_versions current ON current.id = s.current_config_version_id
-WHERE n.name = sqlc.arg(node_name);
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL));
 
 -- name: ListNodeConfigStatuses :many
 SELECT
@@ -170,4 +170,4 @@ SELECT
 FROM node_config_status s
 JOIN nodes n ON n.id = s.node_id
 JOIN config_versions cv ON cv.id = s.target_config_version_id
-WHERE n.name = sqlc.arg(node_name);
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL));

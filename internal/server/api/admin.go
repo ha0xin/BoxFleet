@@ -1707,7 +1707,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	}
 	statusByNode := make(map[string]db.NodeConfigStatus, len(statuses))
 	for _, status := range statuses {
-		statusByNode[status.NodeName] = status
+		statusByNode[status.NodeID] = status
 	}
 	tokenNames, err := store.ListNodeNamesWithActiveTokens(ctx)
 	if err != nil {
@@ -1730,12 +1730,12 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 		// Base off adminNodeFromNode so list responses carry the same fields as
 		// single-node responses (notably Hosts) instead of a divergent literal.
 		item := adminNodeFromNode(node)
-		item.HasActiveToken = hasToken[node.Name]
+		item.HasActiveToken = !node.DeletedAt.Valid && hasToken[node.Name]
 		if operation, ok := operationByNodeID[node.ID]; ok {
 			operationCopy := operation
 			item.ActiveOperation = &operationCopy
 		}
-		if status, ok := statusByNode[node.Name]; ok {
+		if status, ok := statusByNode[node.ID]; ok {
 			applyAdminNodeStatus(&item, status)
 		}
 		out = append(out, item)

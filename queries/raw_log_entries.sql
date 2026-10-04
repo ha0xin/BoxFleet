@@ -26,6 +26,6 @@ SELECT
   r.ingested_at
 FROM raw_log_entries r
 JOIN nodes n ON n.id = r.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
 ORDER BY r.observed_at DESC
 LIMIT sqlc.arg(limit);

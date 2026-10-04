@@ -9,7 +9,7 @@ export function RotateCredentialsDialog({ request, user, onClose }: {
   onClose: () => void;
 }) {
   const mutation = useAdminMutation<void, { rotated: number }>(request,
-    (req) => req(`/api/admin/users/${encodeURIComponent(user.name)}/credentials/rotate`, { method: "POST" }),
+    (req) => req(`/api/admin/users/${encodeURIComponent(user.id)}/credentials/rotate`, { method: "POST" }),
     { toastError: false });
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open && !mutation.isPending) onClose(); }}>

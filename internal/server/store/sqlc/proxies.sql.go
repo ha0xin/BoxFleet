@@ -9,6 +9,16 @@ import (
 	"context"
 )
 
+const archiveNodeProxies = `-- name: ArchiveNodeProxies :exec
+UPDATE proxies SET enabled = 0, deleted_at = COALESCE(deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE node_id = ?1
+`
+
+func (q *Queries) ArchiveNodeProxies(ctx context.Context, nodeID string) error {
+	_, err := q.db.ExecContext(ctx, archiveNodeProxies, nodeID)
+	return err
+}
+
 const createProxy = `-- name: CreateProxy :exec
 INSERT INTO proxies (
   id,
@@ -91,6 +101,24 @@ func (q *Queries) CreateProxyNameAlias(ctx context.Context, arg CreateProxyNameA
 	return err
 }
 
+const deleteArchivedProxyAliases = `-- name: DeleteArchivedProxyAliases :exec
+DELETE FROM proxy_name_aliases WHERE proxy_id IN (SELECT id FROM proxies WHERE deleted_at IS NOT NULL)
+`
+
+func (q *Queries) DeleteArchivedProxyAliases(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteArchivedProxyAliases)
+	return err
+}
+
+const deleteProxyAliases = `-- name: DeleteProxyAliases :exec
+DELETE FROM proxy_name_aliases WHERE proxy_id = ?1
+`
+
+func (q *Queries) DeleteProxyAliases(ctx context.Context, proxyID string) error {
+	_, err := q.db.ExecContext(ctx, deleteProxyAliases, proxyID)
+	return err
+}
+
 const deleteProxyNameAlias = `-- name: DeleteProxyNameAlias :exec
 DELETE FROM proxy_name_aliases
 WHERE alias = ?1 AND proxy_id = ?2
@@ -148,7 +176,7 @@ FROM proxy_details
 WHERE node_id = (
     SELECT n.id
     FROM nodes n
-    WHERE n.name = ?1
+    WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
        OR n.id = (
          SELECT node_id
          FROM node_name_aliases
@@ -160,12 +188,12 @@ WHERE node_id = (
   AND id = (
     SELECT p.id
     FROM proxies p
-    WHERE p.name = ?2
+    WHERE (p.id = ?2 OR (p.deleted_at IS NULL AND p.name = ?2)
        OR p.id = (
          SELECT proxy_id
          FROM proxy_name_aliases
          WHERE alias = ?2
-       )
+       ))
   )
 `
 
@@ -203,28 +231,10 @@ func (q *Queries) GetProxyByNodeAndName(ctx context.Context, arg GetProxyByNodeA
 }
 
 const getProxyByNodeAndNameIncludingDeleted = `-- name: GetProxyByNodeAndNameIncludingDeleted :one
-SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at
-FROM proxy_details
-WHERE node_id = (
-    SELECT n.id
-    FROM nodes n
-    WHERE n.name = ?1
-       OR n.id = (
-         SELECT node_id
-         FROM node_name_aliases
-         WHERE alias = ?1
-       )
-  )
-  AND id = (
-    SELECT p.id
-    FROM proxies p
-    WHERE p.name = ?2
-       OR p.id = (
-         SELECT proxy_id
-         FROM proxy_name_aliases
-         WHERE alias = ?2
-       )
-  )
+SELECT id, node_id, node_name, node_public_host, name, protocol, listen, listen_port, transport, enabled, traffic_multiplier, direct_publish, settings_json, inbound_rules_json, outbound_rules_json, route_rules_json, deleted_at, node_deleted_at, created_at, updated_at FROM proxy_details
+WHERE (node_id = ?1 OR (node_name = ?1 AND node_deleted_at IS NULL))
+AND (id = ?2 OR name = ?2 OR id = (SELECT proxy_id FROM proxy_name_aliases WHERE alias = ?2))
+ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1
 `
 
 type GetProxyByNodeAndNameIncludingDeletedParams struct {
@@ -263,12 +273,12 @@ func (q *Queries) GetProxyByNodeAndNameIncludingDeleted(ctx context.Context, arg
 const getProxyIDByNameOrAlias = `-- name: GetProxyIDByNameOrAlias :one
 SELECT id
 FROM proxies
-WHERE name = ?1
+WHERE deleted_at IS NULL AND (id = ?1 OR name = ?1
    OR id = (
      SELECT proxy_id
      FROM proxy_name_aliases
      WHERE alias = ?1
-   )
+   ))
 `
 
 func (q *Queries) GetProxyIDByNameOrAlias(ctx context.Context, name string) (string, error) {

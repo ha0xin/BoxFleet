@@ -631,14 +631,20 @@ func (db *DB) SoftDeleteProxy(ctx context.Context, nodeName, name string) (Proxy
 	if err != nil {
 		return Proxy{}, err
 	}
-	affected, err := db.q.SoftDeleteProxy(ctx, proxy.ID)
+	err = db.withTx(ctx, func(q *store.Queries) error {
+		affected, err := q.SoftDeleteProxy(ctx, proxy.ID)
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
+			return err
+		}
+		return q.DeleteProxyAliases(ctx, proxy.ID)
+	})
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
-		return Proxy{}, err
-	}
-	return db.getProxyIncludingDeleted(ctx, nodeName, proxy.Name)
+	return db.getProxyIncludingDeleted(ctx, proxy.NodeID, proxy.ID)
 }
 
 func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, error) {

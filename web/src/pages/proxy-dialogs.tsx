@@ -192,7 +192,7 @@ export function ProxyFormDialog({
         ? mergeServerName(state.proxy.settings_json, sni)
         : JSON.stringify({ ...parseSettings(state.proxy.settings_json), method: values.ss_method });
       return req(
-        `/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies/${encodeURIComponent(state.proxy.name)}`,
+        `/api/admin/nodes/${encodeURIComponent(values.node_name)}/proxies/${encodeURIComponent(state.proxy.id)}`,
         {
           method: "PATCH",
           body: JSON.stringify({

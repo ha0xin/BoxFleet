@@ -16,8 +16,8 @@ FROM log_events e
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE e.proxy_user_id IS NOT NULL
-  AND (?1 = '' OR n.name = ?1)
-  AND (?2 = '' OR u.name = ?2)
+  AND (?1 = '' OR (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL)))
+  AND (?2 = '' OR (u.id = ?2 OR (u.name = ?2 AND u.deleted_at IS NULL)))
   AND (?3 = '' OR e.window_end >= ?3)
   AND (?4 = '' OR e.window_start <= ?4)
 `
@@ -137,7 +137,7 @@ SELECT c.proxy_user_id
 FROM proxy_accesses c
 JOIN proxies p ON p.id = c.proxy_id
 JOIN nodes n ON n.id = p.node_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
   AND c.auth_name = ?2
 `
 
@@ -175,8 +175,8 @@ FROM log_events e
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE e.proxy_user_id IS NOT NULL
-  AND (?1 = '' OR n.name = ?1)
-  AND (?2 = '' OR u.name = ?2)
+  AND (?1 = '' OR (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL)))
+  AND (?2 = '' OR (u.id = ?2 OR (u.name = ?2 AND u.deleted_at IS NULL)))
   AND (?3 = '' OR e.window_end >= ?3)
   AND (?4 = '' OR e.window_start <= ?4)
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
@@ -337,7 +337,7 @@ SELECT
   e.created_at
 FROM log_events e
 JOIN nodes n ON n.id = e.node_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
   AND e.proxy_user_id IS NOT NULL
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
 LIMIT ?2
@@ -404,7 +404,7 @@ SELECT
   e.created_at
 FROM log_events e
 JOIN proxy_users u ON u.id = e.proxy_user_id
-WHERE u.name = ?1
+WHERE (u.id = ?1 OR (u.name = ?1 AND u.deleted_at IS NULL))
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
 LIMIT ?2
 `

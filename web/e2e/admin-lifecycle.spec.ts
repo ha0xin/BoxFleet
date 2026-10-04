@@ -169,3 +169,30 @@ async function expectRowVisible(page: Page, rowText: string) {
 async function expectRowHidden(page: Page, rowText: string) {
   await expect(page.getByRole("row").filter({ hasText: rowText })).toHaveCount(0);
 }
+
+test("deleted node name can be enrolled with a fresh identity on narrow screens", async ({ page }) => {
+  const enrolled = await page.request.post("/api/admin/nodes/bootstrap", { data: { name: "reused-ui", public_host: "192.0.2.80" } });
+  expect(enrolled.ok()).toBeTruthy();
+  const old = (await enrolled.json()).node;
+  await page.setViewportSize({ width: 390, height: 824 });
+  await page.goto("nodes?search=reused-ui");
+  await openRowActions(page, "reused-ui");
+  await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete node" });
+  await expect(dialog).toContainText("Enroll again to create a new node");
+  const box = await dialog.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("No nodes match this filter.", { exact: true })).toBeVisible();
+  const replacement = await page.request.post("/api/admin/nodes/bootstrap", { data: { name: "reused-ui", public_host: "192.0.2.81" } });
+  expect(replacement.ok()).toBeTruthy();
+  const fresh = (await replacement.json()).node;
+  expect(fresh.id).not.toBe(old.id);
+  expect((await page.request.get(`/api/admin/nodes/${old.id}`)).status()).toBe(422);
+  expect((await page.request.get(`/api/admin/nodes/${fresh.id}`)).ok()).toBeTruthy();
+  await page.reload();
+  await expectRowVisible(page, "reused-ui");
+  await expect(page.getByText("192.0.2.81", { exact: true })).toBeVisible();
+});

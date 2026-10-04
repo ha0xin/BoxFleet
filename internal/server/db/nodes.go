@@ -574,7 +574,7 @@ func (db *DB) GetNode(ctx context.Context, name string) (Node, error) {
 	node, err := db.q.GetNodeByName(ctx, normalizeName(name))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Node{}, fmt.Errorf("node %q not found", name)
+			return Node{}, fmt.Errorf("node %q not found: %w", name, sql.ErrNoRows)
 		}
 		return Node{}, err
 	}
@@ -591,7 +591,7 @@ func (db *DB) SetNodeStatus(ctx context.Context, name, status string) error {
 	}
 	affected, err := db.q.SetNodeStatus(ctx, store.SetNodeStatusParams{
 		Status: status,
-		Name:   node.Name,
+		Name:   node.ID,
 	})
 	if err != nil {
 		return err
@@ -609,11 +609,20 @@ func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 		return Node{}, err
 	}
 	err = db.withTx(ctx, func(qtx *store.Queries) error {
-		affected, err := qtx.SoftDeleteNode(ctx, node.Name)
+		affected, err := qtx.SoftDeleteNode(ctx, node.ID)
 		if err != nil {
 			return err
 		}
 		if err := requireAffected(affected, "node", name); err != nil {
+			return err
+		}
+		if err := qtx.DeleteNodeAliases(ctx, node.ID); err != nil {
+			return err
+		}
+		if err := qtx.ArchiveNodeProxies(ctx, node.ID); err != nil {
+			return err
+		}
+		if err := qtx.DeleteArchivedProxyAliases(ctx); err != nil {
 			return err
 		}
 		return qtx.RevokeNodeTokensByNodeID(ctx, node.ID)
@@ -621,22 +630,11 @@ func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	return db.getNodeIncludingDeleted(ctx, node.Name)
+	return db.getNodeIncludingDeleted(ctx, node.ID)
 }
 
 func (db *DB) RestoreNode(ctx context.Context, name string) (Node, error) {
-	node, err := db.getNodeIncludingDeleted(ctx, name)
-	if err != nil {
-		return Node{}, err
-	}
-	affected, err := db.q.RestoreNode(ctx, node.Name)
-	if err != nil {
-		return Node{}, err
-	}
-	if err := requireAffected(affected, "deleted node", name); err != nil {
-		return Node{}, err
-	}
-	return db.GetNode(ctx, node.Name)
+	return Node{}, errors.New("deleted nodes cannot be restored; enroll a new node")
 }
 
 func (db *DB) getNodeIncludingDeleted(ctx context.Context, name string) (Node, error) {

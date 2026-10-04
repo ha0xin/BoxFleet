@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/haoxin/boxfleet/internal/model"
 	"github.com/haoxin/boxfleet/internal/server/db"
@@ -21,7 +23,10 @@ type updateCampaignController struct {
 	store    *db.DB
 	notifier *nodeOperationNotifier
 	mu       sync.Mutex
+	now      func() time.Time
 }
+
+const updateQueueTimeout = 10 * time.Minute
 
 type adminCreateUpdateCampaignPayload struct {
 	Nodes          []string `json:"nodes,omitempty"`
@@ -31,7 +36,27 @@ type adminCreateUpdateCampaignPayload struct {
 }
 
 func newUpdateCampaignController(store *db.DB, notifier *nodeOperationNotifier) *updateCampaignController {
-	return &updateCampaignController{store: store, notifier: notifier}
+	return &updateCampaignController{store: store, notifier: notifier, now: time.Now}
+}
+
+// Reconcile even when no browser is open and no offline agent can report back.
+func (c *updateCampaignController) run(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		detail, found, err := c.store.GetActiveNodeUpdateCampaign(ctx)
+		if err == nil && found {
+			_, err = c.reconcile(ctx, detail.Campaign.ID)
+		}
+		if err != nil && ctx.Err() == nil {
+			log.Warn().Err(err).Msg("reconcile node update campaign")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (c *updateCampaignController) reconcile(ctx context.Context, campaignID string) (db.NodeUpdateCampaignDetail, error) {
@@ -46,6 +71,24 @@ func (c *updateCampaignController) reconcile(ctx context.Context, campaignID str
 			return detail, nil
 		}
 		for _, member := range detail.Members {
+			if member.Status == "skipped" || member.Status == "succeeded" {
+				continue
+			}
+			_, nodeErr := c.store.GetNode(ctx, member.NodeID)
+			if errors.Is(nodeErr, sql.ErrNoRows) {
+				if member.OperationID != "" && (member.Status == "queued" || member.Status == "running") {
+					if _, err := c.store.RequestNodeOperationCancel(ctx, member.OperationID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+						return db.NodeUpdateCampaignDetail{}, err
+					}
+				}
+				if err := c.store.UpdateNodeUpdateCampaignMemberState(ctx, campaignID, member.NodeID, "skipped", "node was deleted"); err != nil {
+					return db.NodeUpdateCampaignDetail{}, err
+				}
+				continue
+			}
+			if nodeErr != nil {
+				return db.NodeUpdateCampaignDetail{}, nodeErr
+			}
 			if member.OperationID == "" {
 				continue
 			}
@@ -54,7 +97,31 @@ func (c *updateCampaignController) reconcile(ctx context.Context, campaignID str
 				return db.NodeUpdateCampaignDetail{}, err
 			}
 			status := operation.Status
+			if status == "queued" {
+				requested, parseErr := time.Parse(time.RFC3339Nano, operation.RequestedAt)
+				if parseErr == nil && c.now().Sub(requested) >= updateQueueTimeout {
+					operation, err = c.store.CancelUnclaimedNodeOperation(ctx, operation.ID)
+					if err != nil {
+						return db.NodeUpdateCampaignDetail{}, err
+					}
+					// A claim can race with cancellation; never skip an operation
+					// that has started executing on the node.
+					if operation.Status == "cancelled" {
+						if err := c.store.UpdateNodeUpdateCampaignMemberState(ctx, campaignID, member.NodeID, "skipped", "node did not claim the update within 10 minutes"); err != nil {
+							return db.NodeUpdateCampaignDetail{}, err
+						}
+						continue
+					}
+					status = operation.Status
+				}
+			}
 			if status == "expired" {
+				if operation.Attempt == 0 {
+					if err := c.store.UpdateNodeUpdateCampaignMemberState(ctx, campaignID, member.NodeID, "skipped", operation.Error); err != nil {
+						return db.NodeUpdateCampaignDetail{}, err
+					}
+					continue
+				}
 				status = "failed"
 			}
 			if member.Status != status || member.Error != operation.Error {
@@ -100,10 +167,30 @@ func (c *updateCampaignController) reconcile(ctx context.Context, campaignID str
 			if member.Status != "pending" || member.OperationID != "" {
 				continue
 			}
+			deadline, _ := time.Parse(time.RFC3339Nano, campaignQueueDeadline(detail.Campaign.UpdatedAt))
+			if !c.now().Before(deadline) {
+				if err := c.store.UpdateNodeUpdateCampaignMemberState(ctx, campaignID, member.NodeID, "skipped", "update queue timed out before dispatch"); err != nil {
+					return db.NodeUpdateCampaignDetail{}, err
+				}
+				createdAny = true
+				continue
+			}
+			node, err := c.store.GetNode(ctx, member.NodeID)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && node.Status == "disabled") {
+				if err := c.store.UpdateNodeUpdateCampaignMemberState(ctx, campaignID, member.NodeID, "skipped", "node is deleted or disabled"); err != nil {
+					return db.NodeUpdateCampaignDetail{}, err
+				}
+				createdAny = true
+				continue
+			}
+			if err != nil {
+				return db.NodeUpdateCampaignDetail{}, err
+			}
 			operation, created, err := c.store.CreateNodeOperation(ctx, db.CreateNodeOperationParams{
-				NodeName: member.NodeName, Kind: member.Kind, Payload: member.Payload,
+				NodeName: member.NodeID, Kind: member.Kind, Payload: member.Payload,
 				IdempotencyKey: "campaign:" + campaignID + ":" + member.NodeID,
 				RequestedBy:    "update-campaign:" + campaignID,
+				ExpiresAt:      campaignQueueDeadline(detail.Campaign.UpdatedAt),
 			})
 			if errors.Is(err, db.ErrActiveNodeOperation) {
 				waiting = true
@@ -151,6 +238,14 @@ func (c *updateCampaignController) reconcile(ctx context.Context, campaignID str
 		}
 	}
 	return c.store.GetNodeUpdateCampaign(ctx, campaignID)
+}
+
+func campaignQueueDeadline(batchStartedAt string) string {
+	started, err := time.Parse(time.RFC3339Nano, batchStartedAt)
+	if err != nil {
+		started = time.Now().UTC()
+	}
+	return started.Add(updateQueueTimeout).UTC().Format(time.RFC3339Nano)
 }
 
 func (c *updateCampaignController) reconcileForOperation(ctx context.Context, operationID string) {
@@ -297,9 +392,10 @@ func adminResumeUpdateCampaignHandler(store *db.DB, controller *updateCampaignCo
 				return
 			}
 			operation, _, err := store.CreateNodeOperation(r.Context(), db.CreateNodeOperationParams{
-				NodeName: member.NodeName, Kind: member.Kind, Payload: member.Payload,
+				NodeName: member.NodeID, Kind: member.Kind, Payload: member.Payload,
 				IdempotencyKey: "campaign-retry:" + db.SHA256Hex([]byte(detail.Campaign.ID+":"+member.NodeID+":"+member.OperationID)),
 				RequestedBy:    "update-campaign:" + detail.Campaign.ID,
+				ExpiresAt:      time.Now().UTC().Add(updateQueueTimeout).Format(time.RFC3339Nano),
 				RetryOf:        member.OperationID,
 			})
 			if err != nil {
@@ -367,7 +463,7 @@ func buildUpdateCampaignMembers(
 	}
 	statusByName := make(map[string]db.NodeConfigStatus, len(statuses))
 	for _, status := range statuses {
-		statusByName[status.NodeName] = status
+		statusByName[status.NodeID] = status
 	}
 	tokenNames, err := store.ListNodeNamesWithActiveTokens(r.Context())
 	if err != nil {
@@ -391,7 +487,7 @@ func buildUpdateCampaignMembers(
 		if len(requested) > 0 && !requested[node.Name] {
 			continue
 		}
-		status, ok := statusByName[node.Name]
+		status, ok := statusByName[node.ID]
 		if !ok || node.Status == "pending" || !hasToken[node.Name] || !containsCapability(status.Capabilities, model.CapabilityOperationsV1) {
 			continue
 		}

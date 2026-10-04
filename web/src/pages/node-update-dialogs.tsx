@@ -152,7 +152,7 @@ export function NodeUpdateDialog({
     queryKey: adminKeys.nodeOperation(node.name, operationID),
     queryFn: () =>
       request<NodeOperationDetail>(
-        `/api/admin/nodes/${encodeURIComponent(node.name)}/operations/${encodeURIComponent(operationID)}`
+        `/api/admin/nodes/${encodeURIComponent(node.id)}/operations/${encodeURIComponent(operationID)}`
       ),
     enabled: operationID !== "",
     refetchInterval: (query) =>
@@ -161,7 +161,7 @@ export function NodeUpdateDialog({
   const mutation = useAdminMutation<UpdateComponent[], NodeOperation>(
     request,
     (req, selected) =>
-      req(`/api/admin/nodes/${encodeURIComponent(node.name)}/updates`, {
+      req(`/api/admin/nodes/${encodeURIComponent(node.id)}/updates`, {
         method: "POST",
         body: JSON.stringify({
           components: selected,
@@ -173,7 +173,7 @@ export function NodeUpdateDialog({
   const cancelMutation = useAdminMutation<void, NodeOperation>(
     request,
     (req) =>
-      req(`/api/admin/nodes/${encodeURIComponent(node.name)}/operations/${encodeURIComponent(operationID)}/cancel`, {
+      req(`/api/admin/nodes/${encodeURIComponent(node.id)}/operations/${encodeURIComponent(operationID)}/cancel`, {
         method: "POST"
       }),
     { toastError: false }
@@ -383,7 +383,7 @@ export function UpdateAllDialog({
               <Banner
                 icon={<CheckCircleIcon weight="fill" />}
                 title="Rollout complete"
-                description={`All eligible nodes reached agent ${release.agent_version}.`}
+                description={`${detail.members.filter((member) => member.status === "succeeded").length} updated, ${detail.members.filter((member) => member.status === "skipped").length} skipped.`}
               />
             ) : null}
             <Meter

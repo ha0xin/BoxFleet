@@ -2,7 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS proxy_users (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   display_name TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'disabled', 'expired', 'quota_exceeded')),
@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS proxy_users (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_users_active_name ON proxy_users(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS subscription_tokens (
   id TEXT PRIMARY KEY,
@@ -96,7 +98,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mihomo_profile_subscription_tokens_active
 
 CREATE TABLE IF NOT EXISTS nodes (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   public_host TEXT NOT NULL,
   hosts_json TEXT NOT NULL DEFAULT '[]',
   api_base_url TEXT NOT NULL DEFAULT '',
@@ -108,6 +110,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_active_name ON nodes(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS node_name_aliases (
   alias TEXT PRIMARY KEY,
@@ -152,12 +156,11 @@ CREATE TABLE IF NOT EXISTS proxies (
   route_rules_json TEXT NOT NULL DEFAULT '[]',
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE (node_id, name)
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxies_node_id ON proxies(node_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_proxies_node_listener
   ON proxies(node_id, listen, listen_port, transport, protocol);
 

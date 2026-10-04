@@ -134,14 +134,14 @@ export function ProxiesPage() {
   const form = useForm<ProxyFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleEnabled = useAdminMutation<AdminProxy>(request, (req, proxy) =>
-    req(`/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}`, {
+    req(`/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ enabled: !proxy.enabled })
     })
   );
   const restore = useAdminMutation<AdminProxy>(request, (req, proxy) =>
     req(
-      `/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.name)}/restore`,
+      `/api/admin/nodes/${encodeURIComponent(proxy.node_name)}/proxies/${encodeURIComponent(proxy.id)}/restore`,
       { method: "POST" }
     )
   );
@@ -375,7 +375,7 @@ export function ProxiesPage() {
               Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? It will disappear from the default inventory and can be restored from the Deleted filter.
             </>
           }
-          endpoint={`/api/admin/nodes/${encodeURIComponent(deleteTarget.node_name)}/proxies/${encodeURIComponent(deleteTarget.name)}`}
+          endpoint={`/api/admin/nodes/${encodeURIComponent(deleteTarget.node_name)}/proxies/${encodeURIComponent(deleteTarget.id)}`}
           onClose={() => setDeleteTarget(null)}
         />
       ) : null}

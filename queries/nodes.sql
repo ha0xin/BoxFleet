@@ -47,7 +47,7 @@ SELECT
   updated_at
 FROM nodes
 WHERE deleted_at IS NULL
-  AND (name = sqlc.arg(name)
+  AND (id = sqlc.arg(name) OR name = sqlc.arg(name)
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -57,22 +57,23 @@ WHERE deleted_at IS NULL
 -- name: GetNodeByNameIncludingDeleted :one
 SELECT *
 FROM nodes
-WHERE name = sqlc.arg(name)
+WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name)
    OR id = (
      SELECT node_id
      FROM node_name_aliases
      WHERE alias = sqlc.arg(name)
-   );
+   ))
+ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1;
 
 -- name: GetNodeIDByNameOrAlias :one
 SELECT id
 FROM nodes
-WHERE name = sqlc.arg(name)
+WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name)
    OR id = (
      SELECT node_id
      FROM node_name_aliases
      WHERE alias = sqlc.arg(name)
-   );
+   )) AND deleted_at IS NULL;
 
 -- name: CreateNodeNameAlias :exec
 INSERT INTO node_name_aliases (alias, node_id)
@@ -94,7 +95,7 @@ UPDATE nodes
 SET
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name)
+WHERE id = sqlc.arg(name)
   AND deleted_at IS NULL;
 
 -- name: PromotePendingNodeToActive :execrows
@@ -123,7 +124,7 @@ SET
   status = 'disabled',
   deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name)
+WHERE id = sqlc.arg(name)
   AND deleted_at IS NULL;
 
 -- name: RestoreNode :execrows
@@ -133,3 +134,6 @@ SET
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE name = sqlc.arg(name)
   AND deleted_at IS NOT NULL;
+
+-- name: DeleteNodeAliases :exec
+DELETE FROM node_name_aliases WHERE node_id = sqlc.arg(node_id);

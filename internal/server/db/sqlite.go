@@ -108,12 +108,27 @@ func (db *DB) configure(ctx context.Context) error {
 	return nil
 }
 
-func (db *DB) Migrate(ctx context.Context) error {
+func (db *DB) Migrate(ctx context.Context) (resultErr error) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return err
 	}
 	goose.SetLogger(goose.NopLogger())
 	goose.SetBaseFS(migrations.FS)
+	// SQLite table rebuilds must not cascade through historical foreign keys.
+	// Keep migrations on one connection so the pragma cannot land on another
+	// pooled connection. Migration 028 checks every foreign key before commit.
+	db.sql.SetMaxOpenConns(1)
+	db.sql.SetMaxIdleConns(1)
+	defer func() {
+		if _, err := db.sql.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("restore foreign key enforcement: %w", err))
+		}
+		db.sql.SetMaxOpenConns(sqliteMaxOpenConnections)
+		db.sql.SetMaxIdleConns(sqliteMaxOpenConnections)
+	}()
+	if _, err := db.sql.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
 	return goose.UpContext(ctx, db.sql, ".")
 }
 

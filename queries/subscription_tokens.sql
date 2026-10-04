@@ -20,7 +20,7 @@ SELECT
   t.revoked_at
 FROM subscription_tokens t
 JOIN proxy_users u ON u.id = t.proxy_user_id
-WHERE u.name = sqlc.arg(proxy_user_name)
+WHERE (u.id = sqlc.arg(proxy_user_name) OR (u.name = sqlc.arg(proxy_user_name) AND u.deleted_at IS NULL))
   AND u.deleted_at IS NULL
   AND t.revoked_at IS NULL;
 

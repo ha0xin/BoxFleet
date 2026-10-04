@@ -48,7 +48,7 @@ SELECT c.proxy_user_id
 FROM proxy_accesses c
 JOIN proxies p ON p.id = c.proxy_id
 JOIN nodes n ON n.id = p.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
   AND c.auth_name = sqlc.arg(auth_name);
 
 -- name: ListRecentLogEventsByNode :many
@@ -69,7 +69,7 @@ SELECT
   e.created_at
 FROM log_events e
 JOIN nodes n ON n.id = e.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
   AND e.proxy_user_id IS NOT NULL
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
 LIMIT sqlc.arg(limit);
@@ -96,8 +96,8 @@ FROM log_events e
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE e.proxy_user_id IS NOT NULL
-  AND (sqlc.arg(node_name) = '' OR n.name = sqlc.arg(node_name))
-  AND (sqlc.arg(user_name) = '' OR u.name = sqlc.arg(user_name))
+  AND (sqlc.arg(node_name) = '' OR (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL)))
+  AND (sqlc.arg(user_name) = '' OR (u.id = sqlc.arg(user_name) OR (u.name = sqlc.arg(user_name) AND u.deleted_at IS NULL)))
   AND (sqlc.arg(start_time) = '' OR e.window_end >= sqlc.arg(start_time))
   AND (sqlc.arg(end_time) = '' OR e.window_start <= sqlc.arg(end_time))
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
@@ -110,8 +110,8 @@ FROM log_events e
 JOIN nodes n ON n.id = e.node_id
 JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE e.proxy_user_id IS NOT NULL
-  AND (sqlc.arg(node_name) = '' OR n.name = sqlc.arg(node_name))
-  AND (sqlc.arg(user_name) = '' OR u.name = sqlc.arg(user_name))
+  AND (sqlc.arg(node_name) = '' OR (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL)))
+  AND (sqlc.arg(user_name) = '' OR (u.id = sqlc.arg(user_name) OR (u.name = sqlc.arg(user_name) AND u.deleted_at IS NULL)))
   AND (sqlc.arg(start_time) = '' OR e.window_end >= sqlc.arg(start_time))
   AND (sqlc.arg(end_time) = '' OR e.window_start <= sqlc.arg(end_time));
 
@@ -137,7 +137,7 @@ SELECT
   e.created_at
 FROM log_events e
 JOIN proxy_users u ON u.id = e.proxy_user_id
-WHERE u.name = sqlc.arg(user_name)
+WHERE (u.id = sqlc.arg(user_name) OR (u.name = sqlc.arg(user_name) AND u.deleted_at IS NULL))
 ORDER BY e.created_at DESC, e.window_end DESC, e.id DESC
 LIMIT sqlc.arg(limit);
 

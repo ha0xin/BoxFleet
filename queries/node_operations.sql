@@ -208,3 +208,10 @@ SELECT CAST(COALESCE(MAX(sequence), 0) AS INTEGER)
 FROM node_operation_events
 WHERE operation_id = sqlc.arg(operation_id)
   AND attempt = sqlc.arg(attempt);
+
+-- name: CancelUnclaimedNodeOperation :execrows
+UPDATE node_operations
+SET status = 'cancelled', phase = 'cancelled', cancel_requested = 1,
+finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id) AND status = 'queued';

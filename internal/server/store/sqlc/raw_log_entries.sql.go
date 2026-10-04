@@ -63,7 +63,7 @@ SELECT
   r.ingested_at
 FROM raw_log_entries r
 JOIN nodes n ON n.id = r.node_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
 ORDER BY r.observed_at DESC
 LIMIT ?2
 `

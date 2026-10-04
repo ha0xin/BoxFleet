@@ -83,7 +83,7 @@ FROM proxy_accesses c
 JOIN proxies p ON p.id = c.proxy_id
 JOIN nodes n ON n.id = p.node_id
 JOIN user_node_bindings b ON b.proxy_user_id = c.proxy_user_id AND b.node_id = n.id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
   AND c.auth_name = sqlc.arg(auth_name);
 
 -- name: SumTrafficByUser :many
@@ -94,7 +94,7 @@ SELECT
   d.billable_bytes
 FROM traffic_usage_totals d
 JOIN proxy_users u ON u.id = d.proxy_user_id
-WHERE u.name = sqlc.arg(user_name)
+WHERE (u.id = sqlc.arg(user_name) OR (u.name = sqlc.arg(user_name) AND u.deleted_at IS NULL))
   AND u.deleted_at IS NULL
 ORDER BY d.direction;
 

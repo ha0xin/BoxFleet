@@ -366,6 +366,17 @@ func (q *Queries) ListProxyAccessesByUserNode(ctx context.Context, arg ListProxy
 	return items, nil
 }
 
+const proxyAuthNameExists = `-- name: ProxyAuthNameExists :one
+SELECT EXISTS(SELECT 1 FROM proxy_accesses WHERE auth_name = ?1)
+`
+
+func (q *Queries) ProxyAuthNameExists(ctx context.Context, authName string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, proxyAuthNameExists, authName)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const restoreProxyAccess = `-- name: RestoreProxyAccess :execrows
 UPDATE proxy_accesses
 SET

@@ -1483,17 +1483,17 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/updates$/,
-    handler: ({ match }) => completedOperation(decodeURIComponent(match?.[1] ?? "")).operation
+    handler: ({ match }) => completedOperation(mockResourceName(match?.[1] ?? "")).operation
   },
   {
     method: "GET",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/operations\/([^/]+)$/,
-    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? "")) ?? completedOperation(decodeURIComponent(match?.[1] ?? ""))
+    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? "")) ?? completedOperation(mockResourceName(match?.[1] ?? ""))
   },
   {
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/operations\/([^/]+)\/cancel$/,
-    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? ""))?.operation ?? completedOperation(decodeURIComponent(match?.[1] ?? "")).operation
+    handler: ({ match }) => mockOperations.get(decodeURIComponent(match?.[2] ?? ""))?.operation ?? completedOperation(mockResourceName(match?.[1] ?? "")).operation
   },
   {
     method: "POST",
@@ -1505,12 +1505,12 @@ const routes: Route[] = [
   {
     method: "GET",
     pattern: /^\/api\/admin\/node-update-campaigns\/([^/]+)$/,
-    handler: ({ match }) => mockCampaigns.get(decodeURIComponent(match?.[1] ?? ""))
+    handler: ({ match }) => mockCampaigns.get(mockResourceName(match?.[1] ?? ""))
   },
   {
     method: "POST",
     pattern: /^\/api\/admin\/node-update-campaigns\/([^/]+)\/(?:cancel|resume)$/,
-    handler: ({ match }) => mockCampaigns.get(decodeURIComponent(match?.[1] ?? ""))
+    handler: ({ match }) => mockCampaigns.get(mockResourceName(match?.[1] ?? ""))
   },
   { method: "GET", pattern: /^\/api\/admin\/system-logs$/, handler: ({ query }) => systemLogsResponse(query) },
   { method: "GET", pattern: /^\/api\/admin\/config\/changes$/, handler: () => configChanges },
@@ -1627,7 +1627,7 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies$/,
     handler: ({ match, body }) => {
-      const node = decodeURIComponent(match?.[1] ?? "");
+      const node = mockResourceName(match?.[1] ?? "");
       const proxy = makeProxy({
         id: `px_${now}_${proxies.length}`,
         node_name: node,
@@ -1650,9 +1650,9 @@ const routes: Route[] = [
     method: "PATCH",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)$/,
     handler: ({ match, body }) => {
-      const node = decodeURIComponent(match?.[1] ?? "");
+      const node = mockResourceName(match?.[1] ?? "");
       const name = decodeURIComponent(match?.[2] ?? "");
-      const proxy = proxies.find((p) => p.node_name === node && p.name === name);
+      const proxy = proxies.find((p) => p.node_name === node && (p.name === name || p.id === name));
       if (proxy && body) {
         if (typeof body.enabled === "boolean") proxy.enabled = body.enabled;
         if (typeof body.listen_port === "number") proxy.listen_port = body.listen_port;
@@ -1690,9 +1690,9 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)$/,
     handler: ({ match }) => {
-      const node = decodeURIComponent(match?.[1] ?? "");
+      const node = mockResourceName(match?.[1] ?? "");
       const name = decodeURIComponent(match?.[2] ?? "");
-      const proxy = proxies.find((p) => p.node_name === node && p.name === name);
+      const proxy = proxies.find((p) => p.node_name === node && (p.name === name || p.id === name));
       if (proxy) {
         proxy.enabled = false;
         proxy.deleted_at = new Date().toISOString();
@@ -1705,9 +1705,9 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/proxies\/([^/]+)\/restore$/,
     handler: ({ match }) => {
-      const node = decodeURIComponent(match?.[1] ?? "");
+      const node = mockResourceName(match?.[1] ?? "");
       const name = decodeURIComponent(match?.[2] ?? "");
-      const proxy = proxies.find((item) => item.node_name === node && item.name === name);
+      const proxy = proxies.find((item) => item.node_name === node && (item.name === name || item.id === name));
       if (proxy) proxy.deleted_at = "";
       return proxy ?? { ok: true };
     }
@@ -1777,7 +1777,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/service-overrides\/([^/]+)$/,
     handler: ({ match }) => {
-      domainServiceOverrides.delete(decodeURIComponent(match?.[1] ?? "").toLowerCase());
+      domainServiceOverrides.delete(mockResourceName(match?.[1] ?? "").toLowerCase());
       return { ok: true };
     }
   },
@@ -1815,7 +1815,7 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/reenroll$/,
     handler: ({ match }): AdminNodeBootstrap => {
-      const name = decodeURIComponent(match?.[1] ?? "");
+      const name = mockResourceName(match?.[1] ?? "");
       const node = nodes.find((n) => n.name === name);
       if (node) {
         node.status = "pending";
@@ -1832,7 +1832,7 @@ const routes: Route[] = [
     method: "PATCH",
     pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
     handler: ({ match, body }) => {
-      const node = nodes.find((n) => n.name === decodeURIComponent(match?.[1] ?? ""));
+      const node = nodes.find((n) => n.name === mockResourceName(match?.[1] ?? ""));
       if (node && body) {
         const oldName = node.name;
         if (Array.isArray(body.hosts)) {
@@ -1871,7 +1871,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/nodes\/([^/]+)$/,
     handler: ({ match }) => {
-      const name = decodeURIComponent(match?.[1] ?? "");
+      const name = mockResourceName(match?.[1] ?? "");
       const node = nodes.find((n) => n.name === name);
       if (node) {
         node.status = "disabled";
@@ -1886,7 +1886,7 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/nodes\/([^/]+)\/restore$/,
     handler: ({ match }) => {
-      const node = nodes.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      const node = nodes.find((item) => item.name === mockResourceName(match?.[1] ?? ""));
       if (node) node.deleted_at = "";
       return node ?? { ok: true };
     }
@@ -1913,7 +1913,7 @@ const routes: Route[] = [
     method: "PATCH",
     pattern: /^\/api\/admin\/users\/([^/]+)$/,
     handler: ({ match, body }) => {
-      const name = decodeURIComponent(match?.[1] ?? "");
+      const name = mockResourceName(match?.[1] ?? "");
       const user = users.find((u) => u.name === name);
       if (user && body) {
         if (typeof body.display_name === "string") user.display_name = body.display_name;
@@ -1963,7 +1963,7 @@ const routes: Route[] = [
     method: "PATCH",
     pattern: /^\/api\/admin\/paths\/([^/]+)$/,
     handler: ({ match, body }) => {
-      const path = paths.find((item) => item.id === decodeURIComponent(match?.[1] ?? ""));
+      const path = paths.find((item) => item.id === mockResourceName(match?.[1] ?? ""));
       if (path) Object.assign(path, body, { updated_at: new Date().toISOString() });
       return path ?? { ok: true };
     }
@@ -1972,7 +1972,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/paths\/([^/]+)$/,
     handler: ({ match }) => {
-      const index = paths.findIndex((item) => item.id === decodeURIComponent(match?.[1] ?? ""));
+      const index = paths.findIndex((item) => item.id === mockResourceName(match?.[1] ?? ""));
       if (index >= 0) paths.splice(index, 1);
       return { ok: true };
     }
@@ -1980,13 +1980,13 @@ const routes: Route[] = [
   {
     method: "GET",
     pattern: /^\/api\/admin\/users\/([^/]+)\/paths$/,
-    handler: ({ match }) => pathAccessFor(decodeURIComponent(match?.[1] ?? "alice"))
+    handler: ({ match }) => pathAccessFor(mockResourceName(match?.[1] ?? "alice"))
   },
   {
     method: "POST",
     pattern: /^\/api\/admin\/users\/([^/]+)\/paths$/,
     handler: ({ match, body }) => {
-      const userName = decodeURIComponent(match?.[1] ?? "");
+      const userName = mockResourceName(match?.[1] ?? "");
       const pathID = String(body?.path_id ?? "");
       const list = pathAccessFor(userName);
       const existing = list.find((access) => access.path_id === pathID);
@@ -2010,7 +2010,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/users\/([^/]+)\/paths\/([^/]+)$/,
     handler: ({ match }) => {
-      const userName = decodeURIComponent(match?.[1] ?? "");
+      const userName = mockResourceName(match?.[1] ?? "");
       const pathID = decodeURIComponent(match?.[2] ?? "");
       const list = pathAccessFor(userName);
       const index = list.findIndex((access) => access.path_id === pathID);
@@ -2033,7 +2033,7 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/,
     handler: ({ match, body }) => {
-      const name = decodeURIComponent(match?.[1] ?? "");
+      const name = mockResourceName(match?.[1] ?? "");
       const proxy = proxies.find((p) => p.node_name === body?.node_name && p.name === body?.proxy_name);
       const list = accessFor(name);
       if (proxy && !list.some((a) => a.node_name === proxy.node_name && a.proxy_name === proxy.name)) {
@@ -2067,7 +2067,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/users\/([^/]+)$/,
     handler: ({ match }) => {
-      const user = users.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      const user = users.find((item) => item.name === mockResourceName(match?.[1] ?? ""));
       if (user) {
         user.status = "disabled";
         user.deleted_at = new Date().toISOString();
@@ -2079,7 +2079,7 @@ const routes: Route[] = [
     method: "POST",
     pattern: /^\/api\/admin\/users\/([^/]+)\/restore$/,
     handler: ({ match }) => {
-      const user = users.find((item) => item.name === decodeURIComponent(match?.[1] ?? ""));
+      const user = users.find((item) => item.name === mockResourceName(match?.[1] ?? ""));
       if (user) user.deleted_at = "";
       return user ?? { ok: true };
     }
@@ -2088,7 +2088,7 @@ const routes: Route[] = [
     method: "DELETE",
     pattern: /^\/api\/admin\/users\/([^/]+)\/proxies\/([^/]+)\/([^/]+)$/,
     handler: ({ match }) => {
-      const name = decodeURIComponent(match?.[1] ?? "");
+      const name = mockResourceName(match?.[1] ?? "");
       const node = decodeURIComponent(match?.[2] ?? "");
       const proxyName = decodeURIComponent(match?.[3] ?? "");
       const list = accessFor(name);
@@ -2100,17 +2100,17 @@ const routes: Route[] = [
       return { ok: true };
     }
   },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => accessFor(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxy-provider$/, handler: ({ match }) => proxyProviderFor(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => subscriptionFor(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => issueSubscription(decodeURIComponent(match?.[1] ?? "alice")) },
-  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription\/rotate$/, handler: ({ match }) => issueSubscription(decodeURIComponent(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => accessFor(mockResourceName(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(mockResourceName(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxy-provider$/, handler: ({ match }) => proxyProviderFor(mockResourceName(match?.[1] ?? "alice")) },
+  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => subscriptionFor(mockResourceName(match?.[1] ?? "alice")) },
+  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => issueSubscription(mockResourceName(match?.[1] ?? "alice")) },
+  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription\/rotate$/, handler: ({ match }) => issueSubscription(mockResourceName(match?.[1] ?? "alice")) },
   {
     method: "DELETE",
     pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/,
     handler: ({ match }) => {
-      const name = decodeURIComponent(match?.[1] ?? "alice");
+      const name = mockResourceName(match?.[1] ?? "alice");
       subscriptions.delete(name);
       return subscriptionFor(name);
     }
@@ -2182,4 +2182,9 @@ export function adminMockPlugin(): Plugin {
       });
     }
   };
+}
+
+function mockResourceName(value: string): string {
+  const decoded = decodeURIComponent(value);
+  return nodes.find((node) => node.id === decoded)?.name ?? users.find((user) => user.id === decoded)?.name ?? decoded;
 }
