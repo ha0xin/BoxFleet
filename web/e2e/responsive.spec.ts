@@ -6,6 +6,17 @@ test("tablet navigation hides the rail and closes the drawer after navigation", 
   await expect(page.locator("aside")).toHaveCount(0);
   const trigger = page.locator('main button[aria-label*="sidebar"]').first();
   await expect(trigger).toBeVisible();
+  for (const width of [390, 651, 849]) {
+    await page.setViewportSize({ width, height: 824 });
+    const button = await trigger.boundingBox();
+    const icon = await trigger.locator("svg").boundingBox();
+    expect(button!.x).toBe(16);
+    expect(button!.width).toBe(32);
+    expect(icon!.x).toBe(24);
+    expect(icon!.width).toBe(16);
+  }
+  await page.setViewportSize({ width: 651, height: 824 });
+  await page.screenshot({ path: "/tmp/boxfleet-header-651.png" });
   await trigger.click();
   await page.getByRole("button", { name: "Paths", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Paths", exact: true })).toBeVisible();

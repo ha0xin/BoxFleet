@@ -38,10 +38,10 @@ export function AppPageHeader({
   return (
     <div className="flex flex-col">
       <div
-        className={`bf-page-topbar flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6`}
+        className={`bf-page-topbar flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 lg:px-6`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <Sidebar.Trigger className="lg:hidden" aria-label="Toggle sidebar navigation" aria-expanded={openMobile}><ListIcon size={20} /></Sidebar.Trigger>
+          <Sidebar.Trigger className="size-8 lg:hidden" aria-label="Toggle sidebar navigation" aria-expanded={openMobile}><ListIcon size={16} /></Sidebar.Trigger>
           <Breadcrumbs size="sm">
             <span
               onClickCapture={(event) => {
