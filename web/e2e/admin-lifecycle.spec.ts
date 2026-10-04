@@ -226,11 +226,8 @@ test("deletion previews dependencies, handles narrow screens, and rechecks chang
     expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBeTruthy();
   }
   await page.screenshot({path: "/tmp/boxfleet-deletion-impact-390.png"});
-  const accessGroup = dialog.getByRole("button", {name: "Access · 1", exact: true});
-  await accessGroup.click();
-  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`)).toBeHidden();
-  await accessGroup.click();
-  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`)).toBeVisible();
+  await expect(dialog.getByRole("columnheader", {name: "Resource", exact: true})).toBeVisible();
+  await expect(dialog.getByRole("columnheader", {name: "Change", exact: true})).toBeVisible();
   expect((await page.request.post("/api/admin/users", {data: {name: "impact-user-2"}})).ok()).toBeTruthy();
   expect((await page.request.post("/api/admin/users/impact-user-2/paths", {data: {path_id: path.id}})).ok()).toBeTruthy();
   await dialog.getByRole("button", {name: "Delete", exact: true}).click();

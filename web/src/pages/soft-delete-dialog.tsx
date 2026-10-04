@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Banner, Button, Collapsible, Dialog } from "@cloudflare/kumo";
+import { Banner, Button, Dialog, Table } from "@cloudflare/kumo";
 
 import type { AdminRequest } from "@/admin/api";
 import type { DeletionImpact, DeletionResourceKind } from "@/types";
@@ -29,8 +29,6 @@ export function SoftDeleteDialog({
     enabled: Boolean(resource),
     staleTime: 0
   });
-  const groups: Record<string, NonNullable<typeof impact.data>["items"]> = {};
-  for (const item of impact.data?.items ?? []) (groups[item.kind] ??= []).push(item);
   const mutation = useAdminMutation<void, unknown>(
     request,
     async (req) => {
@@ -59,21 +57,30 @@ export function SoftDeleteDialog({
             {impact.isError ? <Banner variant="error" title="Unable to check dependencies"><Button variant="secondary" size="sm" onClick={() => void impact.refetch()}>Retry</Button></Banner> : null}
             {impact.data?.blocked ? <Banner variant="error" title={impact.data.blocked} className="mb-2" /> : null}
             {impact.data && !impact.data.items.length ? <p className="text-sm text-kumo-subtle">No other resources are affected.</p> : null}
-            <div className="max-h-[45dvh] overflow-y-auto rounded-md border border-kumo-fill">
-              {Object.entries(groups).map(([kind, items]) => (
-                <Collapsible.Root key={kind} defaultOpen className="border-b border-kumo-fill last:border-b-0">
-                  <Collapsible.DefaultTrigger className="w-full px-3 py-2 text-sm">{kind} · {items.length}</Collapsible.DefaultTrigger>
-                  <Collapsible.DefaultPanel className="px-3 pb-2">
-                    <ul className="space-y-2">
-                      {items.map((item) => <li key={item.id} className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1 text-sm">
-                        <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{item.name}</span>
-                        <span className="shrink-0 text-kumo-subtle">{item.effect}</span>
-                      </li>)}
-                    </ul>
-                  </Collapsible.DefaultPanel>
-                </Collapsible.Root>
-              ))}
-            </div>
+            {impact.data?.items.length ? (
+              <div className="max-h-[45dvh] overflow-y-auto rounded-lg border border-kumo-line">
+                <Table layout="fixed">
+                  <colgroup><col /><col className="w-28" /></colgroup>
+                  <Table.Header variant="compact" className="sticky top-0 z-10">
+                    <Table.Row>
+                      <Table.Head>Resource</Table.Head>
+                      <Table.Head>Change</Table.Head>
+                    </Table.Row>
+                  </Table.Header>
+                  <Table.Body>
+                    {impact.data.items.map((item) => (
+                      <Table.Row key={`${item.kind}:${item.id}`}>
+                        <Table.Cell className="whitespace-normal [overflow-wrap:anywhere]">
+                          <div className="text-sm text-kumo-default">{item.name}</div>
+                          <div className="mt-0.5 text-xs text-kumo-subtle">{item.kind}</div>
+                        </Table.Cell>
+                        <Table.Cell className="whitespace-normal text-sm text-kumo-subtle">{item.effect}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table>
+              </div>
+            ) : null}
             <p className="mt-2 text-xs text-kumo-subtle">Traffic history is retained.</p>
           </section>
         ) : null}
