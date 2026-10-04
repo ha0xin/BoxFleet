@@ -41,7 +41,7 @@ function NodeDiff({ change }: { change: ConfigChange }) {
     [change.target_config, change.rendered_config]
   );
   return (
-    <div className="overflow-hidden rounded-lg border border-kumo-line">
+    <div className="shrink-0 overflow-hidden rounded-lg border border-kumo-line">
       <div className="flex items-center gap-2 border-b border-kumo-line bg-kumo-canvas px-3 py-2 text-sm">
         <span className="font-semibold text-kumo-default">{change.node}</span>
         <span className="flex items-center gap-1 text-kumo-subtle">
@@ -67,18 +67,18 @@ export function PublishDiffDialog() {
 
   return (
     <Dialog.Root open={isDiffOpen} onOpenChange={(open) => (open ? undefined : closeDiff())}>
-      <Dialog size="xl" className="p-6">
-        <div className="mb-1 flex items-start justify-between gap-4">
+      <Dialog size="xl" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-6">
+        <div className="mb-1 flex shrink-0 items-start justify-between gap-4">
           <Dialog.Title className="text-xl font-semibold text-kumo-default">
             Review configuration changes
           </Dialog.Title>
         </div>
-        <Dialog.Description className="mb-4 text-kumo-subtle">
+        <Dialog.Description className="mb-4 shrink-0 text-kumo-subtle">
           {changedCount} {changedCount === 1 ? "node" : "nodes"} will be published. Agents apply the
           new config on their next pull cycle (up to ~1 minute).
         </Dialog.Description>
 
-        <div className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto">
+        <div className="flex min-h-0 max-h-[55vh] flex-col gap-4 overflow-y-auto">
           {changes.map((change) => (
             <NodeDiff key={change.node} change={change} />
           ))}
@@ -87,7 +87,7 @@ export function PublishDiffDialog() {
           ) : null}
         </div>
 
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-6 flex shrink-0 justify-end gap-2">
           <Dialog.Close
             render={(props) => (
               <Button {...props} variant="ghost">
