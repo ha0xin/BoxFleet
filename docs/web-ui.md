@@ -382,3 +382,17 @@ Page titles and resource content use 16px side gutters, matching log toolbars an
 at tablet/desktop widths. Main log grids retain the left gutter and extend flush to
 the right viewport edge, with no fixed blank settings column in overflowing log tables. Log disclosure cells have no horizontal padding; their
 26px buttons sit inside the narrow rail without clipping.
+
+### User connection key rotation
+
+Users → row actions → **Rotate connection keys** replaces all non-deleted
+VLESS UUIDs and Shadowsocks 2022 user passwords in a single transaction,
+including disabled credentials without enabling them. Credentials attached to
+deleted proxies/nodes are excluded. It preserves credential IDs and `auth_name`,
+PathAccess grants, node bindings, quotas, traffic ledgers and subscription URLs.
+
+`POST /api/admin/users/{user}/credentials/rotate` returns `{ "rotated": N }`
+without secrets. Rotation stages a config change: use **Review & apply** to
+publish it; old keys stop accepting new connections when each node applies the
+new config. Clients then refresh their subscription or import new connection
+info. Rotating credentials does not itself revoke existing established sessions.

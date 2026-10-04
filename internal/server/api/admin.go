@@ -2188,3 +2188,14 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+func adminRotateUserCredentialsHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		count, err := store.RotateUserCredentials(r.Context(), chi.URLParam(r, "user"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, map[string]int{"rotated": count})
+	}
+}

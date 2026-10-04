@@ -55,18 +55,12 @@ type IssueCredentialParams struct {
 	ProxyName string
 }
 
-func (db *DB) IssueVLESSRealityCredential(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
-	return db.issueProxyCredential(ctx, params, ProtocolVLESSReality, func(proxy Proxy) (string, error) {
-		credentialJSON, err := json.Marshal(VLESSRealityCredential{
-			UUID: uuid.NewString(),
-			Flow: VLESSRealityFlowVision,
-		})
-		return string(credentialJSON), err
-	})
-}
-
-func (db *DB) IssueShadowsocks2022Credential(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
-	return db.issueProxyCredential(ctx, params, ProtocolShadowsocks2022, func(proxy Proxy) (string, error) {
+func generateProxyCredential(proxy Proxy) (string, error) {
+	switch proxy.Protocol {
+	case ProtocolVLESSReality:
+		raw, err := json.Marshal(VLESSRealityCredential{UUID: uuid.NewString(), Flow: VLESSRealityFlowVision})
+		return string(raw), err
+	case ProtocolShadowsocks2022:
 		var settings Shadowsocks2022Settings
 		if err := json.Unmarshal([]byte(proxy.SettingsJSON), &settings); err != nil {
 			return "", fmt.Errorf("parse settings for %s: %w", proxy.Name, err)
@@ -79,9 +73,56 @@ func (db *DB) IssueShadowsocks2022Credential(ctx context.Context, params IssueCr
 		if err != nil {
 			return "", err
 		}
-		credentialJSON, err := json.Marshal(Shadowsocks2022Credential{Password: password})
-		return string(credentialJSON), err
+		raw, err := json.Marshal(Shadowsocks2022Credential{Password: password})
+		return string(raw), err
+	default:
+		return "", fmt.Errorf("proxy protocol %s does not support credentials", proxy.Protocol)
+	}
+}
+
+func (db *DB) IssueVLESSRealityCredential(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
+	return db.issueProxyCredential(ctx, params, ProtocolVLESSReality, generateProxyCredential)
+}
+
+func (db *DB) IssueShadowsocks2022Credential(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
+	return db.issueProxyCredential(ctx, params, ProtocolShadowsocks2022, generateProxyCredential)
+}
+
+// RotateUserCredentials replaces secrets in place, preserving authorization and
+// counter identities. Disabled credentials are rotated without re-enabling them;
+// deleted credentials and retired resources are excluded. Config publication is
+// deliberately left to the existing review/apply workflow.
+func (db *DB) RotateUserCredentials(ctx context.Context, userName string) (int, error) {
+	count := 0
+	err := db.withTx(ctx, func(q *store.Queries) error {
+		user, err := q.GetProxyUserByName(ctx, normalizeName(userName))
+		if err != nil {
+			return err
+		}
+		rows, err := q.ListProxyAccessesByUserName(ctx, user.Name)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			secret, err := generateProxyCredential(Proxy{Name: row.ProxyName, Protocol: row.Protocol, SettingsJSON: row.SettingsJson})
+			if err != nil {
+				return err
+			}
+			affected, err := q.RotateProxyAccessCredential(ctx, store.RotateProxyAccessCredentialParams{ID: row.ID, CredentialJson: secret})
+			if err != nil {
+				return err
+			}
+			if err := requireAffected(affected, "proxy credential", row.ID); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
 	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (db *DB) issueProxyCredential(

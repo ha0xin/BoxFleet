@@ -37,6 +37,33 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await page.getByRole("checkbox", { name: /vless-ui/ }).check();
   await page.getByRole("button", { name: "Grant access (1)" }).click();
   await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const activation = await page.request.patch("/api/admin/nodes/edge-ui", { data: { status: "active" } });
+  expect(activation.ok()).toBeTruthy();
+  const beforeRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
+  expect(beforeRotation.nodes).toHaveLength(1);
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Rotate connection keys" }).click();
+  const rotationDialog = page.getByRole("dialog", { name: "Rotate connection keys" });
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(rotationDialog).toBeVisible();
+    const box = await rotationDialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    await expect(rotationDialog.getByRole("button", { name: "Rotate all keys" })).toBeVisible();
+  }
+  await page.screenshot({ path: "test-results/credential-rotation-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rotationDialog.getByRole("button", { name: "Rotate all keys" }).click();
+  await expect(rotationDialog.getByText("1 connection key replaced")).toBeVisible();
+  const afterRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
+  expect(afterRotation).not.toEqual(beforeRotation);
+  await rotationDialog.getByRole("button", { name: "Done" }).click();
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Manage access" }).click();
+  await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
   await page.getByRole("button", { name: "Revoke vless-ui" }).click();
   await expect(page.getByRole("heading", { name: "Revoke access" })).toBeVisible();
   await page.getByRole("button", { name: "Revoke", exact: true }).click();

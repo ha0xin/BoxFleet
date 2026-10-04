@@ -391,6 +391,26 @@ func (q *Queries) RestoreProxyAccess(ctx context.Context, arg RestoreProxyAccess
 	return result.RowsAffected()
 }
 
+const rotateProxyAccessCredential = `-- name: RotateProxyAccessCredential :execrows
+UPDATE proxy_accesses
+SET credential_json = ?1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2 AND deleted_at IS NULL
+`
+
+type RotateProxyAccessCredentialParams struct {
+	CredentialJson string `json:"credential_json"`
+	ID             string `json:"id"`
+}
+
+func (q *Queries) RotateProxyAccessCredential(ctx context.Context, arg RotateProxyAccessCredentialParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rotateProxyAccessCredential, arg.CredentialJson, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setProxyAccessEnabled = `-- name: SetProxyAccessEnabled :execrows
 UPDATE proxy_accesses
 SET

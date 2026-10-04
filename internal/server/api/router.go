@@ -110,6 +110,7 @@ func NewRouter(options Options) http.Handler {
 		r.Patch("/users/{user}", adminUpdateUserHandler(options.DB))
 		r.Delete("/users/{user}", adminDeleteUserHandler(options.DB))
 		r.Post("/users/{user}/restore", adminRestoreUserHandler(options.DB))
+		r.Post("/users/{user}/credentials/rotate", adminRotateUserCredentialsHandler(options.DB))
 		r.Get("/users/{user}/proxies", adminUserProxiesHandler(options.DB))
 		r.Post("/users/{user}/proxies", adminIssueUserProxyCredentialHandler(options.DB))
 		r.Delete("/users/{user}/proxies/{node}/{proxy}", adminDeleteUserProxyCredentialHandler(options.DB))

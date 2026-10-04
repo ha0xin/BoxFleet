@@ -2022,6 +2022,15 @@ const routes: Route[] = [
   },
   {
     method: "POST",
+    pattern: /^\/api\/admin\/users\/([^/]+)\/credentials\/rotate$/,
+    handler: ({ match }) => {
+      const list = accessFor(decodeURIComponent(match?.[1] ?? "" )).filter((item) => !item.deleted_at);
+      for (const credential of list) markNodeChanged(credential.node_name);
+      return { rotated: list.length };
+    }
+  },
+  {
+    method: "POST",
     pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/,
     handler: ({ match, body }) => {
       const name = decodeURIComponent(match?.[1] ?? "");

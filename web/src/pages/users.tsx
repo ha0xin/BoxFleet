@@ -25,6 +25,7 @@ import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
+import { RotateCredentialsDialog } from "./rotate-credentials-dialog";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
@@ -196,6 +197,7 @@ export function UsersPage() {
   const { request } = useAdminApi();
   const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(urlFilters);
   const [dialog, setDialog] = useState<UserDialogState>(null);
+  const [rotateTarget, setRotateTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
 
   // react-hook-form is the draft layer for the search box only; `values` re-syncs
@@ -399,6 +401,9 @@ export function UsersPage() {
                                   {row.status === "disabled" ? "Enable" : "Disable"}
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Separator />
+                                <DropdownMenu.Item icon={ArrowsClockwiseIcon} onClick={() => setRotateTarget(row)}>
+                                  Rotate connection keys
+                                </DropdownMenu.Item>
                                 <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row)}>
                                   Delete
                                 </DropdownMenu.Item>
@@ -429,6 +434,7 @@ export function UsersPage() {
       {dialog?.mode === "connection" ? (
         <ConnectionInfoDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
       ) : null}
+      {rotateTarget ? <RotateCredentialsDialog request={request} user={rotateTarget} onClose={() => setRotateTarget(null)} /> : null}
       {deleteTarget ? (
         <SoftDeleteDialog
           request={request}
