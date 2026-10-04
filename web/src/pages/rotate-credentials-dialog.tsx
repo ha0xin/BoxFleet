@@ -16,9 +16,8 @@ export function RotateCredentialsDialog({ request, user, onClose }: {
       <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Rotate connection keys</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Replace all VLESS UUIDs and Shadowsocks passwords for {user.name}, including disabled credentials.
-          Access, traffic usage, and subscription links stay the same.
-          After Review &amp; apply, clients must refresh their subscription or import the new keys.
+          Replace all connection keys for {user.name}.
+          The subscription link will stay the same.
         </Dialog.Description>
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
         {mutation.isSuccess ? (
