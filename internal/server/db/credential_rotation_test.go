@@ -61,7 +61,11 @@ func TestRotateUserCredentialsPreservesAccessAndTraffic(t *testing.T) {
 	rows, _ = d.ListProxyCredentialsByUser(ctx, "alice")
 	bob, _ := d.ListProxyCredentialsByUser(ctx, "bob")
 	paths, _ := d.ListActivePathAccessesByUser(ctx, "alice")
-	subscription, err := d.IssueSubscriptionToken(ctx, "alice")
+	profile, err := d.CreateMihomoProfile(ctx, CreateMihomoProfileParams{Name: "Alice desktop", UserName: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := d.IssueMihomoProfileSubscriptionToken(ctx, profile.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +122,7 @@ func TestRotateUserCredentialsPreservesAccessAndTraffic(t *testing.T) {
 	if !reflect.DeepEqual(paths, pathsAfter) {
 		t.Fatal("changed PathAccess")
 	}
-	subscriptionAfter, found, err := d.GetActiveSubscriptionToken(ctx, "alice")
+	subscriptionAfter, found, err := d.GetActiveMihomoProfileSubscriptionToken(ctx, profile.ID)
 	if err != nil || !found || !reflect.DeepEqual(subscription, subscriptionAfter) {
 		t.Fatal("changed subscription token")
 	}

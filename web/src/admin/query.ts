@@ -35,7 +35,7 @@ export const adminKeys = {
   mihomoProfiles: ["admin", "mihomo-profiles"] as const,
   mihomoTemplates: ["admin", "mihomo-rewrite-templates"] as const,
   mihomoProfile: (id: string) => ["admin", "mihomo-profile", id] as const,
-  subscription: (kind: "user" | "mihomo-profile", id: string) => ["admin", "subscription", kind, id] as const,
+  subscription: (kind: "mihomo-profile", id: string) => ["admin", "subscription", kind, id] as const,
   trafficUsers: ["admin", "traffic-users"] as const,
   systemLogs: (...state: readonly unknown[]) => ["admin", "system-logs", ...state] as const,
   networkEvents: (filters: object) => ["admin", "network-events", filters] as const,

@@ -9,7 +9,6 @@ import type {
   AdminProxy,
   AdminProxyCredential,
   AdminProxiesResponse,
-  AdminSubscription,
   AdminUser,
   AdminUserEffectiveStatus,
   AdminUserRow,
@@ -526,69 +525,7 @@ const connectionInfoFor = (userName: string): UserConnectionInfo => {
   };
 };
 
-const subscriptions = new Map<string, AdminSubscription>([
-  [
-    "alice",
-    {
-      active: true,
-      url: "http://127.0.0.1:5173/sub/bfsub_mock_alice",
-      provider_url: "http://127.0.0.1:5173/sub/bfsub_mock_alice",
-      mihomo_url: "http://127.0.0.1:5173/sub/bfsub_mock_alice/mihomo.yaml",
-      created_at: iso(14 * DAY),
-      last_used_at: iso(10 * MIN)
-    }
-  ]
-]);
 
-function subscriptionFor(userName: string): AdminSubscription {
-  return subscriptions.get(userName) ?? {
-    active: false,
-    url: "",
-    created_at: "",
-    last_used_at: ""
-  };
-}
-
-function issueSubscription(userName: string): AdminSubscription {
-  const providerURL = `http://127.0.0.1:5173/sub/bfsub_mock_${userName}_${Date.now()}`;
-  const subscription: AdminSubscription = {
-    active: true,
-    url: providerURL,
-    provider_url: providerURL,
-    mihomo_url: `${providerURL}/mihomo.yaml`,
-    created_at: new Date().toISOString(),
-    last_used_at: ""
-  };
-  subscriptions.set(userName, subscription);
-  return subscription;
-}
-
-function proxyProviderFor(userName: string): string {
-  const profiles = connectionInfoFor(userName).nodes.flatMap((node) =>
-    node.proxies.map((proxy) => ({ node: node.node, ...proxy }))
-  );
-  if (profiles.length === 0) return "proxies: []\n";
-  return `proxies:\n${profiles
-    .map(
-      (proxy) => `  - name: ${JSON.stringify(proxy.name)}
-    type: vless
-    server: ${JSON.stringify(proxy.server)}
-    port: ${proxy.server_port}
-    uuid: ${JSON.stringify(proxy.uuid)}
-    udp: true
-    flow: ${JSON.stringify(proxy.flow)}
-    network: tcp
-    tls: true
-    servername: ${JSON.stringify(proxy.server_name)}
-    client-fingerprint: chrome
-    packet-encoding: xudp
-    reality-opts:
-      public-key: ${JSON.stringify(proxy.public_key)}
-      short-id: ${JSON.stringify(proxy.short_id)}
-    encryption: ""`
-    )
-    .join("\n")}\n`;
-}
 
 const networkTargets = [
   "api.github.com",
@@ -2153,19 +2090,7 @@ const routes: Route[] = [
   },
   { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxies$/, handler: ({ match }) => accessFor(mockResourceName(match?.[1] ?? "alice")) },
   { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/connection-info$/, handler: ({ match }) => connectionInfoFor(mockResourceName(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/proxy-provider$/, handler: ({ match }) => proxyProviderFor(mockResourceName(match?.[1] ?? "alice")) },
-  { method: "GET", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => subscriptionFor(mockResourceName(match?.[1] ?? "alice")) },
-  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/, handler: ({ match }) => issueSubscription(mockResourceName(match?.[1] ?? "alice")) },
-  { method: "POST", pattern: /^\/api\/admin\/users\/([^/]+)\/subscription\/rotate$/, handler: ({ match }) => issueSubscription(mockResourceName(match?.[1] ?? "alice")) },
-  {
-    method: "DELETE",
-    pattern: /^\/api\/admin\/users\/([^/]+)\/subscription$/,
-    handler: ({ match }) => {
-      const name = mockResourceName(match?.[1] ?? "alice");
-      subscriptions.delete(name);
-      return subscriptionFor(name);
-    }
-  }
+
 ];
 
 function jsonResponse(res: import("node:http").ServerResponse, status: number, body: unknown) {

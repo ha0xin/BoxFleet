@@ -298,15 +298,6 @@ export type UserConnectionInfo = {
   }>;
 };
 
-export type AdminSubscription = {
-  active: boolean;
-  url: string;
-  mihomo_url?: string;
-  provider_url?: string;
-  created_at: string;
-  last_used_at: string;
-};
-
 export type MihomoRewrite = {
   id: string;
   template_id?: string;

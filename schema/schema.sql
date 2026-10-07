@@ -16,22 +16,6 @@ CREATE TABLE IF NOT EXISTS proxy_users (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_users_active_name ON proxy_users(name) WHERE deleted_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS subscription_tokens (
-  id TEXT PRIMARY KEY,
-  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
-  token TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  last_used_at TEXT,
-  revoked_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_subscription_tokens_proxy_user_id
-  ON subscription_tokens(proxy_user_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_tokens_active_user
-  ON subscription_tokens(proxy_user_id)
-  WHERE revoked_at IS NULL;
-
 CREATE TABLE IF NOT EXISTS mihomo_profiles (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
