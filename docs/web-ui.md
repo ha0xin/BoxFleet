@@ -396,3 +396,10 @@ without secrets. Rotation stages a config change: use **Review & apply** to
 publish it; old keys stop accepting new connections when each node applies the
 new config. Clients then refresh their subscription or import new connection
 info. Rotating credentials does not itself revoke existing established sessions.
+
+### Unified network Logs
+
+Logs displays journal history and opt-in connection sessions through one API and
+shared server filters. Stream-specific numeric fields are nullable for journal
+records and display `—`. The removed Connection stream route redirects to Logs.
+Session snapshots share a stable row ID across updates.

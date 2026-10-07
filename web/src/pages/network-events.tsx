@@ -15,12 +15,10 @@ import {
   ArrowLeftIcon,
   CalendarBlankIcon,
   FunnelIcon,
-  InfoIcon,
   WarningCircleIcon
 } from "@phosphor-icons/react";
 import {
   Badge,
-  Banner,
   Button,
   Collapsible,
   Combobox,
@@ -47,14 +45,6 @@ import {
 import type {
   AdminNode,
   AdminUser,
-  ConnectionCoverage,
-  ConnectionEvent,
-  ConnectionEventsResponse,
-  ConnectionHostSort,
-  ConnectionHostsResponse,
-  ConnectionSeriesResponse,
-  ConnectionTelemetryNodesResponse,
-  ConnectionVolume,
   NetworkEvent,
   NetworkEventHostsResponse,
   NetworkEventSeriesResponse,
@@ -71,30 +61,11 @@ import { LogWorkspace, LogFieldsToggle, LogActions, LogResults, manualLogQueryOp
 import { AppPageHeader } from "@/components/app-page-header";
 import { RankedBarList, type RankedBarRow } from "@/components/chart/ranked-bar-list";
 import { TimeBarChart, type TimeSeries } from "@/components/chart/time-bar-chart";
-import { Sparkline } from "@/components/sparkline";
-import { StatusBadge } from "@/components/status-badge";
 import { formatBytes } from "../utils";
 
 type RangePreset = "1h" | "24h" | "7d" | "30d" | "custom" | "all";
 
-/**
- * This page reads two producers and keeps them in two separate sections.
- *
- * The journal section (activity chart, service audit, event table) comes from
- * the journalctl regex scraper that every node runs. It counts connections and
- * nothing else: `log_events` has no byte columns and `traffic_usage_deltas` has
- * no host column, so bytes can never be attributed to a destination there.
- *
- * The connection-stream section comes from sing-box 1.14's daemon gRPC stream,
- * which is opt-in per node and off by default because the production fleet runs
- * 1.13, where the `service.api` config block does not parse at all. It is the
- * only source with bytes per destination and session duration, and it covers
- * only the nodes that opted in.
- *
- * They are never merged into one table or one chart. A union view would have to
- * fake one half of every row, and which producer a row came from is a fact the
- * operator has to be able to read off the page.
- */
+// Logs reads a server-owned union; unavailable legacy metadata stays null.
 
 type ColumnMeta = {
   headClassName?: string;
@@ -121,14 +92,6 @@ type EventScope = {
  * has no full-text index, so `action` and `search` would be silently ignored.
  * `host` is the drill-down the byte ranking hands back.
  */
-type ConnectionScope = {
-  node?: string;
-  user?: string;
-  host?: string;
-  start?: string;
-  end?: string;
-};
-
 const filterSchema = z.object({
   search: z.string(),
   action: z.string(),
@@ -162,12 +125,8 @@ const AUDIT_SERVICE_ROWS = 10;
 /** Hosts requested for a service drill-down. */
 const AUDIT_HOST_ROWS = 50;
 /** Destinations requested for the connection-stream byte ranking. */
-const CONNECTION_HOST_ROWS = 10;
 /** Aggregated connection rows shown when drilling into one destination. */
-const CONNECTION_EVENT_ROWS = 25;
-
 const columnHelper = createColumnHelper<NetworkEvent>();
-const connectionColumnHelper = createColumnHelper<ConnectionEvent>();
 
 function validRange(value: string | null): RangePreset {
   if (value === "1h" || value === "24h" || value === "7d" || value === "30d" || value === "custom" || value === "all") {
@@ -265,10 +224,6 @@ function validBreakdown(value: string | null): ServiceUsageGroup {
  * through the shared `group` whitelist and answers 422 for anything else, so the
  * URL is narrowed to the two values it accepts before a request is built.
  */
-export function validConnectionSort(value: string | null): ConnectionHostSort {
-  return value === "connections" ? "connections" : "bytes";
-}
-
 function formatEventTime(value: string): string {
   const date = parseDateParam(value);
   return date ? format(date, "MMM d, HH:mm") : "n/a";
@@ -276,21 +231,6 @@ function formatEventTime(value: string): string {
 
 function formatCount(value: number): string {
   return value.toLocaleString();
-}
-
-/**
- * Coverage ratios arrive in [0,1]; an empty window reports exactly 1.
- *
- * Only an exact 1 prints as 100%. Rounding 99.9% up would tell the reader the
- * estimate is complete when the server just said it is not, which is the one
- * error this figure exists to prevent.
- */
-export function formatRatio(value: number): string {
-  if (!Number.isFinite(value)) return "n/a";
-  const ratio = Math.max(0, Math.min(1, value));
-  if (ratio === 1) return "100%";
-  if (ratio === 0) return "0%";
-  return `${Math.min(99.9, ratio * 100).toFixed(1)}%`;
 }
 
 /** Units the summed session time is rendered in, largest first. */
@@ -678,484 +618,6 @@ export function ServiceAuditPanel({
  * narrows the totals above it and leaves the coverage node-wide. Saying so is
  * cheaper than letting an operator infer the wrong thing.
  */
-function ConnectionVolumeSummary({
-  totals,
-  coverage,
-  trend,
-  granularity,
-  nodeLabel,
-  trendNotice
-}: {
-  totals?: ConnectionVolume;
-  coverage?: ConnectionCoverage;
-  trend: number[];
-  granularity: string;
-  nodeLabel: string;
-  trendNotice: string;
-}) {
-  return (
-    <div className="flex flex-col gap-2 border-b border-kumo-line px-4 py-3">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-kumo-subtle">Estimated volume</p>
-          <p className="text-xl font-semibold leading-tight text-kumo-default tabular-nums">
-            {formatBytes(totals?.total_bytes ?? 0)}
-          </p>
-          <p className="text-sm text-kumo-subtle tabular-nums">
-            {formatBytes(totals?.uplink_bytes ?? 0)} up · {formatBytes(totals?.downlink_bytes ?? 0)} down ·{" "}
-            {formatCount(totals?.connections_opened ?? 0)} connections · {formatDurationMs(totals?.duration_ms_total ?? 0)} of session time
-          </p>
-        </div>
-        <div className="h-10 w-full min-w-0 shrink text-kumo-info sm:w-64">
-          {trendNotice ? (
-            <p className="flex h-full items-center justify-end text-xs text-kumo-subtle">{trendNotice}</p>
-          ) : (
-            <Sparkline values={trend} label={`Estimated bytes per ${granularity}, oldest bucket first`} />
-          )}
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-kumo-subtle">
-        <span>
-          Estimate, not a ledger: {coverage ? formatRatio(coverage.attribution_ratio) : "n/a"} of{" "}
-          {formatBytes(coverage?.bytes_observed ?? 0)} observed bytes carried a user, across{" "}
-          {formatCount(coverage?.reports ?? 0)} report windows. Per-user billing reads the traffic counters, never this.
-        </span>
-        {coverage && coverage.dropped_buckets > 0 ? (
-          <StatusBadge tone="warning">{formatCount(coverage.dropped_buckets)} dropped buckets</StatusBadge>
-        ) : null}
-        {coverage && coverage.stream_resets > 0 ? (
-          <StatusBadge tone="neutral">{formatCount(coverage.stream_resets)} stream resets</StatusBadge>
-        ) : null}
-      </div>
-      <p className="text-xs text-kumo-subtle">
-        Coverage measures the whole stream on {nodeLabel} for this range, not the filters above it — connection reports
-        carry no user or host column.
-      </p>
-    </div>
-  );
-}
-
-/**
- * Destination volume from sing-box 1.14's daemon connection stream.
- *
- * This is the only section of the page that is not fleet-wide, and the only one
- * that may show bytes. A node produces these rows only while it has an enabled
- * `node_connection_telemetry` row; the production fleet runs 1.13, where the
- * config block this needs does not parse, so today the honest answer is that
- * nothing streams. The panel therefore asks /connection-events/nodes first and
- * explains itself, rather than rendering an empty ranking that reads as a bug.
- *
- * When something does stream, the header states which nodes and how many of the
- * fleet they are, so this can never be mistaken for the journal-based sections
- * above.
- */
-export function ConnectionTelemetryPanel({
-  scope,
-  scopeKey,
-  bucket,
-  fleetNodeCount,
-  nodeFilter,
-  ignoredFilters,
-  host,
-  onHostChange,
-  sort,
-  onSortChange
-}: {
-  scope: ConnectionScope;
-  scopeKey: object;
-  bucket: SeriesBucket;
-  /** Total nodes in the fleet, so "1 of 5" can be stated instead of just "1". */
-  fleetNodeCount: number;
-  /** Node the page is filtered to, or "" for all nodes. */
-  nodeFilter: string;
-  /** Page filters this source cannot honour, named so their absence is explicit. */
-  ignoredFilters: string[];
-  host: string;
-  onHostChange: (host: string) => void;
-  sort: ConnectionHostSort;
-  onSortChange: (sort: ConnectionHostSort) => void;
-}) {
-  const { request } = useAdminApi();
-
-  const nodesQuery = useQuery({
-    ...manualLogQueryOptions,
-    queryKey: adminKeys.connectionTelemetryNodes,
-    queryFn: ({ signal }) =>
-      request<ConnectionTelemetryNodesResponse>("/api/admin/connection-events/nodes", { signal })
-  });
-
-  const streamNodes = useMemo(() => nodesQuery.data?.nodes ?? [], [nodesQuery.data?.nodes]);
-  const streamNames = useMemo(() => streamNodes.map((node) => node.node_name), [streamNodes]);
-  // Filtering to a node that does not stream has no rows by construction. That
-  // is the opt-in working, not an empty result worth ranking.
-  const nodeStreams = nodeFilter === "" || streamNames.includes(nodeFilter);
-  const active = streamNames.length > 0 && nodeStreams;
-  const bounded = Boolean(scope.start && scope.end);
-  const granularity = bucket === "hour" ? "hour" : "day";
-  const offsetMinutes = bucketOffsetMinutes(bucket);
-  const streamScope = useMemo<ConnectionScope>(() => ({ ...scope, host: host || undefined }), [host, scope]);
-
-  // /hosts carries the window totals and the coverage block alongside the
-  // ranking, so the summary needs no separate request and stays available even
-  // for an unbounded range, which /series cannot answer at all.
-  const hostsPath = "/api/admin/connection-events/hosts" + queryString({
-    ...streamScope,
-    group: sort,
-    limit: CONNECTION_HOST_ROWS
-  });
-  const hostsQuery = useQuery({
-    ...manualLogQueryOptions,
-    queryKey: adminKeys.connectionHosts({ ...scopeKey, host, sort }),
-    queryFn: ({ signal }) => request<ConnectionHostsResponse>(hostsPath, { signal }),
-    placeholderData: (previous) => previous,
-    enabled: active
-  });
-
-  // Buckets, zero-fill and ordering are the server's; the sparkline plots the
-  // points it is handed, in the order it is handed them.
-  const seriesPath = "/api/admin/connection-events/series" + queryString({
-    ...streamScope,
-    bucket,
-    offset_minutes: offsetMinutes
-  });
-  const seriesQuery = useQuery({
-    ...manualLogQueryOptions,
-    queryKey: adminKeys.connectionSeries({ ...scopeKey, host, bucket, offsetMinutes }),
-    queryFn: ({ signal }) => request<ConnectionSeriesResponse>(seriesPath, { signal }),
-    placeholderData: (previous) => previous,
-    enabled: active && bounded
-  });
-
-  const eventsQuery = useQuery({
-    ...manualLogQueryOptions,
-    queryKey: adminKeys.connectionEvents({ ...scopeKey, host, limit: CONNECTION_EVENT_ROWS }),
-    queryFn: ({ signal }) =>
-      request<ConnectionEventsResponse>(
-        "/api/admin/connection-events" + queryString({ ...streamScope, limit: CONNECTION_EVENT_ROWS }),
-        { signal }
-      ),
-    placeholderData: (previous) => previous,
-    enabled: active && host !== ""
-  });
-
-  const totals = hostsQuery.data?.totals;
-  const trend = useMemo(
-    () => (seriesQuery.data?.points ?? []).map((point) => point.total_bytes),
-    [seriesQuery.data?.points]
-  );
-  const hostRows = useMemo<RankedBarRow[]>(
-    () => (hostsQuery.data?.hosts ?? []).map((entry) => ({
-      key: entry.host,
-      label: entry.host,
-      value: sort === "bytes" ? entry.total_bytes : entry.connections_opened,
-      secondary: sort === "bytes"
-        ? `${formatCount(entry.connections_opened)} conn`
-        : formatBytes(entry.total_bytes)
-    })),
-    [hostsQuery.data?.hosts, sort]
-  );
-
-  const connectionColumns = useMemo(() => [
-    connectionColumnHelper.accessor("bucket_start", {
-      header: "Bucket",
-      cell: (info) => (
-        <div
-          className="flex min-w-0 items-baseline justify-between gap-3 whitespace-nowrap"
-          title={`Reported ${info.row.original.window_start} to ${info.row.original.window_end}`}
-        >
-          <span className="font-mono text-xs text-kumo-default">{parseDateParam(info.getValue()) ? format(parseDateParam(info.getValue())!, "yyyy-MM-dd HH:mm:ss.SSS") : "—"}</span>
-        </div>
-      ),
-      meta: { headClassName: "w-56", cellClassName: "w-56" }
-    }),
-    connectionColumnHelper.accessor("user_name", {
-      header: "User",
-      // Single-user Shadowsocks never populates the stream's `user` field. These
-      // rows are stored rather than dropped, so their bytes still count in every
-      // total above — labelling them is what keeps that visible.
-      cell: (info) => (info.getValue()
-        ? <span className="block truncate text-kumo-default" title={info.getValue()}>{info.getValue()}</span>
-        : <span className="text-kumo-subtle">Unattributed</span>),
-      meta: { headClassName: "w-40", cellClassName: "w-40" }
-    }),
-    connectionColumnHelper.accessor("node_name", {
-      header: "Node",
-      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
-      meta: { headClassName: "w-28", cellClassName: "w-28" }
-    }),
-    connectionColumnHelper.accessor("source_ip", {
-      header: "Source IP",
-      cell: (info) => <span className="block truncate font-mono text-sm text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
-      meta: { headClassName: "w-36", cellClassName: "w-36" }
-    }),
-    connectionColumnHelper.accessor("target_port", {
-      header: "Port",
-      cell: (info) => <span className="whitespace-nowrap text-kumo-subtle tabular-nums">{info.getValue() || "n/a"}</span>,
-      meta: { headClassName: "w-20", cellClassName: "w-20" }
-    }),
-    connectionColumnHelper.accessor("inbound", {
-      header: "Inbound",
-      cell: (info) => (
-        <span className="block truncate text-kumo-subtle" title={`${info.getValue() || "n/a"} (${info.row.original.inbound_type || "unknown"})`}>
-          {info.getValue() || "n/a"}
-        </span>
-      ),
-      meta: { headClassName: "w-36", cellClassName: "w-36" }
-    }),
-    connectionColumnHelper.display({
-      id: "route",
-      header: "Route",
-      // Rule, outbound and chain are three of the columns log_events has no
-      // equivalent for at all; the chain already flattens the outbound path.
-      cell: (info) => {
-        const row = info.row.original;
-        const route = row.chain || row.outbound || "n/a";
-        return (
-          <span className="block truncate font-mono text-xs text-kumo-subtle" title={row.rule ? `${row.rule} → ${route}` : route}>
-            {route}
-          </span>
-        );
-      },
-      meta: { headClassName: "w-48", cellClassName: "w-48" }
-    }),
-    connectionColumnHelper.accessor("connections_opened", {
-      header: "Opened",
-      cell: (info) => <span className="whitespace-nowrap text-kumo-default tabular-nums">{formatCount(info.getValue())}</span>,
-      meta: { headClassName: "w-24", cellClassName: "w-24" }
-    }),
-    connectionColumnHelper.display({
-      id: "estimated_bytes",
-      header: "Est. bytes",
-      cell: (info) => {
-        const row = info.row.original;
-        return (
-          <span
-            className="whitespace-nowrap text-kumo-default tabular-nums"
-            title={`${formatBytes(row.uplink_bytes)} up, ${formatBytes(row.downlink_bytes)} down`}
-          >
-            {formatBytes(row.uplink_bytes + row.downlink_bytes)}
-          </span>
-        );
-      },
-      meta: { headClassName: "w-28", cellClassName: "w-28" }
-    }),
-    connectionColumnHelper.accessor("duration_ms_total", {
-      header: "Session time",
-      cell: (info) => <span className="whitespace-nowrap text-kumo-subtle tabular-nums">{formatDurationMs(info.getValue())}</span>,
-      meta: { headClassName: "w-36", cellClassName: "w-36" }
-    })
-  ], []);
-
-  const connectionEvents = useMemo(() => eventsQuery.data?.events ?? [], [eventsQuery.data?.events]);
-  const connectionTable = useReactTable({
-    data: connectionEvents,
-    columns: connectionColumns,
-    getCoreRowModel: getCoreRowModel()
-  });
-
-  const nodeLabel = streamNames.join(", ");
-  // The node count leads the sentence in every active state: this is the one
-  // section of the page that is not fleet-wide, and it has to say so before it
-  // says anything else.
-  const nodeShare = `${streamNames.length} of ${Math.max(fleetNodeCount, streamNames.length)} nodes (${nodeLabel})`;
-  const description = !active
-    ? "sing-box 1.14's per-node connection stream — the only source that can attribute bytes to a destination host."
-    : host
-      ? `Estimated bytes and session detail for this destination, from ${nodeShare}. Every other section on this page covers the whole fleet.`
-      : `Estimated bytes per destination, from ${nodeShare}. Every other section on this page covers the whole fleet.`;
-
-  const trendNotice = !bounded
-    ? "Pick a bounded range for a trend"
-    : seriesQuery.error
-      ? "Trend unavailable"
-      : trend.length < 2
-        ? `Single ${granularity} bucket`
-        : "";
-
-  let body: ReactNode;
-  if (nodesQuery.isLoading) {
-    body = <div className="flex min-h-36 items-center justify-center"><Loader size={20} /></div>;
-  } else if (nodesQuery.error) {
-    body = <PanelError>{errorMessage(nodesQuery.error)}</PanelError>;
-  } else if (streamNames.length === 0) {
-    // Today's normal answer for the whole fleet. It is an explanation, not an
-    // error and not an empty table: nothing is broken and nothing is missing.
-    body = (
-      <div className="p-4">
-        <Banner
-          variant="secondary"
-          icon={<InfoIcon weight="fill" />}
-          title="No node streams connection telemetry"
-          description="This source is opt-in per node and is currently switched off everywhere, so there is nothing to show. The fleet runs sing-box 1.13, which cannot produce it at all. The events above come from the journal reader, which covers every node but carries no byte counts."
-        />
-      </div>
-    );
-  } else if (!nodeStreams) {
-    body = (
-      <div className="p-4">
-        <Banner
-          variant="secondary"
-          icon={<InfoIcon weight="fill" />}
-          title={`${nodeFilter} does not stream connection telemetry`}
-          description={`${streamNames.length === 1 ? "Only " : ""}${nodeLabel} ${streamNames.length === 1 ? "streams" : "stream"} it today, so this source has no rows for the current node filter. The journal-based sections above still cover ${nodeFilter}.`}
-        />
-      </div>
-    );
-  } else {
-    body = (
-      <>
-        {ignoredFilters.length > 0 ? (
-          <p className="border-b border-kumo-line px-4 py-2 text-xs text-kumo-subtle">
-            The {ignoredFilters.join(" and ")} filter{ignoredFilters.length > 1 ? "s" : ""} above{" "}
-            {ignoredFilters.length > 1 ? "do" : "does"} not narrow this section: the stream carries no classified action
-            and has no full-text index.
-          </p>
-        ) : null}
-
-        {/*
-          /hosts owns the totals AND the coverage block, so a failure there
-          takes the summary down with it: a "0 B" estimate beside an error
-          message would read as a real, empty window.
-        */}
-        {hostsQuery.error ? (
-          <PanelError>{errorMessage(hostsQuery.error)}</PanelError>
-        ) : hostsQuery.isLoading ? (
-          <div className="flex min-h-36 items-center justify-center"><Loader size={20} /></div>
-        ) : (
-          <>
-            <ConnectionVolumeSummary
-              totals={totals}
-              coverage={hostsQuery.data?.coverage}
-              trend={trend}
-              granularity={granularity}
-              nodeLabel={nodeLabel}
-              trendNotice={trendNotice}
-            />
-
-            {host ? (
-              eventsQuery.error ? (
-                <PanelError>{errorMessage(eventsQuery.error)}</PanelError>
-              ) : (
-                <>
-                  <TableCard tableId="connection-events" variant="log" widths={[270, 160, 160, 200, 100, 160, { min: 220 }, 100, 120, 160]}>
-                    <Table className="min-w-[1400px] table-fixed">
-                      <Table.Header variant="compact">
-                        {connectionTable.getHeaderGroups().map((headerGroup) => (
-                          <Table.Row key={headerGroup.id}>
-                            {headerGroup.headers.map((header) => (
-                              <Table.Head key={header.id} className={columnClass(header.column, "headClassName")}>
-                                {header.isPlaceholder
-                                  ? null
-                                  : flexRender(header.column.columnDef.header, header.getContext())}
-                              </Table.Head>
-                            ))}
-                          </Table.Row>
-                        ))}
-                      </Table.Header>
-                      <Table.Body>
-                        {eventsQuery.isLoading ? (
-                          <TableLoading colSpan={connectionColumns.length} />
-                        ) : connectionTable.getRowModel().rows.length > 0 ? (
-                          connectionTable.getRowModel().rows.map((row) => (
-                            <Table.Row key={row.id}>
-                              {row.getVisibleCells().map((cell) => (
-                                <Table.Cell key={cell.id} className={columnClass(cell.column, "cellClassName")}>
-                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                </Table.Cell>
-                              ))}
-                            </Table.Row>
-                          ))
-                        ) : (
-                          <TableEmpty
-                            colSpan={connectionColumns.length}
-                            description="Widen the time range, or clear the user filter, to see more rows."
-                          >
-                            No connections to this destination in range
-                          </TableEmpty>
-                        )}
-                      </Table.Body>
-                    </Table>
-                  </TableCard>
-                  <p className="border-t border-kumo-line px-4 py-2 text-xs text-kumo-subtle">
-                    Showing {formatCount(connectionEvents.length)} of{" "}
-                    {formatCount(eventsQuery.data?.total ?? connectionEvents.length)} aggregated rows, newest bucket
-                    first. Each row is one five-minute bucket for one connection shape, not one connection.
-                  </p>
-                </>
-              )
-            ) : (
-              <>
-                <div className="px-2 py-1.5">
-                  <RankedBarList
-                    rows={hostRows}
-                    total={(sort === "bytes" ? totals?.total_bytes : totals?.connections_opened) ?? 0}
-                    valueFormat={sort === "bytes" ? formatBytes : formatCount}
-                    maxRows={CONNECTION_HOST_ROWS}
-                    emptyLabel="No connections recorded in this range"
-                    onSelect={onHostChange}
-                  />
-                </div>
-                {hostsQuery.data ? (
-                  <p className="border-t border-kumo-line px-4 py-2 text-xs text-kumo-subtle">
-                    Top {formatCount(hostsQuery.data.hosts.length)} of {formatCount(hostsQuery.data.distinct_hosts)}{" "}
-                    destinations, ranked by {hostsQuery.data.sort === "bytes" ? "estimated bytes" : "connections opened"}.
-                    {hostsQuery.data.truncated
-                      ? " More destinations fall outside this ranking, so it is partial."
-                      : ""}{" "}
-                    Select one for its connection rows.
-                  </p>
-                ) : null}
-              </>
-            )}
-          </>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <Panel>
-      <PanelHeader>
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-kumo-default">
-            {host ? `Connections to ${host}` : "Destination volume"}
-          </h3>
-          <p className="text-sm text-kumo-subtle">{description}</p>
-        </div>
-        {active ? (
-          <div className="flex items-center gap-1">
-            {host ? (
-              <Button size="sm" variant="secondary" icon={ArrowLeftIcon} onClick={() => onHostChange("")}>
-                All destinations
-              </Button>
-            ) : (
-              <div className="flex items-center gap-1" role="group" aria-label="Destination ranking">
-                <Button
-                  size="sm"
-                  variant={sort === "bytes" ? "primary" : "secondary"}
-                  aria-pressed={sort === "bytes"}
-                  onClick={() => onSortChange("bytes")}
-                >
-                  Bytes
-                </Button>
-                <Button
-                  size="sm"
-                  variant={sort === "connections" ? "primary" : "secondary"}
-                  aria-pressed={sort === "connections"}
-                  onClick={() => onSortChange("connections")}
-                >
-                  Connections
-                </Button>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </PanelHeader>
-      {body}
-    </Panel>
-  );
-}
-
 export function NetworkEventsPage() {
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
   const { request } = useAdminApi();
@@ -1177,11 +639,14 @@ export function NetworkEventsPage() {
   );
   const breakdown = validBreakdown(searchParams.get("breakdown"));
   const service = searchParams.get("service") ?? "";
-  // Connection-stream view state is namespaced away from the journal params:
-  // `service` drills into the journal audit, `chost` into the byte ranking.
-  const connectionHost = searchParams.get("chost") ?? "";
-  const connectionSort = validConnectionSort(searchParams.get("csort"));
-  const view = searchParams.get("view") === "services" || searchParams.get("view") === "connections" ? searchParams.get("view")! : "logs";
+  const view = searchParams.get("view") === "services" ? "services" : "logs";
+  useEffect(() => {
+    if (searchParams.get("view") === "connections") {
+      const next = new URLSearchParams(searchParams);
+      next.delete("view"); next.delete("chost"); next.delete("csort");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const form = useForm<FilterValues>({
     resolver: zodResolver(filterSchema),
@@ -1280,34 +745,6 @@ export function NetworkEventsPage() {
     refreshGeneration
   }), [filters, refreshGeneration, timeRange.end, timeRange.start]);
 
-  // The connection endpoints read neither `search` nor `action`, so their scope
-  // and their cache key drop both rather than refetching on a keystroke that
-  // cannot change the answer.
-  const connectionScope = useMemo<ConnectionScope>(() => ({
-    node: filters.node === "all" ? undefined : filters.node,
-    user: filters.user === "all" ? undefined : filters.user,
-    start: timeRange.start,
-    end: timeRange.end
-  }), [filters.node, filters.user, timeRange.end, timeRange.start]);
-
-  const connectionScopeKey = useMemo(() => ({
-    node: filters.node,
-    user: filters.user,
-    range: filters.range,
-    start: filters.range === "custom" ? timeRange.start : undefined,
-    end: filters.range === "custom" ? timeRange.end : undefined,
-    refreshGeneration
-  }), [filters.node, filters.range, filters.user, refreshGeneration, timeRange.end, timeRange.start]);
-
-  // Named so the connection panel can state which active filters it ignores
-  // instead of quietly returning a differently-scoped answer.
-  const connectionIgnoredFilters = useMemo(() => {
-    const names: string[] = [];
-    if (filters.search.trim()) names.push("search");
-    if (filters.action !== "all") names.push("action");
-    return names;
-  }, [filters.action, filters.search]);
-
   const eventsQuery = useInfiniteQuery({
     ...manualLogQueryOptions,
     queryKey: [...adminKeys.networkEvents({ ...scopeKey, limit: perPage, offset }), "infinite"],
@@ -1369,17 +806,17 @@ export function NetworkEventsPage() {
     }),
     columnHelper.accessor("user_name", {
       header: "User",
-      cell: (info) => <span className="block truncate text-kumo-default" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block truncate text-kumo-default" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-40", cellClassName: "w-40" }
     }),
     columnHelper.accessor("node_name", {
       header: "Node",
-      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-28", cellClassName: "w-28" }
     }),
     columnHelper.accessor("source_ip", {
       header: "Source IP",
-      cell: (info) => <span className="block truncate font-mono text-sm text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block truncate font-mono text-sm text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-36", cellClassName: "w-36" }
     }),
     columnHelper.display({
@@ -1395,12 +832,17 @@ export function NetworkEventsPage() {
     }),
     columnHelper.accessor("auth_name", {
       header: "Auth",
-      cell: (info) => <span className="block max-w-44 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block max-w-44 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-44", cellClassName: "w-44" }
     }),
+    columnHelper.accessor("network", { header: "Network", cell: (info) => info.getValue() || "—" }),
+    columnHelper.accessor("uplink_bytes", { header: "Upload", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
+    columnHelper.accessor("downlink_bytes", { header: "Download", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
+    columnHelper.accessor("duration_ms", { header: "Duration", cell: (info) => info.getValue() == null || !info.row.original.connections_closed ? "—" : formatDurationMs(info.getValue()!) }),
+    columnHelper.accessor("outbound", { header: "Outbound", cell: (info) => info.getValue() || "—" }),
     columnHelper.accessor("raw_message", {
       header: "Message",
-      cell: (info) => <span className="block max-w-80 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "n/a"}</span>,
+      cell: (info) => <span className="block max-w-80 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-80", cellClassName: "w-80" }
     })
   ], []);
@@ -1409,6 +851,7 @@ export function NetworkEventsPage() {
     data: events,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id ?? [row.node_name, row.auth_name, row.window_start, row.source_ip, row.target_host, row.target_port].join("|"),
     manualPagination: true,
     pageCount: Math.max(1, Math.ceil(total / perPage))
   });
@@ -1418,14 +861,14 @@ export function NetworkEventsPage() {
       <AppPageHeader
         compact
         title="Network Events"
-        description="Review parsed sing-box connection events, users, nodes, destinations, and raw log context."
+        description="Review connection records, users, nodes, and destinations."
 
       />
       <main className="w-full grow bg-kumo-canvas">
         <LogWorkspace>
         <div className="flex w-full min-w-0 flex-col gap-4">
           <section className="flex flex-col gap-4">
-            <Tabs variant="underline" value={view} onValueChange={(value) => setViewParam("view", value === "logs" ? "" : value)} tabs={[{ value: "logs", label: "Logs" }, { value: "services", label: "Service activity" }, { value: "connections", label: "Connection stream" }]} />
+            <Tabs variant="underline" value={view} onValueChange={(value) => setViewParam("view", value === "logs" ? "" : value)} tabs={[{ value: "logs", label: "Logs" }, { value: "services", label: "Service activity" }]} />
 
             <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
               <div className="bf-log-toolbar flex flex-wrap items-center gap-2">
@@ -1563,7 +1006,7 @@ export function NetworkEventsPage() {
               onTimeRangeChange={applyChartRange}
             />
 
-            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-connect" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 180, 220, 80, 160, { min: 320 }]}>
+            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-unified" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 180, 220, 80, 160, 100, 120, 120, 120, 160, { min: 320 }]}>
               <Table className="table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (
@@ -1625,35 +1068,7 @@ export function NetworkEventsPage() {
             </> : null}
           </section>
 
-          {/*
-            A separate section, below a rule, because it is a separate producer.
-            Everything above counts connections across every node; this counts
-            estimated bytes on the nodes that opted into the sing-box 1.14
-            stream. Merging them into one table or one chart would require
-            faking half of every row.
-          */}
-          {view === "connections" ? <section className="flex flex-col gap-4">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">Connection stream</h2>
-              <p className="text-sm text-kumo-subtle">
-                A second telemetry source, opt-in per node. It is the only place on this page where bytes can be
-                attributed to a destination host — and it covers opted-in nodes alone, never the whole fleet.
-              </p>
-            </div>
 
-            <ConnectionTelemetryPanel
-              scope={connectionScope}
-              scopeKey={connectionScopeKey}
-              bucket={bucket}
-              fleetNodeCount={nodesQuery.data?.length ?? 0}
-              nodeFilter={filters.node === "all" ? "" : filters.node}
-              ignoredFilters={connectionIgnoredFilters}
-              host={connectionHost}
-              onHostChange={(value) => setViewParam("chost", value)}
-              sort={connectionSort}
-              onSortChange={(value) => setViewParam("csort", value === "bytes" ? "" : value)}
-            />
-          </section> : null}
         </div>
       </LogWorkspace>
       </main>

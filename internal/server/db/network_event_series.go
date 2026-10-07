@@ -155,7 +155,7 @@ func (db *DB) networkEventTotalSeries(
 	// created_at on every merge, so it is last-touched rather than first-seen.
 	query := `
 SELECT ` + bucketExpr("e.window_start", bucket, offsetMinutes) + ` AS bucket_key, SUM(e.count) AS connections
-FROM log_events e` + searchJoin + `
+FROM network_event_records e` + searchJoin + `
 WHERE ` + strings.Join(where, " AND ") + `
 GROUP BY bucket_key`
 	rows, err := db.sql.QueryContext(ctx, query, args...)
@@ -205,7 +205,7 @@ func (db *DB) networkEventGroupedSeries(
 	searchJoin, where, args := buildLogEventPredicates(scope)
 	whereSQL := strings.Join(where, " AND ")
 	from := `
-FROM log_events e` + searchJoin + groupJoin
+FROM network_event_records e` + searchJoin + groupJoin
 
 	// Rank the series first so the bucket scan is bounded by the keys that will
 	// actually be rendered, rather than by however many users a scope covers.
@@ -298,7 +298,7 @@ func networkEventSeriesKeyExpr(group NetworkEventSeriesGroup) (keyExpr string, j
 		return "n.name", "\nJOIN nodes n ON n.id = e.node_id", nil
 	case NetworkEventSeriesGroupUser:
 		// No deleted_at filter, matching the paged event table.
-		return "u.name", "\nJOIN proxy_users u ON u.id = e.proxy_user_id", nil
+		return "COALESCE(u.name, 'Unattributed')", "\nLEFT JOIN proxy_users u ON u.id = e.proxy_user_id", nil
 	default:
 		return "", "", fmt.Errorf("unsupported network event series group %q", group)
 	}
@@ -308,7 +308,7 @@ func (db *DB) networkEventActionCounts(ctx context.Context, scope logEventScope)
 	searchJoin, where, args := buildLogEventPredicates(scope)
 	query := `
 SELECT e.action, SUM(e.count) AS connections
-FROM log_events e` + searchJoin + `
+FROM network_event_records e` + searchJoin + `
 WHERE ` + strings.Join(where, " AND ") + `
 GROUP BY e.action
 ORDER BY connections DESC, e.action ASC`

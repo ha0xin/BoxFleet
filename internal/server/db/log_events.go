@@ -43,26 +43,43 @@ type LogEventPage struct {
 }
 
 type LogEventDetail struct {
-	ID           string
-	NodeID       string
-	NodeName     string
-	ProxyUserID  sql.NullString
-	UserName     string
-	AuthName     string
-	SourceIp     string
-	TargetHost   string
-	TargetPort   int64
-	Action       string
-	RawMessage   string
-	Count        int64
-	AggregateKey string
-	WindowStart  string
-	WindowEnd    string
-	CreatedAt    string
+	ID                string
+	NodeID            string
+	NodeName          string
+	ProxyUserID       sql.NullString
+	UserName          string
+	AuthName          string
+	SourceIp          string
+	TargetHost        string
+	TargetPort        int64
+	Action            string
+	RawMessage        string
+	Count             int64
+	AggregateKey      string
+	WindowStart       string
+	WindowEnd         string
+	CreatedAt         string
+	Source            string
+	ConnectionID      string
+	StartedAt         *string
+	Domain            string
+	Network           string
+	IPVersion         *int64
+	Protocol          string
+	Inbound           string
+	InboundType       string
+	Rule              string
+	Outbound          string
+	OutboundType      string
+	Chain             string
+	UplinkBytes       *int64
+	DownlinkBytes     *int64
+	DurationMs        *int64
+	ConnectionsClosed *int64
 }
 
 // logEventScope is LogEventFilter with node and user names already resolved to
-// IDs. Every read over log_events — the paged table, the bucketed series, the
+// IDs. Every unified read — the paged table, the bucketed series, the
 // service breakdown — filters through this one shape so they cannot drift; a
 // chart that filters differently from the table beneath it reads as a data bug.
 type logEventScope struct {
@@ -293,7 +310,7 @@ func (db *DB) resolveLogEventScope(ctx context.Context, filter LogEventFilter) (
 // The returned args are ordered to match the emitted clauses, so a caller
 // appends its own trailing arguments after these.
 func buildLogEventPredicates(scope logEventScope) (searchJoin string, where []string, args []any) {
-	where = []string{"e.proxy_user_id IS NOT NULL"}
+	where = []string{"1 = 1"}
 	args = make([]any, 0, 4)
 	if scope.NodeID != "" {
 		where = append(where, "e.node_id = ?")
@@ -308,19 +325,28 @@ func buildLogEventPredicates(scope logEventScope) (searchJoin string, where []st
 		args = append(args, scope.Action)
 	}
 	if scope.Search != "" {
-		where = append(where, "log_events_search MATCH ?")
-		args = append(args, networkEventSearchQuery(scope.Search))
-		searchJoin = `
-JOIN log_event_search_documents search_document ON search_document.event_id = e.id
-JOIN log_events_search ON log_events_search.docid = search_document.id`
+		tokens := strings.FieldsFunc(strings.TrimSpace(scope.Search), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+		stream := []string{}
+		searchArgs := []any{networkEventSearchQuery(scope.Search)}
+		for _, token := range tokens {
+			stream = append(stream, `(instr(lower(e.auth_name || ' ' || e.source_ip || ' ' || e.target_host || ' ' || e.target_port || ' ' || e.action || ' ' || COALESCE(e.network,'') || ' ' || COALESCE(e.protocol,'') || ' ' || COALESCE(e.domain,'') || ' ' || COALESCE(e.inbound,'') || ' ' || COALESCE(e.rule,'') || ' ' || COALESCE(e.outbound,'') || ' ' || COALESCE(e.chain,'')), lower(?)) > 0 OR e.node_id IN (SELECT id FROM nodes WHERE instr(lower(name), lower(?)) > 0) OR e.proxy_user_id IN (SELECT id FROM proxy_users WHERE instr(lower(name), lower(?)) > 0))`)
+			searchArgs = append(searchArgs, token, token, token)
+		}
+		if len(stream) == 0 {
+			stream = append(stream, "0")
+		}
+		where = append(where, `(e.id IN (SELECT search_document.event_id FROM log_event_search_documents search_document JOIN log_events_search ON log_events_search.docid = search_document.id WHERE log_events_search MATCH ?) OR (e.source = 'stream' AND `+strings.Join(stream, " AND ")+`))`)
+		args = append(args, searchArgs...)
 	}
 	if scope.StartTime != "" {
-		where = append(where, "e.window_end >= ?")
-		args = append(args, scope.StartTime)
+		// Keep an indexed whole-second bound, then compare instants so journal
+		// RFC3339Nano timestamps and stream millisecond timestamps agree.
+		where = append(where, "e.window_end >= strftime('%Y-%m-%dT%H:%M:%S', ?) AND julianday(e.window_end) >= julianday(?)")
+		args = append(args, scope.StartTime, scope.StartTime)
 	}
 	if scope.EndTime != "" {
-		where = append(where, "e.window_start <= ?")
-		args = append(args, scope.EndTime)
+		where = append(where, "e.window_start < strftime('%Y-%m-%dT%H:%M:%S', ?, '+1 second') AND julianday(e.window_start) <= julianday(?)")
+		args = append(args, scope.EndTime, scope.EndTime)
 	}
 	return searchJoin, where, args
 }
@@ -350,27 +376,7 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 	if err != nil {
 		return LogEventPage{}, err
 	}
-	events := make([]LogEventDetail, 0, len(rows))
-	for _, row := range rows {
-		events = append(events, LogEventDetail{
-			ID:           row.ID,
-			NodeID:       row.NodeID,
-			NodeName:     row.NodeName,
-			ProxyUserID:  row.ProxyUserID,
-			UserName:     row.UserName,
-			AuthName:     row.AuthName,
-			SourceIp:     row.SourceIp,
-			TargetHost:   row.TargetHost,
-			TargetPort:   row.TargetPort,
-			Action:       row.Action,
-			RawMessage:   row.RawMessage,
-			Count:        row.Count,
-			AggregateKey: row.AggregateKey,
-			WindowStart:  row.WindowStart,
-			WindowEnd:    row.WindowEnd,
-			CreatedAt:    row.CreatedAt,
-		})
-	}
+	events := rows
 	return LogEventPage{
 		Events: events,
 		Total:  total,
@@ -379,12 +385,12 @@ func (db *DB) ListLogEventsPage(ctx context.Context, filter LogEventFilter) (Log
 	}, nil
 }
 
-func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams) (int64, []store.ListLogEventsPageRow, error) {
+func (db *DB) queryLogEventsPage(ctx context.Context, params logEventsPageParams) (int64, []LogEventDetail, error) {
 	searchJoin, where, args := buildLogEventPredicates(params.logEventScope)
 	whereSQL := strings.Join(where, " AND ")
 	countQuery := `
 SELECT COUNT(*)
-FROM log_events e` + searchJoin + `
+FROM network_event_records e` + searchJoin + `
 WHERE ` + whereSQL
 	var total int64
 	if err := db.sql.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
@@ -409,11 +415,12 @@ SELECT
   e.window_end,
   e.created_at,
   n.name AS node_name,
-  u.name AS user_name
-FROM log_events e
+  COALESCE(u.name, '') AS user_name,
+ e.source, COALESCE(e.connection_id,''), e.started_at, COALESCE(e.domain,''), COALESCE(e.network,''), e.ip_version, COALESCE(e.protocol,''), COALESCE(e.inbound,''), COALESCE(e.inbound_type,''), COALESCE(e.rule,''), COALESCE(e.outbound,''), COALESCE(e.outbound_type,''), COALESCE(e.chain,''), e.uplink_bytes, e.downlink_bytes, e.duration_ms_total, e.connections_closed
+FROM network_event_records e
 ` + searchJoin + `
 JOIN nodes n ON n.id = e.node_id
-JOIN proxy_users u ON u.id = e.proxy_user_id
+LEFT JOIN proxy_users u ON u.id = e.proxy_user_id
 WHERE ` + whereSQL + `
 -- Event time is both the operator-facing chronology and the leading range
 -- column of the filter indexes. Ordering by ingestion time here forced SQLite
@@ -426,9 +433,9 @@ OFFSET ?`
 		return 0, nil, err
 	}
 	defer sqlRows.Close()
-	rows := make([]store.ListLogEventsPageRow, 0)
+	rows := make([]LogEventDetail, 0)
 	for sqlRows.Next() {
-		var row store.ListLogEventsPageRow
+		var row LogEventDetail
 		if err := sqlRows.Scan(
 			&row.ID,
 			&row.NodeID,
@@ -446,6 +453,7 @@ OFFSET ?`
 			&row.CreatedAt,
 			&row.NodeName,
 			&row.UserName,
+			&row.Source, &row.ConnectionID, &row.StartedAt, &row.Domain, &row.Network, &row.IPVersion, &row.Protocol, &row.Inbound, &row.InboundType, &row.Rule, &row.Outbound, &row.OutboundType, &row.Chain, &row.UplinkBytes, &row.DownlinkBytes, &row.DurationMs, &row.ConnectionsClosed,
 		); err != nil {
 			return 0, nil, err
 		}

@@ -84,7 +84,7 @@ func TestConnectionTelemetryOptionsRejectsUnsafeOrAbsentService(t *testing.T) {
 
 // --- aggregation ------------------------------------------------------------
 
-func TestConnectionCollectorAggregatesConnectionLifecycle(t *testing.T) {
+func TestConnectionCollectorRecordsConnectionLifecycle(t *testing.T) {
 	t.Parallel()
 	collector := newTestCollector()
 	opened := collectorBase
@@ -106,7 +106,7 @@ func TestConnectionCollectorAggregatesConnectionLifecycle(t *testing.T) {
 		t.Fatalf("len(buckets) = %d: %+v", len(buckets), buckets)
 	}
 	bucket := buckets[0]
-	if bucket.BucketStart != "2026-07-26T12:00:00.000Z" {
+	if bucket.BucketStart != "2026-07-26T12:03:30.000Z" {
 		t.Fatalf("BucketStart = %q", bucket.BucketStart)
 	}
 	if bucket.AuthName != "alice" || bucket.TargetHost != "example.com" || bucket.TargetPort != 443 {
@@ -450,10 +450,10 @@ func TestConnectionCollectorEnforcesTheLiveConnectionCapAndCountsIt(t *testing.T
 	if !ok {
 		t.Fatal("Drain reported nothing")
 	}
-	if coverage.DroppedBuckets != int64(overflow) {
+	if coverage.DroppedBuckets != int64(overflow+maxTrackedConnections-maxPendingConnectionBuckets) {
 		t.Fatalf("DroppedBuckets = %d, want %d", coverage.DroppedBuckets, overflow)
 	}
-	if len(buckets) != 1 || buckets[0].ConnectionsOpened != int64(maxTrackedConnections) {
+	if len(buckets) != maxPendingConnectionBuckets {
 		t.Fatalf("buckets = %+v, want only the tracked opens counted", buckets)
 	}
 
@@ -1003,4 +1003,37 @@ type fakeSingBoxDaemon struct {
 
 func (f fakeSingBoxDaemon) SubscribeConnections(request *daemonpb.SubscribeConnectionsRequest, stream grpc.ServerStreamingServer[daemonpb.ConnectionEvents]) error {
 	return f.handle(request, stream)
+}
+
+func TestConnectionCollectorKeepsSessionsAcrossDrains(t *testing.T) {
+	c := newTestCollector()
+	c.apply(resetBatch(newEvent("one", liveConnection("one", "alice", collectorBase, 10, 20)), newEvent("two", liveConnection("two", "alice", collectorBase, 10, 20))), collectorBase)
+	first, _, _, ok := c.Drain(collectorBase.Add(time.Second))
+	if !ok || len(first) != 2 || first[0].DimensionKey() == first[1].DimensionKey() {
+		t.Fatalf("distinct sessions collapsed: %+v", first)
+	}
+	conn := liveConnection("one", "alice", collectorBase, 100, 200)
+	closed := collectorBase.Add(10 * time.Minute)
+	conn.ClosedAt = closed.UnixMilli()
+	c.apply(batch(closedEvent("one", closed, conn)), closed)
+	next, coverage, _, ok := c.Drain(closed.Add(time.Second))
+	if !ok || len(next) != 1 {
+		t.Fatalf("closed=%+v", next)
+	}
+	var initial model.ConnectionBucket
+	for _, b := range first {
+		if b.ConnectionID == "one" {
+			initial = b
+		}
+	}
+	if next[0].DimensionKey() != initial.DimensionKey() || next[0].UplinkBytes != 100 || next[0].DownlinkBytes != 200 || next[0].ConnectionsClosed != 1 {
+		t.Fatalf("session fragmented across time buckets: %+v", next[0])
+	}
+	if coverage.BytesObserved != 270 {
+		t.Fatalf("coverage must retain interval deltas: %+v", coverage)
+	}
+	initial.Merge(next[0])
+	if initial.UplinkBytes != 100 || initial.DownlinkBytes != 200 || initial.ConnectionsOpened != 1 {
+		t.Fatalf("merge inflated cumulative totals: %+v", initial)
+	}
 }

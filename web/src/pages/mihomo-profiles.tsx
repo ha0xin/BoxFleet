@@ -19,6 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
 
+import { DEFAULT_PER_PAGE } from "@/admin/use-url-filters";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { MihomoCodeEditor } from "@/components/mihomo-code-editor";
 import { useAdminApi, type AdminRequest } from "@/admin/api";
@@ -151,7 +152,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
   onSubscription: (profile: MihomoProfile) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConfigurationFilter>("all");
@@ -230,7 +231,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
   onOpen: (template: MihomoRewriteTemplate) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<TemplateFilter>("all");

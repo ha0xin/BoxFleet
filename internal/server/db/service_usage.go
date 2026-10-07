@@ -110,7 +110,7 @@ func (db *DB) NetworkEventHostCounts(ctx context.Context, filter LogEventFilter,
 	searchJoin, where, args := buildLogEventPredicates(scope)
 	query := `
 SELECT lower(e.target_host) AS host, SUM(e.count) AS connections, MAX(e.window_end) AS last_seen
-FROM log_events e` + searchJoin + `
+FROM network_event_records e` + searchJoin + `
 WHERE ` + strings.Join(where, " AND ") + `
 GROUP BY host
 ORDER BY connections DESC, host ASC

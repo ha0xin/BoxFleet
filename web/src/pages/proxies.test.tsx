@@ -55,7 +55,7 @@ function proxy(overrides: Partial<AdminProxy> = {}): AdminProxy {
 }
 
 function listing(body: Partial<AdminProxiesResponse>): AdminProxiesResponse {
-  return { proxies: [], total: 0, limit: 10, offset: 0, ...body };
+  return { proxies: [], total: 0, limit: 50, offset: 0, ...body };
 }
 
 function jsonResponse(body: unknown) {
@@ -204,14 +204,14 @@ describe("ProxiesPage", () => {
   });
 
   it("clamps a page that outlives its rows instead of showing an empty table", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(listing({ proxies: [proxy()], total: 12 })));
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(listing({ proxies: [proxy()], total: 62 })));
     vi.stubGlobal("fetch", fetchMock);
 
     const view = renderPage("?page=9");
 
-    // 12 rows at 10 per page is 2 pages, so page 9 collapses to page 2.
+    // 62 rows at 50 per page is 2 pages, so page 9 collapses to page 2.
     await waitFor(() => expect(new URLSearchParams(view.search()).get("page")).toBe("2"));
-    await waitFor(() => expect(lastRequest(fetchMock).get("offset")).toBe("10"));
+    await waitFor(() => expect(lastRequest(fetchMock).get("offset")).toBe("50"));
   });
 
   it("renders a failed query as an error, never as an empty inventory", async () => {

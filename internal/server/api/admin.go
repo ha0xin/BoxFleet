@@ -217,18 +217,36 @@ type adminUserTraffic struct {
 }
 
 type adminNetworkEvent struct {
-	NodeName    string `json:"node_name"`
-	UserName    string `json:"user_name"`
-	AuthName    string `json:"auth_name"`
-	SourceIP    string `json:"source_ip"`
-	TargetHost  string `json:"target_host"`
-	TargetPort  int64  `json:"target_port"`
-	Action      string `json:"action"`
-	RawMessage  string `json:"raw_message"`
-	Count       int64  `json:"count"`
-	WindowStart string `json:"window_start"`
-	WindowEnd   string `json:"window_end"`
-	CreatedAt   string `json:"created_at"`
+	ID                string  `json:"id"`
+	Source            string  `json:"source"`
+	ConnectionID      string  `json:"connection_id"`
+	StartedAt         *string `json:"started_at"`
+	Domain            string  `json:"domain"`
+	Network           string  `json:"network"`
+	IPVersion         *int64  `json:"ip_version"`
+	Protocol          string  `json:"protocol"`
+	Inbound           string  `json:"inbound"`
+	InboundType       string  `json:"inbound_type"`
+	Rule              string  `json:"rule"`
+	Outbound          string  `json:"outbound"`
+	OutboundType      string  `json:"outbound_type"`
+	Chain             string  `json:"chain"`
+	UplinkBytes       *int64  `json:"uplink_bytes"`
+	DownlinkBytes     *int64  `json:"downlink_bytes"`
+	DurationMs        *int64  `json:"duration_ms"`
+	ConnectionsClosed *int64  `json:"connections_closed"`
+	NodeName          string  `json:"node_name"`
+	UserName          string  `json:"user_name"`
+	AuthName          string  `json:"auth_name"`
+	SourceIP          string  `json:"source_ip"`
+	TargetHost        string  `json:"target_host"`
+	TargetPort        int64   `json:"target_port"`
+	Action            string  `json:"action"`
+	RawMessage        string  `json:"raw_message"`
+	Count             int64   `json:"count"`
+	WindowStart       string  `json:"window_start"`
+	WindowEnd         string  `json:"window_end"`
+	CreatedAt         string  `json:"created_at"`
 }
 
 type adminNetworkEventsResponse struct {
@@ -1861,6 +1879,8 @@ func adminNetworkEvents(events []db.LogEvent) []adminNetworkEvent {
 	out := make([]adminNetworkEvent, 0, len(events))
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
+			ID:          event.ID,
+			Source:      "journal",
 			AuthName:    event.AuthName,
 			SourceIP:    event.SourceIp,
 			TargetHost:  event.TargetHost,
@@ -1880,18 +1900,36 @@ func adminNetworkEventDetails(events []db.LogEventDetail) []adminNetworkEvent {
 	out := make([]adminNetworkEvent, 0, len(events))
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
-			NodeName:    event.NodeName,
-			UserName:    event.UserName,
-			AuthName:    event.AuthName,
-			SourceIP:    event.SourceIp,
-			TargetHost:  event.TargetHost,
-			TargetPort:  event.TargetPort,
-			Action:      event.Action,
-			RawMessage:  event.RawMessage,
-			Count:       event.Count,
-			WindowStart: event.WindowStart,
-			WindowEnd:   event.WindowEnd,
-			CreatedAt:   event.CreatedAt,
+			ID:                event.ID,
+			Source:            event.Source,
+			ConnectionID:      event.ConnectionID,
+			StartedAt:         event.StartedAt,
+			Domain:            event.Domain,
+			Network:           event.Network,
+			IPVersion:         event.IPVersion,
+			Protocol:          event.Protocol,
+			Inbound:           event.Inbound,
+			InboundType:       event.InboundType,
+			Rule:              event.Rule,
+			Outbound:          event.Outbound,
+			OutboundType:      event.OutboundType,
+			Chain:             event.Chain,
+			UplinkBytes:       event.UplinkBytes,
+			DownlinkBytes:     event.DownlinkBytes,
+			DurationMs:        event.DurationMs,
+			ConnectionsClosed: event.ConnectionsClosed,
+			NodeName:          event.NodeName,
+			UserName:          event.UserName,
+			AuthName:          event.AuthName,
+			SourceIP:          event.SourceIp,
+			TargetHost:        event.TargetHost,
+			TargetPort:        event.TargetPort,
+			Action:            event.Action,
+			RawMessage:        event.RawMessage,
+			Count:             event.Count,
+			WindowStart:       event.WindowStart,
+			WindowEnd:         event.WindowEnd,
+			CreatedAt:         event.CreatedAt,
 		})
 	}
 	return out

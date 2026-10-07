@@ -88,8 +88,7 @@ const defaultFilters: UserFilterValues = { search: "", status: "all", sort: "nam
 // what lets it be spread straight into a query key.
 const urlFilters: UseUrlFiltersOptions<UserFilterValues> = {
   schema: filterSchema,
-  defaults: defaultFilters,
-  perPage: 10
+  defaults: defaultFilters
 };
 
 /**

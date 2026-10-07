@@ -202,7 +202,7 @@ function renderPage(initialEntry: string) {
 }
 
 function nodesPage(overrides: Partial<AdminNodesResponse> = {}): AdminNodesResponse {
-  return { nodes: [], total: 0, limit: 10, offset: 0, ...overrides };
+  return { nodes: [], total: 0, limit: 50, offset: 0, ...overrides };
 }
 
 describe("NodesPage", () => {
@@ -250,13 +250,13 @@ describe("NodesPage", () => {
   // The clamp waits for a response: a fresh deep link must not be rewritten to
   // page 1 by the total of a request that has not landed yet.
   it("clamps a page that outlives its rows and refetches from the last page", async () => {
-    const urls = stubFetch(() => json(nodesPage({ total: 5, limit: 10, offset: 0 })));
+    const urls = stubFetch(() => json(nodesPage({ total: 5, limit: 50, offset: 0 })));
     renderPage("/nodes?page=3");
 
     await waitFor(() => {
       expect(urls.length).toBe(2);
     });
-    expect(new URL(urls[0], "http://localhost").searchParams.get("offset")).toBe("20");
+    expect(new URL(urls[0], "http://localhost").searchParams.get("offset")).toBe("100");
     expect(new URL(urls[1], "http://localhost").searchParams.get("offset")).toBe("0");
   });
 });

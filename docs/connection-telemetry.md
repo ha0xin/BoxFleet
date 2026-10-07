@@ -20,6 +20,35 @@ The decision to build it ahead of the switch is
 beta.2 exception and its required preflight are recorded in
 [ADR 0001](adr/0001-network-event-telemetry-source.md).
 
+## Unified Logs
+
+Network Events now displays journal and connection-stream records in **Logs**.
+The former `?view=connections` URL redirects to Logs. The table, activity chart,
+search, user/node filters and Service activity use the same server-side source selection.
+Missing journal byte, protocol and duration fields display `—`; their API numeric
+values are `null`. Existing aggregate history retains its Count and cannot be
+reconstructed into individual connections.
+
+Updated agents send one record per session, keyed by authenticated node ID,
+sing-box connection ID and creation time. NEW / UPDATE / CLOSED update that row;
+lifetime byte totals merge by maximum, including after agent restart. Reports
+remain bounded and retryable. Coverage retains interval byte deltas; billing
+continues to use V2Ray counters. Old agents' five-minute reports are accepted
+until they are upgraded; those existing aggregates remain aggregates.
+
+A node switches its primary Logs source on its first accepted stream report,
+not merely when its version changes or the opt-in configuration is written.
+The server stores source intervals: journal history preceding the switch remains
+visible, and journal records in a streaming interval are excluded from all unified
+reads. Disabling/removing the opt-in ends the interval and resumes journal
+visibility. A temporary stream failure does not silently fall back and double
+count journal rows. Raw source tables are preserved during migration.
+
+Deploy the server migration first, then upgrade agents to get individual records.
+This change does not opt nodes in automatically, delete old logs, or change
+user traffic counters. The separate connection aggregate APIs remain available
+for diagnostics; destination-volume analytics are outside this UI change.
+
 ## What it adds
 
 `log_events` cannot answer bytes-per-destination — it has no byte columns, and
@@ -218,10 +247,9 @@ and correct. `dropped_buckets` growing steadily is a sizing problem, not a bug.
 
 ## Reading the data
 
-Admin endpoints, all behind `adminAuthMiddleware`. They sit beside the
-`/network-events` family and are never merged with it: which producer a row came
-from is a fact the UI has to be able to state, and only one of the two covers the
-whole fleet.
+Admin endpoints are behind `adminAuthMiddleware`. `/network-events` is the
+unified Logs contract, including `source`, nullable rich fields, and stable IDs.
+The following connection-only endpoints remain available for diagnostics.
 
 | Route | Purpose |
 | --- | --- |
@@ -244,16 +272,9 @@ so a partial ranking cannot read as a complete one.
 long-lived session contributes bytes to several consecutive buckets, so summing
 "connections" must use `opened`.
 
-The Network Events page reads these through a **Connection stream** panel. It
-queries `/connection-events/nodes` first and renders nothing but a short
-explanation when no node is opted in — which is every node today — so the panel
-never shows as an empty table that reads like breakage. When a node is opted in
-the panel makes clear it covers only those nodes, not the fleet, because the
-journal-based table above it covers everything.
-
-Byte figures in that panel always carry the attribution ratio from the coverage
-counters. Do not present them without it: they under-count by an amount that
-varies with load and cannot be bounded.
+Logs reads the unified `/network-events` API. Byte totals in connection-only
+aggregate responses remain estimates and carry coverage counters. They must
+not replace per-user billing counters.
 
 ## Rolling back
 
@@ -291,7 +312,8 @@ row at a finer dimension tuple and accumulates faster for the same traffic.
 
 Applied inline on ingest, in the same transaction as the write, exactly as
 `RecordLogEvents` does — there is no scheduler on the server.
-`connection_events` prunes on `bucket_start`, `connection_reports` on
+Legacy `connection_events` rows prune on `bucket_start`; session rows prune on
+`window_end` so a long-lived active session is retained. `connection_reports` prune on
 `window_end`.
 
 The setting is not in `AdminSettings` and not on the settings PATCH handler yet,
@@ -305,7 +327,7 @@ Bounded by construction, because node memory is a hard constraint:
 | Bound | Value | On hitting it |
 | --- | --- | --- |
 | Live connection identities | 4096 (~1.6 MB) | Connection refused, `dropped_buckets`++. Recovered in full from its close event |
-| Pending aggregation buckets | 2000 | Bucket dropped, `dropped_buckets`++, its bytes excluded from `bytes_observed` so the denominator stays honest |
+| Pending session snapshots | 2000 | Snapshot dropped, `dropped_buckets`++, its bytes excluded from `bytes_observed` so the denominator stays honest |
 | Accounted close ids | 2048 | Oldest evicted (FIFO). Larger than sing-box's 1000-entry replay ring, so a replay within one agent run can never double count |
 
 sing-box's own tracker spends roughly 1 KB per live connection, so a node at the

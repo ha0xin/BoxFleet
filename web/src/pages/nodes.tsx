@@ -62,7 +62,7 @@ const defaultFilters: NodeFilterValues = { search: "", status: "all", sort: "nam
 
 // Module scope on purpose: `useUrlFilters` reads these every render, and inlining
 // them would re-parse the URL each time and break `filters`' referential stability.
-const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage: 10 };
+const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters };
 
 /**
  * Column widths, in table order. The px values are each column's measured

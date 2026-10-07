@@ -165,7 +165,7 @@ describe("UsersPage", () => {
   it("renders the page the server returned, with its traffic and derived status", async () => {
     const urls = stubUsersFetch(() => jsonResponse(page([
       userRow({ traffic: volume(1024, 3072), effective_status: "quota_exceeded", global_quota_bytes: 8192 })
-    ], 42)));
+    ], 142)));
     renderUsers();
 
     await waitFor(() => expect(screen.getByText("alice")).toBeTruthy());
@@ -174,8 +174,8 @@ describe("UsersPage", () => {
     expect(screen.getByText("4.0 KB")).toBeTruthy();
     expect(screen.getByText("raw 4.0 KB")).toBeTruthy();
     // The count is the server's total, not the length of this page.
-    expect(screen.getByText("of 42 items", { exact: false })).toBeTruthy();
-    expect(urls[0]).toContain("/api/admin/users?limit=10");
+    expect(screen.getByText("of 142 items", { exact: false })).toBeTruthy();
+    expect(urls[0]).toContain("/api/admin/users?limit=50");
   });
 
   it("renders a failed query as an error, never as an empty inventory", async () => {
@@ -187,11 +187,11 @@ describe("UsersPage", () => {
   });
 
   it("honours a deep-linked page, filter and sort on first render", async () => {
-    const urls = stubUsersFetch(() => jsonResponse(page([userRow()], 40, 10, 20)));
+    const urls = stubUsersFetch(() => jsonResponse(page([userRow()], 140, 50, 100)));
     renderUsers("?page=3&status=disabled&sort=traffic&direction=desc");
 
     await waitFor(() => expect(urls.length).toBeGreaterThan(0));
-    expect(urls[0]).toContain("offset=20");
+    expect(urls[0]).toContain("offset=100");
     expect(urls[0]).toContain("status=disabled");
     expect(urls[0]).toContain("sort=traffic&direction=desc");
   });
@@ -209,20 +209,20 @@ describe("UsersPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Search users")).toBeTruthy());
     expect(router.state.location.search).toBe("?page=3");
 
-    release(jsonResponse(page([userRow()], 40, 10, 20)));
+    release(jsonResponse(page([userRow()], 140, 50, 100)));
     await waitFor(() => expect(screen.getByText("alice")).toBeTruthy());
     expect(router.state.location.search).toBe("?page=3");
   });
 
   it("clamps a page that outlived its rows once the total is known", async () => {
-    stubUsersFetch(() => jsonResponse(page([], 5, 10, 80)));
+    stubUsersFetch(() => jsonResponse(page([], 5, 50, 400)));
     const router = renderUsers("?page=9");
 
     await waitFor(() => expect(router.state.location.search).toBe(""));
   });
 
   it("commits a search to the URL and resets to the first page", async () => {
-    stubUsersFetch(() => jsonResponse(page([userRow()], 40, 10, 20)));
+    stubUsersFetch(() => jsonResponse(page([userRow()], 140, 50, 100)));
     const router = renderUsers("?page=3");
     await waitFor(() => expect(screen.getByText("alice")).toBeTruthy());
 

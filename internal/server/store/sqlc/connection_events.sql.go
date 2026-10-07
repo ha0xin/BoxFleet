@@ -10,6 +10,23 @@ import (
 	"database/sql"
 )
 
+const activateNetworkStreamSource = `-- name: ActivateNetworkStreamSource :exec
+INSERT INTO network_event_source_intervals(node_id, started_at)
+SELECT ?1, ?2
+WHERE EXISTS(SELECT 1 FROM node_connection_telemetry WHERE node_id=?1 AND enabled=1)
+AND NOT EXISTS(SELECT 1 FROM network_event_source_intervals WHERE node_id=?1 AND ended_at IS NULL)
+`
+
+type ActivateNetworkStreamSourceParams struct {
+	NodeID    string `json:"node_id"`
+	StartedAt string `json:"started_at"`
+}
+
+func (q *Queries) ActivateNetworkStreamSource(ctx context.Context, arg ActivateNetworkStreamSourceParams) error {
+	_, err := q.db.ExecContext(ctx, activateNetworkStreamSource, arg.NodeID, arg.StartedAt)
+	return err
+}
+
 const countConnectionEvents = `-- name: CountConnectionEvents :one
 SELECT COUNT(*)
 FROM connection_events e
@@ -115,7 +132,8 @@ func (q *Queries) CreateConnectionReport(ctx context.Context, arg CreateConnecti
 
 const deleteConnectionEventsBefore = `-- name: DeleteConnectionEventsBefore :exec
 DELETE FROM connection_events
-WHERE bucket_start < ?1
+WHERE (connection_id = '' AND bucket_start < ?1)
+   OR (connection_id <> '' AND window_end < ?1)
 `
 
 // Retention is piggy-backed on ingest exactly like DeleteLogEventsBefore;
@@ -631,6 +649,7 @@ INSERT INTO connection_events (
   outbound,
   outbound_type,
   chain,
+  connection_id,
   connections_opened,
   connections_closed,
   uplink_bytes,
@@ -666,13 +685,14 @@ INSERT INTO connection_events (
   ?23,
   ?24,
   ?25,
-  ?26
+  ?26,
+  ?27
 ) ON CONFLICT(aggregate_key) DO UPDATE SET
-  connections_opened = connection_events.connections_opened + excluded.connections_opened,
-  connections_closed = connection_events.connections_closed + excluded.connections_closed,
-  uplink_bytes = connection_events.uplink_bytes + excluded.uplink_bytes,
-  downlink_bytes = connection_events.downlink_bytes + excluded.downlink_bytes,
-  duration_ms_total = connection_events.duration_ms_total + excluded.duration_ms_total,
+  connections_opened = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.connections_opened, excluded.connections_opened) ELSE connection_events.connections_opened + excluded.connections_opened END,
+  connections_closed = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.connections_closed, excluded.connections_closed) ELSE connection_events.connections_closed + excluded.connections_closed END,
+  uplink_bytes = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.uplink_bytes, excluded.uplink_bytes) ELSE connection_events.uplink_bytes + excluded.uplink_bytes END,
+  downlink_bytes = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.downlink_bytes, excluded.downlink_bytes) ELSE connection_events.downlink_bytes + excluded.downlink_bytes END,
+  duration_ms_total = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.duration_ms_total, excluded.duration_ms_total) ELSE connection_events.duration_ms_total + excluded.duration_ms_total END,
   proxy_user_id = COALESCE(connection_events.proxy_user_id, excluded.proxy_user_id),
   window_start = MIN(connection_events.window_start, excluded.window_start),
   window_end = MAX(connection_events.window_end, excluded.window_end),
@@ -697,6 +717,7 @@ type UpsertConnectionEventParams struct {
 	Outbound          string         `json:"outbound"`
 	OutboundType      string         `json:"outbound_type"`
 	Chain             string         `json:"chain"`
+	ConnectionID      string         `json:"connection_id"`
 	ConnectionsOpened int64          `json:"connections_opened"`
 	ConnectionsClosed int64          `json:"connections_closed"`
 	UplinkBytes       int64          `json:"uplink_bytes"`
@@ -732,6 +753,7 @@ func (q *Queries) UpsertConnectionEvent(ctx context.Context, arg UpsertConnectio
 		arg.Outbound,
 		arg.OutboundType,
 		arg.Chain,
+		arg.ConnectionID,
 		arg.ConnectionsOpened,
 		arg.ConnectionsClosed,
 		arg.UplinkBytes,

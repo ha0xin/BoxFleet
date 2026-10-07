@@ -370,6 +370,24 @@ export type TrafficRow = {
 };
 
 export type NetworkEvent = {
+  id?: string;
+  source?: "journal" | "stream";
+  connection_id?: string | null;
+  started_at?: string | null;
+  domain?: string | null;
+  network?: string | null;
+  ip_version?: number | null;
+  protocol?: string | null;
+  inbound?: string | null;
+  inbound_type?: string | null;
+  rule?: string | null;
+  outbound?: string | null;
+  outbound_type?: string | null;
+  chain?: string | null;
+  uplink_bytes?: number | null;
+  downlink_bytes?: number | null;
+  duration_ms?: number | null;
+  connections_closed?: number | null;
   node_name: string;
   user_name: string;
   auth_name: string;

@@ -25,7 +25,7 @@ const VISIBILITY_LABELS: Record<AdminPath["visibility"], string> = {
   dependency: "Dependency only"
 };
 
-const pathUrlFilters = { schema: z.object({}), defaults: {}, perPage: 10 };
+const pathUrlFilters = { schema: z.object({}), defaults: {} };
 
 /**
  * Column widths, in table order. Published name, endpoint and dialer are all

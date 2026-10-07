@@ -59,6 +59,7 @@ type ConnectionEvent struct {
 	WindowEnd         string         `json:"window_end"`
 	CreatedAt         string         `json:"created_at"`
 	UpdatedAt         string         `json:"updated_at"`
+	ConnectionID      string         `json:"connection_id"`
 }
 
 type ConnectionReport struct {
@@ -162,6 +163,46 @@ type MihomoRewriteTemplate struct {
 	BuiltIn     int64  `json:"built_in"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
+}
+
+type NetworkEventRecord struct {
+	ID                string         `json:"id"`
+	NodeID            string         `json:"node_id"`
+	ProxyUserID       sql.NullString `json:"proxy_user_id"`
+	AuthName          string         `json:"auth_name"`
+	SourceIp          string         `json:"source_ip"`
+	TargetHost        string         `json:"target_host"`
+	TargetPort        int64          `json:"target_port"`
+	Action            string         `json:"action"`
+	RawMessage        string         `json:"raw_message"`
+	Count             int64          `json:"count"`
+	AggregateKey      string         `json:"aggregate_key"`
+	WindowStart       string         `json:"window_start"`
+	WindowEnd         string         `json:"window_end"`
+	CreatedAt         string         `json:"created_at"`
+	Source            string         `json:"source"`
+	Domain            interface{}    `json:"domain"`
+	Network           interface{}    `json:"network"`
+	IpVersion         interface{}    `json:"ip_version"`
+	Protocol          interface{}    `json:"protocol"`
+	Inbound           interface{}    `json:"inbound"`
+	InboundType       interface{}    `json:"inbound_type"`
+	Rule              interface{}    `json:"rule"`
+	Outbound          interface{}    `json:"outbound"`
+	OutboundType      interface{}    `json:"outbound_type"`
+	Chain             interface{}    `json:"chain"`
+	UplinkBytes       interface{}    `json:"uplink_bytes"`
+	DownlinkBytes     interface{}    `json:"downlink_bytes"`
+	DurationMsTotal   interface{}    `json:"duration_ms_total"`
+	ConnectionsClosed interface{}    `json:"connections_closed"`
+	ConnectionID      interface{}    `json:"connection_id"`
+	StartedAt         interface{}    `json:"started_at"`
+}
+
+type NetworkEventSourceInterval struct {
+	NodeID    string         `json:"node_id"`
+	StartedAt string         `json:"started_at"`
+	EndedAt   sql.NullString `json:"ended_at"`
 }
 
 type Node struct {

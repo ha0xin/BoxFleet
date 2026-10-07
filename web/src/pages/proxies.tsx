@@ -84,8 +84,7 @@ const defaultFilters: ProxyFilterValues = {
 // would break the referential stability of the returned `filters`.
 const urlFilters: UseUrlFiltersOptions<ProxyFilterValues> = {
   schema: filterSchema,
-  defaults: defaultFilters,
-  perPage: 10
+  defaults: defaultFilters
 };
 
 const FILTER_LABELS: Record<Exclude<ProxyStatus, "all">, string> = {
