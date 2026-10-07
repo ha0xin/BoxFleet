@@ -38,6 +38,10 @@ def fetch_file(item):
 
 
 def main():
+    DEST.mkdir(parents=True, exist_ok=True)
+    # Go ignores Git exclusions: a nested module keeps third-party reference
+    # packages out of the application module's `go test ./...` and `go mod tidy`.
+    (DEST / "go.mod").write_text("module boxfleet-prior-art-references\n\ngo 1.26.3\n")
     manifest = json.loads(MANIFEST.read_text())
     items = [(project, record) for project in manifest["projects"] for record in project["files"]]
     with ThreadPoolExecutor(max_workers=4) as executor:
