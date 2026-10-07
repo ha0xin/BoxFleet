@@ -1,23 +1,24 @@
-# Docker development and server builds on bero
+# Docker development and server deployment
 
 The central server is `bfs`. These images never install anything on edge nodes.
-The Go development image pins Go 1.27.1, with Node 24 and a C compiler for SQLite
-CGO. The host needs Docker and Compose; host Go/Node installations are optional.
-Remote builds on bero are supported. Production runs in a separate runtime
-container with a persistent database; development never mounts production data.
+The development image includes Go, Node, and a C compiler for SQLite CGO.
+Toolchain defaults are defined in the root `Dockerfile`. The host needs Docker
+and Compose; host Go/Node installations are optional. Builds can run on the
+development machine or a remote Docker host. Production runs in a separate
+runtime container with a persistent database; development never mounts
+production data.
 
 ## Development
 
-On bero, `~/Projects/BoxFleet` (`/root/Projects/BoxFleet` for the current SSH
-account) is a real Git checkout of `ha0xin/BoxFleet`, branch `codex/cloudflare-ui`.
-Use Git to fetch/pull committed changes. Uncommitted local changes must be
+Run the commands below from the repository root on a host with Docker and
+Compose. For remote development, keep a Git checkout on that host and use Git
+to fetch/pull committed changes. Uncommitted local changes must be
 transferred explicitly; they do not automatically synchronize. Never overwrite
 remote edits or copy `.git`, dependencies, generated assets, databases or secrets.
 The development container bind-mounts this checkout; production runs a built
 image and does not mount source. Editing source never updates production.
 
 ```sh
-cd /root/Projects/BoxFleet
 docker compose -p boxfleet-dev -f deploy/docker/compose.dev.yml up -d --build
 docker compose -p boxfleet-dev -f deploy/docker/compose.dev.yml exec dev bash
 # Inside the container:
@@ -40,10 +41,11 @@ go run ./cmd/bfs --addr 0.0.0.0:18081 --db /tmp/boxfleet-dev.db --admin-token de
 npm --prefix web run dev:api -- --host 0.0.0.0
 ```
 
-From your workstation, tunnel the loopback-only ports:
+On the Docker host, open `http://127.0.0.1:5173`. For a remote host, forward
+the loopback-only ports over SSH (replace `<user>@<host>`):
 
 ```sh
-ssh -N -L 18082:127.0.0.1:18082 -L 5173:127.0.0.1:5173 bero
+ssh -N -L 18082:127.0.0.1:18082 -L 5173:127.0.0.1:5173 '<user>@<host>'
 ```
 
 Open `http://127.0.0.1:5173`. The runtime service uses port 18081; development
@@ -57,15 +59,18 @@ agent revision in `.github/workflows/artifacts.yml`; server builds do not change
 agent or sing-box versions.
 
 ```sh
-docker build --build-arg VERSION=4d590df6cc3f-docker \
-  --build-arg AGENT_VERSION=v0.8.1 \
-  -t boxfleet-bfs:4d590df6cc3f-docker .
-docker run --rm boxfleet-bfs:4d590df6cc3f-docker --version
+# Set VERSION to the source release or development build identity,
+# and AGENT_VERSION to AGENT_REVISION in the artifact workflow.
+: "${VERSION:?Set VERSION}"
+: "${AGENT_VERSION:?Set AGENT_VERSION}"
+docker build --build-arg VERSION="$VERSION" \
+  --build-arg AGENT_VERSION="$AGENT_VERSION" \
+  -t "boxfleet-bfs:$VERSION" .
+docker run --rm "boxfleet-bfs:$VERSION" --version
 ```
 
-The example is a development image, not a production release. The current
-installer downloads node artifacts from the GitHub release named by server
-VERSION, and the update manifest requires a matching valid semantic version.
+A development build is not a published release. The current installer downloads
+node artifacts from the GitHub release named by server VERSION, and the update manifest requires a matching valid semantic version.
 A commit-based VERSION cannot enroll/update nodes through those release paths.
 For an unchanged tagged source build, use its actual release VERSION and matching
 artifacts. For unreleased source, prepare a real release identity plus manifest
@@ -81,10 +86,10 @@ an image alone does not run tests. Pin base image digests for release reproducib
 ## Database migration and production startup
 
 1. Preserve the existing public hostname so nodes and subscriptions keep their
-   URLs. The operator installs cloudflared manually on bero. Configure its
-   Cloudflare Tunnel origin as `http://127.0.0.1:18081`; bfs publishes only on
-   loopback. Run cloudflared on the host for this origin address. Do not connect
-   the existing production tunnel to the development or smoke-test server.
+   URLs. Configure HTTPS ingress to the production server; the supplied Compose
+   file publishes bfs only on loopback. If using Cloudflare Tunnel, run
+   cloudflared on the host with origin `http://127.0.0.1:18081`. Do not connect
+   production ingress to the development or smoke-test server.
    Inventory the source host's ingress and served artifacts before cutover.
 2. Keep a rollback copy of the source binary, service configuration and DB. Never
    copy a live SQLite DB with plain `cp`/`rsync`; use SQLite backup for a rehearsal.
@@ -102,7 +107,9 @@ an image alone does not run tests. Pin base image digests for release reproducib
 6. Start with the immutable build tag:
 
    ```sh
-   BOXFLEET_IMAGE=boxfleet-bfs:4d590df6cc3f-docker \
+   # Set BOXFLEET_IMAGE to the verified runtime image tag or digest.
+   : "${BOXFLEET_IMAGE:?Set BOXFLEET_IMAGE}"
+   BOXFLEET_IMAGE="$BOXFLEET_IMAGE" \
      docker compose -p boxfleet -f deploy/docker/compose.server.yml up -d
    ```
 
@@ -110,8 +117,9 @@ an image alone does not run tests. Pin base image digests for release reproducib
    artifact downloads, node heartbeats and traffic ingestion. Switch ingress
    only after the new server passes local checks; verify externally afterward.
 8. Rollback before new writes can restore the source service and the old ingress directly.
-   After bero accepts new writes, database reconciliation is required; do not
-   silently revert to an older DB and lose traffic or administrative changes.
+   After the target server accepts new writes, database reconciliation is
+   required; do not silently revert to an older DB and lose traffic or
+   administrative changes.
 
 Do not run two bfs instances against the same database or mount the production
 DB into the development container. Keep backups outside the container; container
@@ -123,8 +131,12 @@ For a host migration without a source upgrade, preserve the running release
 identity by packaging the verified deployed bfs binary:
 
 ```sh
+# RUNTIME_CONTEXT is a directory containing the verified bfs binary.
+# BOXFLEET_IMAGE identifies the packaged release.
+: "${RUNTIME_CONTEXT:?Set RUNTIME_CONTEXT}"
+: "${BOXFLEET_IMAGE:?Set BOXFLEET_IMAGE}"
 docker build -f deploy/docker/Dockerfile.runtime \
-  -t boxfleet-bfs:v0.13.0-rc.6-migration /srv/boxfleet/migration/runtime
+  -t "$BOXFLEET_IMAGE" "$RUNTIME_CONTEXT"
 ```
 
 The context contains only `bfs`, never database files or server.env. Compare its
@@ -132,39 +144,25 @@ SHA256 against the source binary before starting. Production Compose files can
 be copied to `/opt/boxfleet/deploy` so service operations are independent of the
 development checkout. Set `BOXFLEET_IMAGE` there to the verified runtime tag.
 
-cloudflared is installed and managed manually by the operator. Its origin is
-`http://127.0.0.1:18081`; retain the existing public hostname.
+## Operations and verification
 
-## Current production deployment
-
-The server on bero runs image `boxfleet-bfs:v0.13.0-rc.7`. The update catalog
-advertises agent `v0.8.1` and sing-box `v1.14.2`; existing node agents are not
-automatically upgraded. The verified image ID is
-`sha256:ff816f4da66945022aaab5382c714487ddd3671fe1bef735eb1ab5adb6b19214`.
-
-The pre-upgrade rollback database and Compose configuration are retained at
-`/opt/boxfleet/backups/pre-rc7-20261007T120901Z`. Schema 30 was verified after
-startup, with all 2,775,892 historical traffic rows and their raw/billable totals
-of 5,888,267,307,571 bytes unchanged.
+Run from the repository root, or use the Compose definition copied into the
+deployment directory. Set `BOXFLEET_IMAGE` through the environment or a Compose
+`.env` file to the verified runtime image tag or digest.
 
 ```sh
-cd /opt/boxfleet/deploy
-docker compose -p boxfleet ps
-docker compose -p boxfleet logs --tail=50 bfs
+docker compose -p boxfleet -f deploy/docker/compose.server.yml ps
+docker compose -p boxfleet -f deploy/docker/compose.server.yml logs --tail=50 bfs
 curl -fsS http://127.0.0.1:18081/healthz
 ```
 
-The migration checkpoint backup is
-`/opt/boxfleet/backups/pre-docker-migration-20261007/boxfleet.db`; it matches the
-stopped source database SHA256
-`58fcb610e122fde600705cf4630089fa672b17ce52497c9d98bbd3dea946c72b`.
-Verification passed SQLite quick_check, foreign_key_check, schema 29, table counts
-and raw/billable traffic totals of 5,846,632,665,794 bytes. Raw verification and
-transfer logs are retained under `/srv/boxfleet/migration` on bero.
+Verify both the container health and the public HTTPS endpoint. If the local
+health check passes but public requests return HTTP 502, check the ingress
+routing and origin address. For a host-managed Cloudflare Tunnel, the supplied
+Compose origin is `http://127.0.0.1:18081`. A proxy in another container needs
+network access to bfs; its own loopback address does not reach the host.
 
-The public endpoint is `https://boxfleet.122368.xyz`. The operator controls the
-Tunnel cutover. A healthy local container with public HTTP 502 means public
-routing/origin still needs verification; check the hostname routes to bero's
-Tunnel and that its origin is `http://127.0.0.1:18081`. After cutover verify the
-existing hidden admin mount, authenticated release endpoint, node heartbeats
-and new traffic ingestion. Do not treat local health as a completed cutover.
+After deployment, verify the configured admin mount, authenticated release
+endpoint, subscriptions, node heartbeats, and new traffic ingestion. Keep
+hostnames, deployed image digests, backup locations, and migration verification
+results in the operator's deployment records.
