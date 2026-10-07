@@ -235,23 +235,20 @@ function formatCount(value: number): string {
 
 /** Units the summed session time is rendered in, largest first. */
 const DURATION_UNITS = ["years", "months", "days", "hours", "minutes", "seconds"] as const;
+const DURATION_SUFFIXES: Record<string, string> = {
+  xYears: "y", xMonths: "mo", xDays: "d", xHours: "h", xMinutes: "m", xSeconds: "s"
+};
 
-/**
- * Summed session time, compact enough for a table cell. date-fns owns both the
- * calendar arithmetic and the wording; only the choice of the two largest
- * non-zero units is made here, so a busy bucket reads "3 hours 12 minutes"
- * rather than a six-term sentence.
- */
+/** Render the two largest non-zero units using compact table labels. */
 export function formatDurationMs(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0 seconds";
-  if (value < 1000) return "<1 second";
+  if (!Number.isFinite(value) || value <= 0) return "0s";
+  if (value < 1000) return "<1s";
   const duration = intervalToDuration({ start: 0, end: Math.round(value) });
-  const largest = DURATION_UNITS.findIndex((unit) => (duration[unit] ?? 0) > 0);
-  if (largest < 0) return "<1 second";
   return formatDuration(duration, {
-    format: [...DURATION_UNITS].slice(largest, largest + 2),
-    delimiter: " ",
-    zero: false
+    format: DURATION_UNITS.filter((unit) => (duration[unit] ?? 0) > 0).slice(0, 2),
+    delimiter: "",
+    zero: false,
+    locale: { formatDistance: (token, count) => `${count}${DURATION_SUFFIXES[token]}` }
   });
 }
 
@@ -822,7 +819,7 @@ export function NetworkEventsPage() {
     columnHelper.display({
       id: "destination",
       header: "Destination",
-      cell: (info) => <span className="block max-w-64 truncate text-kumo-default" title={eventDestination(info.row.original)}>{eventDestination(info.row.original)}</span>,
+      cell: (info) => <span className="block truncate text-kumo-default" title={eventDestination(info.row.original)}>{eventDestination(info.row.original)}</span>,
       meta: { headClassName: "w-64", cellClassName: "w-64" }
     }),
     columnHelper.accessor("count", {
@@ -832,17 +829,17 @@ export function NetworkEventsPage() {
     }),
     columnHelper.accessor("auth_name", {
       header: "Auth",
-      cell: (info) => <span className="block max-w-44 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
+      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-44", cellClassName: "w-44" }
     }),
     columnHelper.accessor("network", { header: "Network", cell: (info) => info.getValue() || "—" }),
     columnHelper.accessor("uplink_bytes", { header: "Upload", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
     columnHelper.accessor("downlink_bytes", { header: "Download", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
-    columnHelper.accessor("duration_ms", { header: "Duration", cell: (info) => info.getValue() == null || !info.row.original.connections_closed ? "—" : formatDurationMs(info.getValue()!) }),
+    columnHelper.accessor("duration_ms", { header: "Duration", cell: (info) => <span className="whitespace-nowrap text-kumo-subtle tabular-nums">{info.getValue() == null || !info.row.original.connections_closed ? "—" : formatDurationMs(info.getValue()!)}</span> }),
     columnHelper.accessor("outbound", { header: "Outbound", cell: (info) => info.getValue() || "—" }),
     columnHelper.accessor("raw_message", {
       header: "Message",
-      cell: (info) => <span className="block max-w-80 truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
+      cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-80", cellClassName: "w-80" }
     })
   ], []);

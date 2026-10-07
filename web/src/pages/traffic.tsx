@@ -455,7 +455,7 @@ export function TrafficPage() {
       columnHelper.accessor("label", {
         header: "User",
         cell: (info) => (
-          <span className="block max-w-52 truncate font-medium text-kumo-default" title={info.getValue()}>
+          <span className="block truncate font-medium text-kumo-default" title={info.getValue()}>
             {info.getValue()}
           </span>
         )

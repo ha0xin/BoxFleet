@@ -346,7 +346,7 @@ export function ManageAccessDialog({
 
   return (
     <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="base" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+      <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Manage access</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
           Grant or revoke selectable Paths for <span className="font-medium text-kumo-default">{user.name}</span>.
@@ -363,14 +363,14 @@ export function ManageAccessDialog({
         {issueError ? <Banner variant="error" title={issueError} className="mb-4" /> : null}
 
         <section>
-          <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="font-semibold text-kumo-default">Grant Paths</h3>
               <p className="text-sm text-kumo-subtle">Credentials for every hop are created automatically.</p>
             </div>
             {available.length > 0 ? (
               <Checkbox
-                label="Select all"
+                label={<span className="whitespace-nowrap">Select all</span>}
                 checked={selectedIDs.length === available.length}
                 indeterminate={selectedIDs.length > 0 && selectedIDs.length < available.length}
                 disabled={issue.isPending}

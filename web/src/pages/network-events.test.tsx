@@ -70,10 +70,12 @@ describe("bucketOffsetMinutes", () => {
 
 describe("formatDurationMs", () => {
   it("keeps the two largest units so a cell stays readable", () => {
-    expect(formatDurationMs(7_200_000)).toBe("2 hours");
-    expect(formatDurationMs(90_000)).toBe("1 minute 30 seconds");
-    expect(formatDurationMs(500)).toBe("<1 second");
-    expect(formatDurationMs(0)).toBe("0 seconds");
+    expect(formatDurationMs(7_200_000)).toBe("2h");
+    expect(formatDurationMs(90_000)).toBe("1m30s");
+    expect(formatDurationMs(108_184)).toBe("1m48s");
+    expect(formatDurationMs(3_601_000)).toBe("1h1s");
+    expect(formatDurationMs(500)).toBe("<1s");
+    expect(formatDurationMs(0)).toBe("0s");
   });
 });
 
