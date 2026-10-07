@@ -137,9 +137,15 @@ cloudflared is installed and managed manually by the operator. Its origin is
 
 ## Current production deployment
 
-The server on bero runs image `boxfleet-bfs:v0.13.0-rc.6-migration`, preserving
-server `v0.13.0-rc.6`, agent `v0.8.0` and sing-box `v1.14.2`. The verified image
-ID is `sha256:d92897c1ecfaf3c55822cb153df83f67fe082c1b3ea369d6812012418faebb72`.
+The server on bero runs image `boxfleet-bfs:v0.13.0-rc.7`. The update catalog
+advertises agent `v0.8.1` and sing-box `v1.14.2`; existing node agents are not
+automatically upgraded. The verified image ID is
+`sha256:ff816f4da66945022aaab5382c714487ddd3671fe1bef735eb1ab5adb6b19214`.
+
+The pre-upgrade rollback database and Compose configuration are retained at
+`/opt/boxfleet/backups/pre-rc7-20261007T120901Z`. Schema 30 was verified after
+startup, with all 2,775,892 historical traffic rows and their raw/billable totals
+of 5,888,267,307,571 bytes unchanged.
 
 ```sh
 cd /opt/boxfleet/deploy
