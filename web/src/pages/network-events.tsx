@@ -239,6 +239,23 @@ const DURATION_SUFFIXES: Record<string, string> = {
   xYears: "y", xMonths: "mo", xDays: "d", xHours: "h", xMinutes: "m", xSeconds: "s"
 };
 
+/** Report observed lifecycle state without treating legacy buckets as sessions. */
+export function connectionStatus(event: Pick<NetworkEvent, "source" | "connection_id" | "connections_closed">): { label: string; description: string; variant: "secondary" | "info" } {
+  if (event.source !== "stream") {
+    return { label: "Unknown", description: "Journal logs do not include connection lifecycle state.", variant: "secondary" };
+  }
+  if (!event.connection_id) {
+    return { label: "Aggregated", description: "This legacy bucket may contain multiple connections with different states.", variant: "secondary" };
+  }
+  if (event.connections_closed == null) {
+    return { label: "Unknown", description: "Connection lifecycle state is unavailable.", variant: "secondary" };
+  }
+  if (event.connections_closed > 0) {
+    return { label: "已关闭", description: "A connection close event was observed.", variant: "secondary" };
+  }
+  return { label: "活动中", description: "No close event has been observed. This is the last reported state, not confirmation that the connection is still active; reports can be delayed or close events missed.", variant: "info" };
+}
+
 /** Render the two largest non-zero units using compact table labels. */
 export function formatDurationMs(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0s";
@@ -831,6 +848,14 @@ export function NetworkEventsPage() {
       header: "Auth",
       cell: (info) => <span className="block truncate text-kumo-subtle" title={info.getValue()}>{info.getValue() || "—"}</span>,
       meta: { headClassName: "w-44", cellClassName: "w-44" }
+    }),
+    columnHelper.display({
+      id: "connection_status",
+      header: "Status",
+      cell: (info) => {
+        const status = connectionStatus(info.row.original);
+        return <span title={status.description}><Badge variant={status.variant} className="whitespace-nowrap">{status.label}</Badge></span>;
+      }
     }),
     columnHelper.accessor("network", { header: "Network", cell: (info) => info.getValue() || "—" }),
     columnHelper.accessor("uplink_bytes", { header: "Upload", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),

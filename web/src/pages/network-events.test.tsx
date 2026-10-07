@@ -14,6 +14,7 @@ import {
   ActivityPanel,
   ServiceAuditPanel,
   bucketOffsetMinutes,
+  connectionStatus,
   formatDurationMs,
   resolveSeriesBucket,
   seriesSpanMillis
@@ -65,6 +66,18 @@ describe("bucketOffsetMinutes", () => {
     const utcPlus8 = { getTimezoneOffset: () => -480 } as Date;
     expect(bucketOffsetMinutes("day", utcPlus8)).toBe(480);
     expect(bucketOffsetMinutes("hour", utcPlus8)).toBe(0);
+  });
+});
+
+describe("connectionStatus", () => {
+  it("does not claim journal or aggregate rows represent a live session", () => {
+    expect(connectionStatus({ source: "journal" }).label).toBe("Unknown");
+    expect(connectionStatus({ source: "stream", connections_closed: 3 }).label).toBe("Aggregated");
+  });
+  it("distinguishes observed open and closed sessions without inventing missing state", () => {
+    expect(connectionStatus({ source: "stream", connection_id: "session", connections_closed: 0 }).label).toBe("活动中");
+    expect(connectionStatus({ source: "stream", connection_id: "session", connections_closed: 1 }).label).toBe("已关闭");
+    expect(connectionStatus({ source: "stream", connection_id: "session" }).label).toBe("Unknown");
   });
 });
 
