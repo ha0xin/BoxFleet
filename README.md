@@ -61,8 +61,8 @@ Run `bfs --help`, `bfs --version`, or `boxfleet-agent --help` for the current co
 Pushing a `v*` tag publishes Linux amd64 artifacts. Server, agent, and sing-box
 versions are independent, so a server-only release does not advertise a no-op
 node update. See [deployment](docs/deployment.md) for releases and node
-bootstrap, and the [Docker runbook](deploy/docker/README.md) for bero development
-and production operations.
+bootstrap, and the [Docker runbook](deploy/docker/README.md) for container-based
+development and production operations.
 
 ## Documentation
 

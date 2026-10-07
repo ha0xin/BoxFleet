@@ -3,9 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
-  ArrowsClockwiseIcon,
   CopyIcon,
-  LinkSimpleIcon,
   PlusIcon,
   TrashIcon
 } from "@phosphor-icons/react";
@@ -14,16 +12,14 @@ import { Banner, Button, Checkbox, Dialog, Input, Loader, Select } from "@cloudf
 import type {
   AdminPath,
   AdminPathAccess,
-  AdminSubscription,
   AdminUser,
   UserConnectionInfo
 } from "../types";
 import type { AdminRequest } from "@/admin/api";
 import { adminKeys } from "@/admin/query";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
-import { useSubscription } from "@/admin/use-subscription";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { copyText as writeClipboard, formatDateTime } from "@/utils";
+import { useQuery } from "@tanstack/react-query";
+import { copyText as writeClipboard } from "@/utils";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 
 export type UserDialogState =
@@ -479,7 +475,6 @@ export function ManageAccessDialog({
 }
 
 type ConnectionProxy = UserConnectionInfo["nodes"][number]["proxies"][number];
-type ConfirmationAction = "rotate" | "revoke";
 
 // Credential fields differ per protocol, so emit only the ones the server
 // actually populated. A VLESS-shaped payload for a Shadowsocks 2022 Path would
@@ -526,7 +521,6 @@ export function ConnectionInfoDialog({
 }) {
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
-  const [confirmation, setConfirmation] = useState<ConfirmationAction | null>(null);
   const copiedResetTimer = useRef<number | null>(null);
   const encodedUser = encodeURIComponent(user.id);
 
@@ -541,12 +535,6 @@ export function ConnectionInfoDialog({
     queryFn: () =>
       request<UserConnectionInfo>(`/api/admin/users/${encodedUser}/connection-info`)
   });
-  const { query: subscriptionQuery, generate, rotate, revoke } = useSubscription<AdminSubscription>(
-    request,
-    adminKeys.subscription("user", user.name),
-    `/api/admin/users/${encodedUser}/subscription`,
-    () => setConfirmation(null)
-  );
 
   async function copyText(value: string, key: string) {
     try {
@@ -560,256 +548,101 @@ export function ConnectionInfoDialog({
     }
   }
 
-  const copyProvider = useMutation({
-    mutationFn: () =>
-      request<string>(`/api/admin/users/${encodedUser}/proxy-provider`),
-    onSuccess: (yaml) => void copyText(yaml, "provider")
-  });
-  const subscription = subscriptionQuery.data;
   const nodes = connectionQuery.data?.nodes ?? [];
   const proxyCount = nodes.reduce((total, node) => total + node.proxies.length, 0);
-  const requestError =
-    connectionQuery.error ??
-    subscriptionQuery.error ??
-    copyProvider.error ??
-    generate.error ??
-    rotate.error ??
-    revoke.error;
+  const requestError = connectionQuery.error;
 
   return (
-    <>
-      <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-        <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
-          <Dialog.Title className="text-xl font-semibold text-kumo-default">
-            Connection info
-          </Dialog.Title>
-          <Dialog.Description className="mb-4 text-kumo-subtle">
-            Connection profiles and complete Mihomo subscription for{" "}
-            <span className="font-medium text-kumo-default">{user.name}</span>.
-          </Dialog.Description>
+    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+        <Dialog.Title className="text-xl font-semibold text-kumo-default">
+          Connection info
+        </Dialog.Title>
+        <Dialog.Description className="mb-4 text-kumo-subtle">
+          Connection details for{" "}
+          <span className="font-medium text-kumo-default">{user.name}</span>.
+        </Dialog.Description>
 
-          {requestError ? (
-            <Banner
-              variant="error"
-              title={requestError instanceof Error ? requestError.message : "Request failed."}
-              className="mb-4"
-            />
-          ) : null}
-          {copyError ? <Banner variant="error" title={copyError} className="mb-4" /> : null}
-
-          <section className="rounded-lg border border-kumo-line bg-kumo-base p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="font-semibold text-kumo-default">Mihomo subscription</h3>
-                <p className="text-sm text-kumo-subtle">
-                  The primary URL contains inline <code>proxies:</code>, groups, DNS and the latest saved rules.
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={CopyIcon}
-                loading={copyProvider.isPending}
-                onClick={() => copyProvider.mutate()}
-              >
-                {copied === "provider" ? "Copied YAML" : "Copy provider YAML"}
-              </Button>
-            </div>
-
-            {subscriptionQuery.isLoading ? (
-              <div className="flex min-h-20 items-center justify-center">
-                <Loader size={20} />
-              </div>
-            ) : subscription?.active ? (
-              <div className="mt-4 flex flex-col gap-3">
-                <div className="flex items-end gap-2">
-                  <div className="min-w-0 flex-1">
-                    <Input label="Mihomo Profile URL" readOnly value={subscription.mihomo_url || subscription.url} className="w-full" />
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={CopyIcon}
-                    onClick={() =>
-                      void copyText(subscription.mihomo_url || subscription.url, "mihomo-url")
-                    }
-                  >
-                    {copied === "mihomo-url" ? "Copied" : "Copy"}
-                  </Button>
-                </div>
-                <div className="flex items-end gap-2">
-                  <div className="min-w-0 flex-1">
-                    <Input label="Legacy provider URL" readOnly value={subscription.provider_url || subscription.url} className="w-full" />
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={CopyIcon}
-                    onClick={() =>
-                      void copyText(subscription.provider_url || subscription.url, "provider-url")
-                    }
-                  >
-                    {copied === "provider-url" ? "Copied" : "Copy"}
-                  </Button>
-                </div>
-                <dl className="grid gap-2 text-sm text-kumo-subtle sm:grid-cols-2">
-                  <div>
-                    <dt className="font-medium text-kumo-default">Created</dt>
-                    <dd>{formatDateTime(subscription.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-kumo-default">Last fetched</dt>
-                    <dd>{formatDateTime(subscription.last_used_at)}</dd>
-                  </div>
-                </dl>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={ArrowsClockwiseIcon}
-                    onClick={() => setConfirmation("rotate")}
-                  >
-                    Rotate link
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    icon={TrashIcon}
-                    onClick={() => setConfirmation("revoke")}
-                  >
-                    Revoke link
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 flex items-center justify-between gap-3 rounded-md bg-kumo-canvas p-3">
-                <p className="text-sm text-kumo-subtle">No subscription link has been generated.</p>
-                <Button
-                  size="sm"
-                  icon={LinkSimpleIcon}
-                  loading={generate.isPending}
-                  onClick={() => generate.mutate()}
-                >
-                  Generate link
-                </Button>
-              </div>
-            )}
-          </section>
-
-          <section className="mt-4">
-            <div className="mb-3 flex items-end justify-between gap-3">
-              <div>
-                <h3 className="font-semibold text-kumo-default">Connection profiles</h3>
-                <p className="text-sm text-kumo-subtle">
-                  {proxyCount} {proxyCount === 1 ? "proxy" : "proxies"} across {nodes.length}{" "}
-                  {nodes.length === 1 ? "node" : "nodes"}
-                </p>
-              </div>
-            </div>
-
-            {connectionQuery.isLoading ? (
-              <div className="flex min-h-32 items-center justify-center">
-                <Loader size={20} />
-              </div>
-            ) : proxyCount > 0 ? (
-              <div className="flex max-h-80 flex-col gap-3 overflow-y-auto">
-                {nodes.map((node) =>
-                  node.proxies.length > 0 ? (
-                    <div
-                      key={node.node}
-                      className="rounded-lg border border-kumo-line bg-kumo-canvas p-3"
-                    >
-                      <h4 className="mb-2 text-sm font-semibold text-kumo-default">{node.node}</h4>
-                      <div className="flex flex-col gap-2">
-                        {node.proxies.map((proxy) => {
-                          const key = `${node.node}/${proxy.name}/${proxy.server}`;
-                          return (
-                            <div
-                              key={key}
-                              className="flex flex-col gap-2 rounded-md bg-kumo-base px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-kumo-default">
-                                  {proxy.name}
-                                </div>
-                                <div className="truncate font-mono text-xs text-kumo-subtle">
-                                  {proxySummary(proxy)}
-                                </div>
-                              </div>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                icon={CopyIcon}
-                                onClick={() =>
-                                  void copyText(proxyDetails(node.node, proxy), `proxy:${key}`)
-                                }
-                              >
-                                {copied === `proxy:${key}` ? "Copied" : "Copy details"}
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null
-                )}
-              </div>
-            ) : (
-              <div className="flex min-h-28 items-center justify-center rounded-lg border border-kumo-line bg-kumo-canvas text-sm text-kumo-subtle">
-                No active connection profiles.
-              </div>
-            )}
-          </section>
-
+        {requestError ? (
           <Banner
-            variant="secondary"
-            title="Configuration behavior"
-            description="Inline proxies and saved YAML or JavaScript processors are rendered on every request. Publish node configuration changes before new credentials can connect."
-            className="mt-4"
+            variant="error"
+            title={requestError instanceof Error ? requestError.message : "Request failed."}
+            className="mb-4"
           />
+        ) : null}
+        {copyError ? <Banner variant="error" title={copyError} className="mb-4" /> : null}
 
-          <div className="mt-2 flex justify-end gap-2">
-            <Button variant="secondary" onClick={onClose}>
-              Done
-            </Button>
+        <section className="mt-4">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-kumo-default">Connection profiles</h3>
+              <p className="text-sm text-kumo-subtle">
+                {proxyCount} {proxyCount === 1 ? "proxy" : "proxies"} across {nodes.length}{" "}
+                {nodes.length === 1 ? "node" : "nodes"}
+              </p>
+            </div>
           </div>
-        </Dialog>
-      </Dialog.Root>
 
-      <Dialog.Root
-        role="alertdialog"
-        open={confirmation !== null}
-        onOpenChange={(open) => (open ? undefined : setConfirmation(null))}
-      >
-        <Dialog size="sm" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
-          <Dialog.Title className="text-xl font-semibold text-kumo-default">
-            {confirmation === "rotate" ? "Rotate subscription link?" : "Revoke subscription link?"}
-          </Dialog.Title>
-          <Dialog.Description className="mb-4 text-kumo-subtle">
-            {confirmation === "rotate"
-              ? "The current URL will stop working immediately. Clients must be updated to use the new URL."
-              : "The current URL will stop working immediately. This does not remove credentials already cached by clients."}
-          </Dialog.Description>
-          <div className="mt-2 flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              disabled={rotate.isPending || revoke.isPending}
-              onClick={() => setConfirmation(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              loading={rotate.isPending || revoke.isPending}
-              onClick={() =>
-                confirmation === "rotate" ? rotate.mutate() : revoke.mutate()
-              }
-            >
-              {confirmation === "rotate" ? "Rotate link" : "Revoke link"}
-            </Button>
-          </div>
-        </Dialog>
-      </Dialog.Root>
-    </>
+          {connectionQuery.isLoading ? (
+            <div className="flex min-h-32 items-center justify-center">
+              <Loader size={20} />
+            </div>
+          ) : proxyCount > 0 ? (
+            <div className="flex max-h-80 flex-col gap-3 overflow-y-auto">
+              {nodes.map((node) =>
+                node.proxies.length > 0 ? (
+                  <div
+                    key={node.node}
+                    className="rounded-lg border border-kumo-line bg-kumo-canvas p-3"
+                  >
+                    <h4 className="mb-2 text-sm font-semibold text-kumo-default">{node.node}</h4>
+                    <div className="flex flex-col gap-2">
+                      {node.proxies.map((proxy) => {
+                        const key = `${node.node}/${proxy.name}/${proxy.server}`;
+                        return (
+                          <div
+                            key={key}
+                            className="flex flex-col gap-2 rounded-md bg-kumo-base px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-kumo-default">
+                                {proxy.name}
+                              </div>
+                              <div className="truncate font-mono text-xs text-kumo-subtle">
+                                {proxySummary(proxy)}
+                              </div>
+                            </div>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={CopyIcon}
+                              onClick={() =>
+                                void copyText(proxyDetails(node.node, proxy), `proxy:${key}`)
+                              }
+                            >
+                              {copied === `proxy:${key}` ? "Copied" : "Copy details"}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null
+              )}
+            </div>
+          ) : (
+            <div className="flex min-h-28 items-center justify-center rounded-lg border border-kumo-line bg-kumo-canvas text-sm text-kumo-subtle">
+              No active connection profiles.
+            </div>
+          )}
+        </section>
+
+        <div className="mt-2 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </Dialog>
+    </Dialog.Root>
   );
 }

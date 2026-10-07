@@ -42,6 +42,32 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   expect(activation.ok()).toBeTruthy();
   const beforeRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
   expect(beforeRotation.nodes).toHaveLength(1);
+  const subscriptionRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/api\/admin\/users\/[^/]+\/(subscription|proxy-provider)(?:\?|$)/.test(request.url())) {
+      subscriptionRequests.push(request.url());
+    }
+  });
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Connection info" }).click();
+  const connectionDialog = page.getByRole("dialog", { name: "Connection info", exact: true });
+  await expect(connectionDialog.getByRole("button", { name: "Copy details" })).toBeVisible();
+  await expect(connectionDialog.getByText("Mihomo subscription", { exact: true })).toHaveCount(0);
+  await expect(connectionDialog.getByRole("button", { name: "Generate link" })).toHaveCount(0);
+  await expect(connectionDialog.getByText("Configuration behavior", { exact: true })).toHaveCount(0);
+  for (const width of [1440, 632, 390]) {
+    await page.setViewportSize({ width, height: 824 });
+    const box = await connectionDialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    const overflow = await connectionDialog.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(overflow).toBe(false);
+  }
+  await page.screenshot({ path: "test-results/user-connection-info-mobile.png" });
+  await connectionDialog.getByRole("button", { name: "Done", exact: true }).click();
+  expect(subscriptionRequests).toEqual([]);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Rotate connection keys" }).click();
   const rotationDialog = page.getByRole("dialog", { name: "Rotate connection keys" });

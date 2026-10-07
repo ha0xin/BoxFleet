@@ -1,7 +1,7 @@
 # Deployment
 
-BoxFleet supports prebuilt Linux amd64 artifacts and Docker builds on bero.
-Development runs in a Go container on bero from `~/Projects/BoxFleet`.
+BoxFleet supports prebuilt Linux amd64 artifacts and Docker server images.
+Development can run directly on a workstation or in a separate Docker container.
 For Docker development, server images and operations, see the
 [Docker runbook](../deploy/docker/README.md).
 
@@ -33,14 +33,15 @@ Download the release, reconstruct the `artifacts/` layout expected by
 `SHA256SUMS` if individual GitHub assets were downloaded flat, and verify every
 file before use.
 
-## Management server on bero
+## Management server
 
-The production server runs as a Docker container. Development uses a separate
-Go container and a real Git checkout at `~/Projects/BoxFleet`; production does
-not mount that checkout. See the [Docker runbook](../deploy/docker/README.md).
+The supplied Compose configuration runs the production server as a Docker
+container with persistent storage. Development uses a separate checkout and
+database; production does not mount the source tree. See the
+[Docker runbook](../deploy/docker/README.md). The following is an example
+deployment layout; database and artifact paths match the supplied Compose mounts.
 
 ```text
-/root/Projects/BoxFleet                 development Git checkout
 /opt/boxfleet/deploy/compose.yml        production Compose definition
 /opt/boxfleet/deploy/.env               immutable image selection
 /opt/boxfleet/server/boxfleet.db        persistent SQLite database
@@ -50,7 +51,7 @@ not mount that checkout. See the [Docker runbook](../deploy/docker/README.md).
 ```
 
 ```sh
-ssh bero
+ssh '<user>@<host>'
 cd /opt/boxfleet/deploy
 docker compose -p boxfleet ps
 docker compose -p boxfleet logs --tail=50 bfs
@@ -59,12 +60,14 @@ curl -fsS http://127.0.0.1:18081/healthz
 
 The runtime process uses UID/GID 10001; the database directory and DB must be
 writable by it, including SQLite WAL/SHM files. Keep server.env mode 0600 and
-outside image build contexts. Admin authentication and the existing hidden
-admin prefix remain required.
+outside image build contexts. Configure admin authentication and the admin
+prefix for the deployment.
 
-cloudflared is installed manually on the host. Keep the existing public domain
-and configure the Tunnel origin as `http://127.0.0.1:18081`. Docker publishes
-that port only on loopback. The development backend uses host port 18082.
+Configure HTTPS ingress for the public server hostname. With a host-managed
+Cloudflare Tunnel, use origin `http://127.0.0.1:18081`. The supplied Docker
+configuration publishes that port only on loopback; the development backend
+uses host port 18082. Preserve the public hostname during host migrations so
+node and subscription URLs remain valid.
 
 Before a runtime upgrade, run the required checks, record the image digest,
 compare migrations and preserve the previous image. For schema/data changes,
@@ -124,9 +127,13 @@ After deployment verify without printing secrets:
 
 ```bash
 curl -fsS http://127.0.0.1:18081/healthz
-sudo systemctl is-active boxfleet-server
-sudo journalctl -u boxfleet-server -n 30 --no-pager
+# For the supplied Docker deployment, run from the repository root:
+docker compose -p boxfleet -f deploy/docker/compose.server.yml ps
+docker compose -p boxfleet -f deploy/docker/compose.server.yml logs --tail=30 bfs
 ```
+
+For an artifact deployment managed by systemd, inspect the configured server
+unit with `systemctl` and `journalctl` instead.
 
 Also confirm:
 
