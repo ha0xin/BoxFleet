@@ -1,8 +1,9 @@
 # Deployment
 
-BoxFleet deploys prebuilt Linux amd64 artifacts. Do not build on production
-hosts. For the current management server, follow the stricter
-[azus runbook](azus-runbook.md).
+BoxFleet supports prebuilt Linux amd64 artifacts and Docker builds on bero.
+Development runs in a Go container on bero from `~/Projects/BoxFleet`.
+For Docker development, server images and operations, see the
+[Docker runbook](../deploy/docker/README.md).
 
 ## Releases
 
@@ -32,52 +33,55 @@ Download the release, reconstruct the `artifacts/` layout expected by
 `SHA256SUMS` if individual GitHub assets were downloaded flat, and verify every
 file before use.
 
-## Management server
+## Management server on bero
 
-The host layout is:
+The production server runs as a Docker container. Development uses a separate
+Go container and a real Git checkout at `~/Projects/BoxFleet`; production does
+not mount that checkout. See the [Docker runbook](../deploy/docker/README.md).
 
 ```text
-/opt/boxfleet/bin/bfs
-/opt/boxfleet/server/boxfleet.db
-/opt/boxfleet/backups/
-/etc/boxfleet/server.env
+/root/Projects/BoxFleet                 development Git checkout
+/opt/boxfleet/deploy/compose.yml        production Compose definition
+/opt/boxfleet/deploy/.env               immutable image selection
+/opt/boxfleet/server/boxfleet.db        persistent SQLite database
+/opt/boxfleet/artifacts/                optional local node artifacts
+/opt/boxfleet/backups/                  rollback snapshots
+/etc/boxfleet/server.env               authentication and server configuration
 ```
 
-The service normally runs:
-
-```ini
-[Service]
-EnvironmentFile=/etc/boxfleet/server.env
-ExecStart=/opt/boxfleet/bin/bfs --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db
-Restart=always
-RestartSec=5s
+```sh
+ssh bero
+cd /opt/boxfleet/deploy
+docker compose -p boxfleet ps
+docker compose -p boxfleet logs --tail=50 bfs
+curl -fsS http://127.0.0.1:18081/healthz
 ```
 
-Before replacement:
+The runtime process uses UID/GID 10001; the database directory and DB must be
+writable by it, including SQLite WAL/SHM files. Keep server.env mode 0600 and
+outside image build contexts. Admin authentication and the existing hidden
+admin prefix remain required.
 
-1. Verify local and remote SHA256 values.
-2. Run the server candidate with `--help`.
-3. Compare migrations and database-writing behavior with the deployed release.
-   Prepare one rollback directory for the old binary and unit. Copy SQLite
-   DB/WAL/SHM only when the deployment changes schema or existing stored data.
+cloudflared is installed manually on the host. Keep the existing public domain
+and configure the Tunnel origin as `http://127.0.0.1:18081`. Docker publishes
+that port only on loopback. The development backend uses host port 18082.
 
-Stop, replace, restart, and smoke-test inside an `ERR`-trapped script that
-backs up the binary and unit and restores them on failure. When schema or stored
-data changes, also back up DB/WAL/SHM after stopping the service and restore that
-snapshot on failure. A binary/UI-only replacement does not copy the database.
-Startup applies embedded migrations. A
-server-only release replaces only `bfs`; never update node
-components on the management host.
+Before a runtime upgrade, run the required checks, record the image digest,
+compare migrations and preserve the previous image. For schema/data changes,
+stop the writer and take a consistent database backup before startup applies
+embedded migrations. Never mount a production DB into development or run two
+bfs instances against it. Retain the previous rollback snapshot after success;
+a failed upgrade must not prune backups. Container recreation is not a backup.
 
-After all smoke checks pass and the rollback trap is disarmed, retain only the
-backup created by that deployment. It is the rollback copy of the immediately
-previous server version; a database snapshot is present only when needed. Delete older backup directories
-only at that point; a failed deployment must not prune any backups, and a
-cleanup failure must not roll back a healthy release.
+For host migration, stop the source writer, checkpoint SQLite and transfer
+source-to-target directly over SSH/rsync. Verify DB SHA256, integrity, foreign
+keys, table counts and traffic totals before accepting new reports. Once the
+new host accepts writes, rollback requires reconciling its latest data.
 
-Admin auth is mandatory through `BOXFLEET_ADMIN_TOKEN` unless the explicit
-development-only `--allow-insecure-admin` flag is used. A hidden admin prefix
-may be configured with `BOXFLEET_ADMIN_PATH_TOKEN`.
+Server and node component versions remain independent. A development image
+with a commit-based VERSION cannot use the release-bound node installer and
+update catalog. Preserve the deployed release identity for a host migration;
+prepare matching published artifacts when promoting a new source release.
 
 ## Node bootstrap
 

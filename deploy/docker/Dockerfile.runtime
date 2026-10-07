@@ -1,0 +1,16 @@
+# Package a previously verified bfs binary without changing its release identity.
+# Build context must contain only bfs. Build it on the target architecture.
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 boxfleet \
+    && useradd --uid 10001 --gid 10001 --no-create-home boxfleet \
+    && mkdir /data && chown boxfleet:boxfleet /data
+COPY --chmod=0755 bfs /usr/local/bin/bfs
+USER 10001:10001
+EXPOSE 18081
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:18081/healthz || exit 1
+ENTRYPOINT ["/usr/local/bin/bfs"]
+CMD ["--addr", "0.0.0.0:18081", "--db", "/data/boxfleet.db"]

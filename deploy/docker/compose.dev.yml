@@ -1,0 +1,23 @@
+services:
+  dev:
+    image: boxfleet-dev:go1.27.1
+    build:
+      context: ../..
+      target: dev
+    init: true
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      - npm-cache:/root/.npm
+      - web-modules:/workspace/web/node_modules
+    ports:
+      - "127.0.0.1:18082:18081"
+      - "127.0.0.1:5173:5173"
+    restart: unless-stopped
+volumes:
+  go-mod:
+  go-build:
+  npm-cache:
+  web-modules:

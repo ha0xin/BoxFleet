@@ -160,7 +160,7 @@ table scrolling, and known console-error checks covered.
 
 Real-node service and sing-box checks belong to the deployment smoke flow, not
 the regular suite. Follow [deployment](deployment.md) and the
-[azus runbook](azus-runbook.md).
+[Docker runbook](../deploy/docker/README.md).
 
 Performance-sensitive releases also follow [performance.md](performance.md).
 Query-plan tests protect bounded access paths, while absolute P95 measurements

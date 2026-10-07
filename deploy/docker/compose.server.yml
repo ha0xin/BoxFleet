@@ -1,0 +1,16 @@
+services:
+  bfs:
+    image: ${BOXFLEET_IMAGE:?Set BOXFLEET_IMAGE to an immutable build tag}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${BOXFLEET_ENV_FILE:-/etc/boxfleet/server.env}
+    environment:
+      BOXFLEET_ADDR: 0.0.0.0:18081
+      BOXFLEET_DB: /data/boxfleet.db
+    ports:
+      - "127.0.0.1:18081:18081"
+    volumes:
+      - /opt/boxfleet/server:/data
+      - /opt/boxfleet/artifacts:/artifacts:ro
+    stop_grace_period: 60s

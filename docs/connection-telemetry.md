@@ -84,7 +84,7 @@ fleet-wide default is off structurally rather than by convention.
 -- CHECK refuses anything under 32.
 INSERT INTO node_connection_telemetry (node_id, enabled, listen_address, listen_port, secret)
 SELECT id, 1, '127.0.0.1', 9091, lower(hex(randomblob(32)))
-FROM nodes WHERE name = 'azus';
+FROM nodes WHERE name = 'example-node';
 ```
 
 Then publish. The change surfaces through the normal pipeline —
@@ -281,7 +281,7 @@ not replace per-user billing counters.
 ```sql
 UPDATE node_connection_telemetry
 SET enabled = 0
-WHERE node_id = (SELECT id FROM nodes WHERE name = 'azus');
+WHERE node_id = (SELECT id FROM nodes WHERE name = 'example-node');
 ```
 
 Then publish, as for opting in. The rendered config returns to **byte-identical**
