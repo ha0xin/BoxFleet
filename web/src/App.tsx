@@ -2,7 +2,7 @@ import { GearSixIcon } from "@phosphor-icons/react";
 import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Banner, Button, Loader, Sidebar, Text, Toasty } from "@cloudflare/kumo";
+import { Banner, Button, Loader, Sidebar, Text, Toasty, useSidebar } from "@cloudflare/kumo";
 
 import { AdminApiProvider, useAdminApi } from "@/admin/api";
 import { adminToastManager } from "@/admin/toast";
@@ -138,7 +138,7 @@ function AdminApp({
   const navigate = useNavigate();
   const location = useLocation();
   return (
-    <Sidebar.Provider collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
+    <Sidebar.Provider mobileBreakpoint={1024} collapsible="icon" defaultOpen className="h-svh bg-kumo-canvas">
       <AppSidebar />
 
       <main className="min-w-0 flex-1 overflow-y-auto">
@@ -245,6 +245,7 @@ function PageLoader() {
 }
 
 function AppSidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -261,7 +262,7 @@ function AppSidebar() {
         onPointerEnter={preload}
         onPointerDown={preload}
         onFocus={preload}
-        onClick={() => navigate(item.path)}
+        onClick={() => { navigate(item.path); if (isMobile) setOpenMobile(false); }}
       >
         {item.label}
       </Sidebar.MenuButton>

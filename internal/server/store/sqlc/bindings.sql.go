@@ -26,12 +26,12 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = ?1 AND n.name = ?2
+WHERE u.id = ?1 AND n.id = ?2
 `
 
 type GetUserNodeBindingParams struct {
-	UserName string `json:"user_name"`
-	NodeName string `json:"node_name"`
+	ProxyUserID string `json:"proxy_user_id"`
+	NodeID      string `json:"node_id"`
 }
 
 type GetUserNodeBindingRow struct {
@@ -49,7 +49,7 @@ type GetUserNodeBindingRow struct {
 }
 
 func (q *Queries) GetUserNodeBinding(ctx context.Context, arg GetUserNodeBindingParams) (GetUserNodeBindingRow, error) {
-	row := q.db.QueryRowContext(ctx, getUserNodeBinding, arg.UserName, arg.NodeName)
+	row := q.db.QueryRowContext(ctx, getUserNodeBinding, arg.ProxyUserID, arg.NodeID)
 	var i GetUserNodeBindingRow
 	err := row.Scan(
 		&i.ID,
@@ -135,7 +135,7 @@ func (q *Queries) ListUserNodeBindings(ctx context.Context) ([]ListUserNodeBindi
 	return items, nil
 }
 
-const listUserNodeBindingsByUserName = `-- name: ListUserNodeBindingsByUserName :many
+const listUserNodeBindingsByUserID = `-- name: ListUserNodeBindingsByUserID :many
 SELECT
   b.id,
   b.proxy_user_id,
@@ -151,11 +151,11 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = ?1
+WHERE u.id = ?1
 ORDER BY u.name, n.name
 `
 
-type ListUserNodeBindingsByUserNameRow struct {
+type ListUserNodeBindingsByUserIDRow struct {
 	ID                string          `json:"id"`
 	ProxyUserID       string          `json:"proxy_user_id"`
 	ProxyUserName     string          `json:"proxy_user_name"`
@@ -169,15 +169,15 @@ type ListUserNodeBindingsByUserNameRow struct {
 	UpdatedAt         string          `json:"updated_at"`
 }
 
-func (q *Queries) ListUserNodeBindingsByUserName(ctx context.Context, userName string) ([]ListUserNodeBindingsByUserNameRow, error) {
-	rows, err := q.db.QueryContext(ctx, listUserNodeBindingsByUserName, userName)
+func (q *Queries) ListUserNodeBindingsByUserID(ctx context.Context, proxyUserID string) ([]ListUserNodeBindingsByUserIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUserNodeBindingsByUserID, proxyUserID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListUserNodeBindingsByUserNameRow
+	var items []ListUserNodeBindingsByUserIDRow
 	for rows.Next() {
-		var i ListUserNodeBindingsByUserNameRow
+		var i ListUserNodeBindingsByUserIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProxyUserID,

@@ -139,7 +139,7 @@ SELECT
   l.ingested_at
 FROM system_logs l
 JOIN nodes n ON n.id = l.node_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
 ORDER BY l.observed_at DESC
 LIMIT ?2
 `

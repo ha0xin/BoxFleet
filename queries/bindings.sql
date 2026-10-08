@@ -35,7 +35,7 @@ JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
 ORDER BY u.name, n.name;
 
--- name: ListUserNodeBindingsByUserName :many
+-- name: ListUserNodeBindingsByUserID :many
 SELECT
   b.id,
   b.proxy_user_id,
@@ -51,7 +51,7 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = sqlc.arg(user_name)
+WHERE u.id = sqlc.arg(proxy_user_id)
 ORDER BY u.name, n.name;
 
 -- name: GetUserNodeBinding :one
@@ -70,7 +70,7 @@ SELECT
 FROM user_node_bindings b
 JOIN proxy_users u ON u.id = b.proxy_user_id
 JOIN nodes n ON n.id = b.node_id
-WHERE u.name = sqlc.arg(user_name) AND n.name = sqlc.arg(node_name);
+WHERE u.id = sqlc.arg(proxy_user_id) AND n.id = sqlc.arg(node_id);
 
 -- name: SetUserNodeBindingEnabled :execrows
 UPDATE user_node_bindings

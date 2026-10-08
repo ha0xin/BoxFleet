@@ -137,7 +137,7 @@ const getMihomoProfileIDForUser = `-- name: GetMihomoProfileIDForUser :one
 SELECT COALESCE(binding.profile_id, 'mhp_default') AS profile_id
 FROM proxy_users u
 LEFT JOIN proxy_user_mihomo_profiles binding ON binding.proxy_user_id = u.id
-WHERE u.name = ?1
+WHERE (u.id = ?1 OR (u.name = ?1 AND u.deleted_at IS NULL))
   AND u.deleted_at IS NULL
 `
 

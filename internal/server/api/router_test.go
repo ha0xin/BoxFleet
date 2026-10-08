@@ -287,192 +287,39 @@ func TestNodeConfigEndpointRejectsBadToken(t *testing.T) {
 	}
 }
 
-func TestAdminSubscriptionLifecycleAndDynamicProvider(t *testing.T) {
-	ctx := context.Background()
-	store := openAPITestDB(t)
-	seedAPITestNode(t, ctx, store)
-	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-
-	req := adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/subscription", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("initial get status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var subscription adminUserSubscription
-	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
-		t.Fatal(err)
-	}
-	if subscription.Active || subscription.URL != "" {
-		t.Fatalf("initial subscription = %#v", subscription)
-	}
-
-	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/subscription", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("issue status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
-		t.Fatal(err)
-	}
-	if !subscription.Active || !strings.HasPrefix(subscription.URL, "http://example.com/sub/bfsub_") {
-		t.Fatalf("issued subscription = %#v", subscription)
-	}
-	if subscription.ProviderURL != subscription.URL ||
-		!strings.HasPrefix(subscription.MihomoURL, subscription.URL) ||
-		!strings.HasSuffix(subscription.MihomoURL, "/mihomo.yaml") {
-		t.Fatalf("issued subscription formats = %#v", subscription)
-	}
-	oldPath := strings.TrimPrefix(subscription.URL, "http://example.com")
-	oldMihomoPath := strings.TrimPrefix(subscription.MihomoURL, "http://example.com")
-
-	req = httptest.NewRequest(http.MethodGet, oldMihomoPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("Mihomo profile status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if body := rec.Body.String(); !strings.Contains(body, "proxies:") ||
-		!strings.Contains(body, "proxy-groups:") ||
-		!strings.Contains(body, "include-all-proxies: true") ||
-		!strings.Contains(body, "MATCH,PROXY") ||
-		strings.Contains(body, "proxy-providers:") {
-		t.Fatalf("Mihomo profile body = %s", body)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("provider status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if contentType := rec.Header().Get("Content-Type"); contentType != "application/yaml; charset=utf-8" {
-		t.Fatalf("content type = %q", contentType)
-	}
-	if body := rec.Body.String(); !strings.Contains(body, "proxies:") ||
-		!strings.Contains(body, "name: vless-39090") ||
-		!strings.Contains(body, "type: vless") {
-		t.Fatalf("provider body = %s", body)
-	}
-	etag := rec.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("provider missing ETag")
-	}
-	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
-	req.Header.Set("If-None-Match", etag)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
-		t.Fatalf("conditional status = %d, body = %q", rec.Code, rec.Body.String())
-	}
-
-	req = adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/subscription", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
-		t.Fatal(err)
-	}
-	if subscription.LastUsedAt == "" {
-		t.Fatalf("last_used_at was not exposed: %#v", subscription)
-	}
-
-	proxy, err := store.GetProxy(ctx, "azus", "vless-39090")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.UpdateProxy(ctx, db.UpdateProxyParams{
-		NodeName:          proxy.NodeName,
-		Name:              proxy.Name,
-		Listen:            proxy.Listen,
-		ListenPort:        39091,
-		Transport:         proxy.Transport,
-		Enabled:           proxy.Enabled,
-		TrafficMultiplier: proxy.TrafficMultiplier,
-		SettingsJSON:      proxy.SettingsJSON,
-		InboundRulesJSON:  proxy.InboundRulesJSON,
-		OutboundRulesJSON: proxy.OutboundRulesJSON,
-		RouteRulesJSON:    proxy.RouteRulesJSON,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "port: 39091") {
-		t.Fatalf("modified provider status = %d, body = %q", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("ETag") == etag {
-		t.Fatal("provider ETag did not change after proxy edit")
-	}
-
-	if _, err := store.SetProxyCredentialEnabled(ctx, "alice", "azus", "vless-39090", false); err != nil {
-		t.Fatal(err)
-	}
-	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || rec.Body.String() != "proxies: []\n" {
-		t.Fatalf("updated provider status = %d, body = %q", rec.Code, rec.Body.String())
-	}
-
-	req = adminJSONRequest(t, http.MethodPost, "/api/admin/users/alice/subscription/rotate", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rotate status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&subscription); err != nil {
-		t.Fatal(err)
-	}
-	newPath := strings.TrimPrefix(subscription.URL, "http://example.com")
-	if newPath == oldPath {
-		t.Fatal("rotate kept the old URL")
-	}
-	req = httptest.NewRequest(http.MethodGet, oldPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("old token status after rotate = %d", rec.Code)
-	}
-
-	req = adminJSONRequest(t, http.MethodDelete, "/api/admin/users/alice/subscription", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("revoke status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	req = httptest.NewRequest(http.MethodGet, newPath, nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("revoked token status = %d", rec.Code)
-	}
-}
-
-func TestAdminProxyProviderRequiresAuth(t *testing.T) {
+func TestUserSubscriptionRoutesRemovedAndConnectionInfoRetained(t *testing.T) {
 	store := openAPITestDB(t)
 	seedAPITestNode(t, context.Background(), store)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/users/alice/proxy-provider", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated status = %d", rec.Code)
+	for _, item := range []struct{ method, path string }{
+		{http.MethodGet, "/api/admin/users/alice/subscription"},
+		{http.MethodPost, "/api/admin/users/alice/subscription"},
+		{http.MethodPost, "/api/admin/users/alice/subscription/rotate"},
+		{http.MethodDelete, "/api/admin/users/alice/subscription"},
+		{http.MethodGet, "/api/admin/users/alice/proxy-provider"},
+		{http.MethodGet, "/sub/bfsub_retired"},
+		{http.MethodGet, "/sub/bfsub_retired/mihomo.yaml"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, adminJSONRequest(t, item.method, item.path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status=%d", item.method, item.path, rec.Code)
+		}
 	}
-
-	req = adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/proxy-provider", nil)
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "proxies:") {
-		t.Fatalf("authenticated status = %d, body = %s", rec.Code, rec.Body.String())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, adminJSONRequest(t, http.MethodGet, "/api/admin/users/alice/connection-info", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("connection info status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestAdminNetworkEventsPaginationAndFilters(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
+	// Pagination fixtures must outlive the production default retention period.
+	if err := store.SetNetworkEventRetentionDays(ctx, db.MaxNetworkEventRetentionDays); err != nil {
+		t.Fatal(err)
+	}
 	seedAPITestNode(t, ctx, store)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})
 	if err := store.RecordLogEvents(ctx, db.LogEventReport{
@@ -766,27 +613,34 @@ func TestAdminNodeReenroll(t *testing.T) {
 		t.Fatal("active node's token should survive a rejected re-enroll")
 	}
 
-	// Delete hides the node and revokes its token. Restore makes the disabled
-	// record visible again, then re-enroll returns it to pending.
-	delReq := adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/edge-r", nil)
+	// Deletion ends this identity. A same-name enrollment creates a new ID.
+	oldNode, err := store.GetNode(ctx, "edge-r")
+	if err != nil {
+		t.Fatal(err)
+	}
 	delRec := httptest.NewRecorder()
-	router.ServeHTTP(delRec, delReq)
+	router.ServeHTTP(delRec, adminJSONRequest(t, http.MethodDelete, "/api/admin/nodes/"+oldNode.ID, nil))
 	if delRec.Code != http.StatusOK {
-		t.Fatalf("decommission status = %d, body = %s", delRec.Code, delRec.Body.String())
+		t.Fatalf("delete: %d %s", delRec.Code, delRec.Body.String())
 	}
-	restoreReq := adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/edge-r/restore", nil)
 	restoreRec := httptest.NewRecorder()
-	router.ServeHTTP(restoreRec, restoreReq)
-	if restoreRec.Code != http.StatusOK {
-		t.Fatalf("restore status = %d, body = %s", restoreRec.Code, restoreRec.Body.String())
+	router.ServeHTTP(restoreRec, adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/"+oldNode.ID+"/restore", nil))
+	if restoreRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("restore: %d", restoreRec.Code)
 	}
-	restored, thirdCfg := decodeBootstrap(t, reenroll())
-	if restored.Status != "pending" {
-		t.Fatalf("status after restore re-enroll = %q, want pending", restored.Status)
+	freshRec := httptest.NewRecorder()
+	router.ServeHTTP(freshRec, adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/bootstrap", map[string]string{"name": "edge-r", "public_host": "192.0.2.9"}))
+	fresh, freshCfg := decodeBootstrap(t, freshRec)
+	if fresh.ID == oldNode.ID {
+		t.Fatal("enrollment reused deleted identity")
 	}
-	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", thirdCfg.Token); !ok {
-		t.Fatal("restored token did not verify")
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", secondCfg.Token); ok {
+		t.Fatal("old token authenticated replacement")
 	}
+	if ok, _ := store.VerifyNodeToken(ctx, "edge-r", freshCfg.Token); !ok {
+		t.Fatal("new token did not authenticate")
+	}
+
 }
 
 func TestAdminNodePatchMultiHost(t *testing.T) {
@@ -1588,13 +1442,13 @@ func TestAdminDeleteResourceEndpointsHideAndRestoreResources(t *testing.T) {
 	req = adminJSONRequest(t, http.MethodPost, "/api/admin/nodes/azus/restore", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("restore node status = %d, body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("deleted node restore = %d", rec.Code)
 	}
-	node, err := store.GetNode(ctx, "azus")
-	if err != nil || node.Status != "disabled" {
-		t.Fatalf("restored node = %#v, err = %v; want visible and disabled", node, err)
+	if _, err := store.GetNode(ctx, "azus"); err == nil {
+		t.Fatal("restore revived deleted node")
 	}
+
 }
 
 func TestNodeSystemLogsEndpointDiscardsReports(t *testing.T) {

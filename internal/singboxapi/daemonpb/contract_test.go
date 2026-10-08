@@ -12,7 +12,7 @@ import (
 // upstream. This file checks the deliberate deviations — the things a
 // conformance diff cannot express, because they are the point of the trim.
 
-const upstreamTag = "v1.14.0-beta.2"
+const upstreamTag = "v1.14.2"
 
 func TestOnlyTheSubscriptionRPCIsReachable(t *testing.T) {
 	// Upstream's StartedService declares 34 RPCs, including StopService,

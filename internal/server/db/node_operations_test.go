@@ -212,3 +212,23 @@ func TestNodeOperationCancelAndExpiredLeaseReclaim(t *testing.T) {
 		t.Fatalf("stale lease event error = %v", err)
 	}
 }
+
+func TestQueueCancellationDoesNotCancelClaimedOperation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+		t.Fatal(err)
+	}
+	queued, _, err := store.CreateNodeOperation(ctx, CreateNodeOperationParams{NodeName: "edge", Kind: "config.reconcile", Payload: json.RawMessage(`{}`), IdempotencyKey: "queue-race"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := store.ClaimNodeOperation(ctx, ClaimNodeOperationParams{NodeName: "edge", Capabilities: []string{"operations.v1"}})
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	after, err := store.CancelUnclaimedNodeOperation(ctx, queued.ID)
+	if err != nil || after.Status != "running" || after.CancelRequested || after.ID != claimed.Operation.ID {
+		t.Fatalf("queue timeout cancelled claimed operation: %+v %v", after, err)
+	}
+}

@@ -113,7 +113,7 @@ func (db *DB) CreateProxyUser(ctx context.Context, params CreateProxyUserParams)
 	if err != nil {
 		return ProxyUser{}, err
 	}
-	return db.GetProxyUser(ctx, name)
+	return db.GetProxyUser(ctx, userID)
 }
 
 func (db *DB) ListProxyUsers(ctx context.Context) ([]ProxyUser, error) {
@@ -296,7 +296,7 @@ func userPageSort(sort, direction string) string {
 }
 
 func (db *DB) GetProxyUser(ctx context.Context, name string) (ProxyUser, error) {
-	user, err := db.q.GetProxyUserByName(ctx, normalizeName(name))
+	user, err := resolveProxyUser(ctx, db.q, name, false)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ProxyUser{}, fmt.Errorf("proxy user %q not found", name)
@@ -310,9 +310,13 @@ func (db *DB) SetProxyUserStatus(ctx context.Context, name, status string) error
 	if status != "active" && status != "disabled" {
 		return fmt.Errorf("unsupported user status %q", status)
 	}
+	user, err := db.GetProxyUser(ctx, name)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetProxyUserStatus(ctx, store.SetProxyUserStatusParams{
 		Status: status,
-		Name:   normalizeName(name),
+		ID:     user.ID,
 	})
 	if err != nil {
 		return err
@@ -328,18 +332,26 @@ func (db *DB) DisableProxyUser(ctx context.Context, name string) (ProxyUser, err
 }
 
 func (db *DB) SoftDeleteProxyUser(ctx context.Context, name string) (ProxyUser, error) {
-	affected, err := db.q.SoftDeleteProxyUser(ctx, normalizeName(name))
+	user, err := db.GetProxyUser(ctx, name)
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	affected, err := db.q.SoftDeleteProxyUser(ctx, user.ID)
 	if err != nil {
 		return ProxyUser{}, err
 	}
 	if err := requireAffected(affected, "proxy user", name); err != nil {
 		return ProxyUser{}, err
 	}
-	return db.getProxyUserIncludingDeleted(ctx, name)
+	return db.getProxyUserIncludingDeleted(ctx, user.ID)
 }
 
 func (db *DB) RestoreProxyUser(ctx context.Context, name string) (ProxyUser, error) {
-	affected, err := db.q.RestoreProxyUser(ctx, normalizeName(name))
+	user, err := db.getProxyUserIncludingDeleted(ctx, name)
+	if err != nil {
+		return ProxyUser{}, err
+	}
+	affected, err := db.q.RestoreProxyUser(ctx, user.ID)
 	if err != nil {
 		return ProxyUser{}, err
 	}
@@ -350,7 +362,7 @@ func (db *DB) RestoreProxyUser(ctx context.Context, name string) (ProxyUser, err
 }
 
 func (db *DB) getProxyUserIncludingDeleted(ctx context.Context, name string) (ProxyUser, error) {
-	user, err := db.q.GetProxyUserByNameIncludingDeleted(ctx, normalizeName(name))
+	user, err := resolveProxyUser(ctx, db.q, name, true)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ProxyUser{}, fmt.Errorf("proxy user %q not found", name)
@@ -388,8 +400,12 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 		expireAt = parsed
 	}
 	err := db.withTx(ctx, func(q *store.Queries) error {
+		user, err := resolveProxyUser(ctx, q, normalized, false)
+		if err != nil {
+			return err
+		}
 		if params.DisplayName != nil {
-			affected, err := q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{DisplayName: *params.DisplayName, Name: normalized})
+			affected, err := q.SetProxyUserDisplayName(ctx, store.SetProxyUserDisplayNameParams{DisplayName: *params.DisplayName, ID: user.ID})
 			if err != nil {
 				return err
 			}
@@ -398,7 +414,7 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 			}
 		}
 		if params.GlobalQuotaBytes != nil {
-			affected, err := q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{GlobalQuotaBytes: *params.GlobalQuotaBytes, Name: normalized})
+			affected, err := q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{GlobalQuotaBytes: *params.GlobalQuotaBytes, ID: user.ID})
 			if err != nil {
 				return err
 			}
@@ -407,7 +423,7 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 			}
 		}
 		if params.ExpireAt != nil {
-			affected, err := q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{ExpireAt: expireAt, Name: normalized})
+			affected, err := q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{ExpireAt: expireAt, ID: user.ID})
 			if err != nil {
 				return err
 			}
@@ -416,7 +432,7 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 			}
 		}
 		if params.Status != nil {
-			affected, err := q.SetProxyUserStatus(ctx, store.SetProxyUserStatusParams{Status: *params.Status, Name: normalized})
+			affected, err := q.SetProxyUserStatus(ctx, store.SetProxyUserStatusParams{Status: *params.Status, ID: user.ID})
 			if err != nil {
 				return err
 			}
@@ -433,9 +449,13 @@ func (db *DB) UpdateProxyUser(ctx context.Context, name string, params UpdatePro
 }
 
 func (db *DB) SetProxyUserQuota(ctx context.Context, name string, quotaBytes int64) error {
+	user, err := db.GetProxyUser(ctx, name)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetProxyUserQuota(ctx, store.SetProxyUserQuotaParams{
 		GlobalQuotaBytes: quotaBytes,
-		Name:             normalizeName(name),
+		ID:               user.ID,
 	})
 	if err != nil {
 		return err
@@ -448,9 +468,13 @@ func (db *DB) SetProxyUserExpire(ctx context.Context, name, expireAt string) err
 	if err != nil {
 		return err
 	}
+	user, err := db.GetProxyUser(ctx, name)
+	if err != nil {
+		return err
+	}
 	affected, err := db.q.SetProxyUserExpire(ctx, store.SetProxyUserExpireParams{
 		ExpireAt: expires,
-		Name:     normalizeName(name),
+		ID:       user.ID,
 	})
 	if err != nil {
 		return err
@@ -470,4 +494,21 @@ func normalizeExpireAt(value string) (sql.NullString, error) {
 		return sql.NullString{}, fmt.Errorf("expire_at must be an RFC3339 timestamp: %q", value)
 	}
 	return sql.NullString{String: parsed.UTC().Format(time.RFC3339), Valid: true}, nil
+}
+
+// Compatibility entry points resolve an immutable ID first, then an exact name.
+// Even a deleted ID owns its identity: it must never resolve to a replacement.
+func resolveProxyUser(ctx context.Context, q *store.Queries, reference string, includingDeleted bool) (store.ProxyUser, error) {
+	reference = normalizeName(reference)
+	user, err := q.GetProxyUserByIDIncludingDeleted(ctx, reference)
+	if errors.Is(err, sql.ErrNoRows) {
+		if includingDeleted {
+			return q.GetProxyUserByNameIncludingDeleted(ctx, reference)
+		}
+		return q.GetProxyUserByName(ctx, reference)
+	}
+	if err == nil && user.DeletedAt.Valid && !includingDeleted {
+		return store.ProxyUser{}, sql.ErrNoRows
+	}
+	return user, err
 }

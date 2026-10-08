@@ -138,7 +138,7 @@ export function ReenrollNodeDialog({
 
   const mutation = useAdminMutation<void, AdminNodeBootstrap>(
     request,
-    (req) => req(`/api/admin/nodes/${encodeURIComponent(node.name)}/reenroll`, { method: "POST" }),
+    (req) => req(`/api/admin/nodes/${encodeURIComponent(node.id)}/reenroll`, { method: "POST" }),
     { onSuccess: (data) => setResult(data), toastError: false }
   );
 
@@ -270,7 +270,7 @@ export function EditNodeDialog({
       const hosts = values.hosts
         .map((h) => ({ id: h.id, host: h.host.trim(), tag: h.tag.trim(), selected: h.selected }))
         .filter((h) => h.host !== "");
-      return req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
+      return req(`/api/admin/nodes/${encodeURIComponent(node.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ name: values.name.trim(), hosts, api_base_url: values.api_base_url.trim() })
       });
@@ -374,13 +374,12 @@ export function DeleteNodeDialog({
   return (
     <SoftDeleteDialog
       request={request}
-      endpoint={`/api/admin/nodes/${encodeURIComponent(node.name)}`}
+      endpoint={`/api/admin/nodes/${encodeURIComponent(node.id)}`}
+      resource={{ kind: "node", id: node.id }}
       title="Delete node"
       description={
         <>
-          Delete <span className="font-medium text-kumo-default">{node.name}</span>? This disables it,
-          revokes its agent token, and hides it from the default inventory. You can restore it from the Deleted
-          filter. Use <span className="font-medium text-kumo-default">Disable</span> instead to only pause serving.
+          Delete <span className="font-medium text-kumo-default">{node.name}</span> and revoke its agent token?
         </>
       }
       onClose={onClose}

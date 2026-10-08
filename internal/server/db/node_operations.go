@@ -412,6 +412,14 @@ func (db *DB) RequestNodeOperationCancel(ctx context.Context, operationID string
 	return nodeOperationFromStore(row)
 }
 
+// A queue deadline must not cancel an update that raced ahead and was claimed.
+func (db *DB) CancelUnclaimedNodeOperation(ctx context.Context, operationID string) (NodeOperation, error) {
+	if _, err := db.q.CancelUnclaimedNodeOperation(ctx, operationID); err != nil {
+		return NodeOperation{}, err
+	}
+	return db.GetNodeOperation(ctx, operationID)
+}
+
 func (db *DB) RecordNodeOperationEvent(ctx context.Context, params RecordNodeOperationEventParams) (NodeOperation, error) {
 	node, err := db.GetNode(ctx, params.NodeName)
 	if err != nil {

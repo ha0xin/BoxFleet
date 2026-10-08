@@ -154,7 +154,7 @@ func (db *DB) CreateProxy(ctx context.Context, params CreateProxyParams) (Proxy,
 	}); err != nil {
 		return Proxy{}, err
 	}
-	created, err := db.GetProxy(ctx, node.Name, proxy.Name)
+	created, err := db.GetProxyByID(ctx, proxyID)
 	if err != nil {
 		return Proxy{}, err
 	}
@@ -185,7 +185,7 @@ func (db *DB) UpdateProxy(ctx context.Context, params UpdateProxyParams) (Proxy,
 	if err != nil {
 		return Proxy{}, err
 	}
-	existing, err := db.GetProxy(ctx, node.Name, params.Name)
+	existing, err := db.GetProxy(ctx, node.ID, params.Name)
 	if err != nil {
 		return Proxy{}, err
 	}
@@ -213,7 +213,7 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 	if currentName == "" {
 		return Proxy{}, errors.New("current proxy name is required")
 	}
-	existing, err := db.GetProxy(ctx, node.Name, currentName)
+	existing, err := db.GetProxy(ctx, node.ID, currentName)
 	if err != nil {
 		return Proxy{}, err
 	}
@@ -235,10 +235,7 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 		return Proxy{}, err
 	}
 	err = db.withTx(ctx, func(qtx *store.Queries) error {
-		current, err := qtx.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
-			NodeName: node.Name,
-			Name:     currentName,
-		})
+		current, err := resolveProxy(ctx, qtx, node.ID, currentName, false)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("proxy %q on node %q not found", currentName, node.Name)
@@ -265,7 +262,7 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 			OutboundRulesJson: proxy.OutboundRulesJSON,
 			RouteRulesJson:    proxy.RouteRulesJSON,
 			NodeID:            node.ID,
-			Name:              proxy.Name,
+			ID:                existing.ID,
 		})
 		if err != nil {
 			return err
@@ -275,7 +272,7 @@ func (db *DB) UpdateProxyByName(ctx context.Context, nodeName, currentName strin
 	if err != nil {
 		return Proxy{}, err
 	}
-	return db.GetProxy(ctx, node.Name, proxy.Name)
+	return db.GetProxyByID(ctx, existing.ID)
 }
 
 func renameProxyTx(ctx context.Context, qtx *store.Queries, proxyID, currentName, newName string) error {
@@ -330,10 +327,7 @@ func (db *DB) RenameProxy(ctx context.Context, nodeName, oldName, newName string
 	}
 	var proxyID string
 	err := db.withTx(ctx, func(qtx *store.Queries) error {
-		existing, err := qtx.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
-			NodeName: nodeName,
-			Name:     oldName,
-		})
+		existing, err := resolveProxy(ctx, qtx, nodeName, oldName, false)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("proxy %q on node %q not found", oldName, nodeName)
@@ -349,7 +343,7 @@ func (db *DB) RenameProxy(ctx context.Context, nodeName, oldName, newName string
 	if err != nil {
 		return Proxy{}, err
 	}
-	proxy, err := db.GetProxy(ctx, nodeName, newName)
+	proxy, err := db.GetProxyByID(ctx, proxyID)
 	if err != nil {
 		return Proxy{}, err
 	}
@@ -586,10 +580,7 @@ func proxyPageSort(sort, direction string) string {
 }
 
 func (db *DB) GetProxy(ctx context.Context, nodeName, name string) (Proxy, error) {
-	row, err := db.q.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{
-		NodeName: normalizeName(nodeName),
-		Name:     normalizeName(name),
-	})
+	row, err := resolveProxy(ctx, db.q, normalizeName(nodeName), normalizeName(name), false)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Proxy{}, fmt.Errorf("proxy %q on node %q not found", name, nodeName)
@@ -604,14 +595,14 @@ func (db *DB) SetProxyEnabled(ctx context.Context, nodeName, name string, enable
 	if err != nil {
 		return err
 	}
-	proxy, err := db.GetProxy(ctx, node.Name, name)
+	proxy, err := db.GetProxy(ctx, node.ID, name)
 	if err != nil {
 		return err
 	}
 	affected, err := db.q.SetProxyEnabled(ctx, store.SetProxyEnabledParams{
 		Enabled: boolToInt64(enabled),
 		NodeID:  node.ID,
-		Name:    proxy.Name,
+		ID:      proxy.ID,
 	})
 	if err != nil {
 		return err
@@ -631,23 +622,29 @@ func (db *DB) SoftDeleteProxy(ctx context.Context, nodeName, name string) (Proxy
 	if err != nil {
 		return Proxy{}, err
 	}
-	affected, err := db.q.SoftDeleteProxy(ctx, proxy.ID)
+	err = db.withTx(ctx, func(q *store.Queries) error {
+		affected, err := q.SoftDeleteProxy(ctx, proxy.ID)
+		if err != nil {
+			return err
+		}
+		if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
+			return err
+		}
+		if err := q.DeleteProxyAliases(ctx, proxy.ID); err != nil {
+			return err
+		}
+		return retireResourceDependenciesTx(ctx, q)
+	})
 	if err != nil {
 		return Proxy{}, err
 	}
-	if err := requireAffected(affected, "proxy", name+"@"+nodeName); err != nil {
-		return Proxy{}, err
-	}
-	return db.getProxyIncludingDeleted(ctx, nodeName, proxy.Name)
+	return db.getProxyIncludingDeleted(ctx, proxy.NodeID, proxy.ID)
 }
 
 func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, error) {
-	restoredName := ""
+	restoredID := ""
 	err := db.withTx(ctx, func(qtx *store.Queries) error {
-		row, err := qtx.GetProxyByNodeAndNameIncludingDeleted(ctx, store.GetProxyByNodeAndNameIncludingDeletedParams{
-			NodeName: normalizeName(nodeName),
-			Name:     normalizeName(name),
-		})
+		row, err := resolveProxy(ctx, qtx, normalizeName(nodeName), normalizeName(name), true)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("proxy %q on node %q not found", name, nodeName)
@@ -665,20 +662,18 @@ func (db *DB) RestoreProxy(ctx context.Context, nodeName, name string) (Proxy, e
 		if err := requireAffected(affected, "deleted proxy", name+"@"+nodeName); err != nil {
 			return err
 		}
-		restoredName = proxy.Name
-		return nil
+		restoredID = proxy.ID
+		// Restore endpoint usability, but require explicit path/access grants again.
+		return qtx.RestoreProxyEndpoints(ctx, proxy.ID)
 	})
 	if err != nil {
 		return Proxy{}, err
 	}
-	return db.GetProxy(ctx, nodeName, restoredName)
+	return db.GetProxyByID(ctx, restoredID)
 }
 
 func (db *DB) getProxyIncludingDeleted(ctx context.Context, nodeName, name string) (Proxy, error) {
-	row, err := db.q.GetProxyByNodeAndNameIncludingDeleted(ctx, store.GetProxyByNodeAndNameIncludingDeletedParams{
-		NodeName: normalizeName(nodeName),
-		Name:     normalizeName(name),
-	})
+	row, err := resolveProxy(ctx, db.q, normalizeName(nodeName), normalizeName(name), true)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Proxy{}, fmt.Errorf("proxy %q on node %q not found", name, nodeName)
@@ -885,4 +880,23 @@ func proxyFromDetail(row store.ProxyDetail) Proxy {
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
 	}
+}
+
+func resolveProxy(ctx context.Context, q *store.Queries, nodeReference, reference string, includingDeleted bool) (store.ProxyDetail, error) {
+	node, err := resolveNode(ctx, q, nodeReference, includingDeleted)
+	if err != nil {
+		return store.ProxyDetail{}, err
+	}
+	reference = normalizeName(reference)
+	proxy, err := q.GetProxyByIDIncludingDeleted(ctx, reference)
+	if errors.Is(err, sql.ErrNoRows) {
+		if includingDeleted {
+			return q.GetProxyByNodeAndNameIncludingDeleted(ctx, store.GetProxyByNodeAndNameIncludingDeletedParams{NodeName: node.ID, Name: reference})
+		}
+		return q.GetProxyByNodeAndName(ctx, store.GetProxyByNodeAndNameParams{NodeName: node.ID, Name: reference})
+	}
+	if err == nil && (proxy.NodeID != node.ID || !includingDeleted && (proxy.DeletedAt.Valid || proxy.NodeDeletedAt.Valid)) {
+		return store.ProxyDetail{}, sql.ErrNoRows
+	}
+	return proxy, err
 }

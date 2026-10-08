@@ -359,3 +359,38 @@ OFFSET 0`, "node-1")
 		t.Fatalf("node-scoped page does not use the composite index:\n%s", plan)
 	}
 }
+
+func TestSystemLogTimeRange(t *testing.T) {
+	ctx := context.Background()
+	store := openTestDB(t)
+	if _, err := store.CreateNode(ctx, "time-test", "192.0.2.1", ""); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	var entries []SystemLogInput
+	for i := 0; i < 4; i++ {
+		entries = append(entries, SystemLogInput{Service: "sing-box", RawMessage: strconv.Itoa(i), ObservedAt: base.Add(time.Duration(i) * time.Minute).Format(time.RFC3339Nano), Cursor: strconv.Itoa(i)})
+	}
+	if err := store.RecordSystemLogs(ctx, SystemLogReport{NodeName: "time-test", Entries: entries}); err != nil {
+		t.Fatal(err)
+	}
+	// Offset timestamps must describe the same bounds; start is inclusive and end exclusive.
+	filter := SystemLogFilter{Start: base.Add(time.Minute).In(time.FixedZone("test", 8*3600)).Format(time.RFC3339Nano), End: base.Add(3 * time.Minute).Format(time.RFC3339Nano), Limit: 1}
+	page, err := store.ListSystemLogsPage(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.Logs) != 1 || page.Logs[0].RawMessage != "2" {
+		t.Fatalf("unexpected time page: %#v", page)
+	}
+	filter.Offset = 1
+	page, err = store.ListSystemLogsPage(ctx, filter)
+	if err != nil || page.Total != 2 || len(page.Logs) != 1 || page.Logs[0].RawMessage != "1" {
+		t.Fatalf("unexpected second page: %#v, %v", page, err)
+	}
+	for _, invalid := range []SystemLogFilter{{Start: "bad"}, {End: "bad"}, {Start: filter.End, End: filter.Start}, {Start: filter.Start, End: filter.Start}} {
+		if _, err := store.ListSystemLogsPage(ctx, invalid); err == nil {
+			t.Fatalf("accepted invalid time range: %#v", invalid)
+		}
+	}
+}

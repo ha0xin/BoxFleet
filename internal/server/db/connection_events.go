@@ -399,6 +399,9 @@ func (db *DB) RecordConnectionReport(ctx context.Context, report ConnectionRepor
 			}
 			return err
 		}
+		if err := q.ActivateNetworkStreamSource(ctx, store.ActivateNetworkStreamSourceParams{NodeID: node.ID, StartedAt: windowStart}); err != nil {
+			return err
+		}
 		// One lookup per distinct credential name rather than per bucket: a
 		// busy window repeats the same handful of names across hundreds of
 		// buckets, and the map is bounded by the batch cap above.
@@ -450,6 +453,7 @@ func (db *DB) RecordConnectionReport(ctx context.Context, report ConnectionRepor
 				Outbound:          bucket.Outbound,
 				OutboundType:      bucket.OutboundType,
 				Chain:             model.ConnectionChainString(bucket.Chain),
+				ConnectionID:      bucket.ConnectionID,
 				ConnectionsOpened: bucket.ConnectionsOpened,
 				ConnectionsClosed: bucket.ConnectionsClosed,
 				UplinkBytes:       bucket.UplinkBytes,
@@ -481,6 +485,13 @@ func sanitizeConnectionBucket(bucket ConnectionBucket) (ConnectionBucket, bool) 
 	bucket, ok := bucket.Normalize()
 	if !ok {
 		return bucket, false
+	}
+	if len(bucket.ConnectionID) > 256 {
+		return bucket, false
+	}
+	if bucket.ConnectionID != "" {
+		bucket.ConnectionsOpened = min(bucket.ConnectionsOpened, 1)
+		bucket.ConnectionsClosed = min(bucket.ConnectionsClosed, 1)
 	}
 	bucket.AuthName = truncateConnectionField(bucket.AuthName, maxConnectionAuthNameLen)
 	bucket.SourceIP = truncateConnectionField(bucket.SourceIP, maxConnectionHostLen)

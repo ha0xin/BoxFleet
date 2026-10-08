@@ -83,7 +83,7 @@ behavior. Treat a failure as a real signal before adjusting the assertion.
 
 - **Upstream proto conformance.** `internal/singboxapi/daemonpb` diffs the
   vendored descriptor against
-  `testdata/upstream-v1.14.0-beta.2.descriptorset.binpb`, a committed copy of the
+  `testdata/upstream-v1.14.2.descriptorset.binpb`, a committed copy of the
   real compiled upstream descriptor. See
   [connection telemetry](#connection-telemetry).
 
@@ -160,7 +160,7 @@ table scrolling, and known console-error checks covered.
 
 Real-node service and sing-box checks belong to the deployment smoke flow, not
 the regular suite. Follow [deployment](deployment.md) and the
-[azus runbook](azus-runbook.md).
+[Docker runbook](../deploy/docker/README.md).
 
 Performance-sensitive releases also follow [performance.md](performance.md).
 Query-plan tests protect bounded access paths, while absolute P95 measurements

@@ -151,6 +151,7 @@ INSERT INTO connection_events (
   outbound,
   outbound_type,
   chain,
+  connection_id,
   connections_opened,
   connections_closed,
   uplink_bytes,
@@ -178,6 +179,7 @@ INSERT INTO connection_events (
   sqlc.arg(outbound),
   sqlc.arg(outbound_type),
   sqlc.arg(chain),
+  sqlc.arg(connection_id),
   sqlc.arg(connections_opened),
   sqlc.arg(connections_closed),
   sqlc.arg(uplink_bytes),
@@ -188,11 +190,11 @@ INSERT INTO connection_events (
   sqlc.arg(window_start),
   sqlc.arg(window_end)
 ) ON CONFLICT(aggregate_key) DO UPDATE SET
-  connections_opened = connection_events.connections_opened + excluded.connections_opened,
-  connections_closed = connection_events.connections_closed + excluded.connections_closed,
-  uplink_bytes = connection_events.uplink_bytes + excluded.uplink_bytes,
-  downlink_bytes = connection_events.downlink_bytes + excluded.downlink_bytes,
-  duration_ms_total = connection_events.duration_ms_total + excluded.duration_ms_total,
+  connections_opened = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.connections_opened, excluded.connections_opened) ELSE connection_events.connections_opened + excluded.connections_opened END,
+  connections_closed = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.connections_closed, excluded.connections_closed) ELSE connection_events.connections_closed + excluded.connections_closed END,
+  uplink_bytes = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.uplink_bytes, excluded.uplink_bytes) ELSE connection_events.uplink_bytes + excluded.uplink_bytes END,
+  downlink_bytes = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.downlink_bytes, excluded.downlink_bytes) ELSE connection_events.downlink_bytes + excluded.downlink_bytes END,
+  duration_ms_total = CASE WHEN excluded.connection_id <> '' THEN MAX(connection_events.duration_ms_total, excluded.duration_ms_total) ELSE connection_events.duration_ms_total + excluded.duration_ms_total END,
   proxy_user_id = COALESCE(connection_events.proxy_user_id, excluded.proxy_user_id),
   window_start = MIN(connection_events.window_start, excluded.window_start),
   window_end = MAX(connection_events.window_end, excluded.window_end),
@@ -287,8 +289,15 @@ LIMIT sqlc.arg(limit);
 -- scan rather than a full table scan.
 -- name: DeleteConnectionEventsBefore :exec
 DELETE FROM connection_events
-WHERE bucket_start < sqlc.arg(before_time);
+WHERE (connection_id = '' AND bucket_start < sqlc.arg(before_time))
+   OR (connection_id <> '' AND window_end < sqlc.arg(before_time));
 
 -- name: DeleteConnectionReportsBefore :exec
 DELETE FROM connection_reports
 WHERE window_end < sqlc.arg(before_time);
+
+-- name: ActivateNetworkStreamSource :exec
+INSERT INTO network_event_source_intervals(node_id, started_at)
+SELECT sqlc.arg(node_id), sqlc.arg(started_at)
+WHERE EXISTS(SELECT 1 FROM node_connection_telemetry WHERE node_id=sqlc.arg(node_id) AND enabled=1)
+AND NOT EXISTS(SELECT 1 FROM network_event_source_intervals WHERE node_id=sqlc.arg(node_id) AND ended_at IS NULL);

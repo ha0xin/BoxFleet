@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { FileTextIcon, MoonIcon, SunIcon } from "@phosphor-icons/react";
-import { Breadcrumbs, Button, LinkButton, Sidebar } from "@cloudflare/kumo";
+import { useNavigate } from "react-router-dom";
+import { ListIcon, MoonIcon, SunIcon } from "@phosphor-icons/react";
+import { Breadcrumbs, Button, Sidebar, useSidebar } from "@cloudflare/kumo";
 
 import { adminBasename } from "@/navigation";
 import { usePublishStatus } from "@/publish/publish-status";
@@ -14,33 +14,34 @@ import { useIsDarkMode } from "@/components/chart/use-color-mode";
  * `Sidebar.Header` (both `min-h-[58px]` with a bottom hairline, so the two
  * borders read as one continuous line) followed by the page title block.
  *
- * The bar's right slot carries the publish strip, a Logs shortcut (hidden on
- * the System Logs page itself), and the page-level `actions`. Every admin page
+ * The bar's right slot carries compact page actions and the color mode toggle. Publication notices occupy a separate row so pending
+ * changes cannot stretch the navigation bar. Every admin page
  * renders this once at the top; page content below owns its own
- * `max-w-[1400px]` container.
+ * responsive content container.
  */
 export function AppPageHeader({
   title,
   description,
-  actions
+  actions,
+  compact = false
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
+  compact?: boolean;
 }) {
-  const { status } = usePublishStatus();
+  const { status, changesError } = usePublishStatus();
   const navigate = useNavigate();
-  const location = useLocation();
-  const onSystemLogs = location.pathname.startsWith("/system-logs");
+  const { openMobile } = useSidebar();
   const isDarkMode = useIsDarkMode();
 
   return (
     <div className="flex flex-col">
       <div
-        className={`flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 sm:px-6 ${publishBarToneClass(status)}`}
+        className={`bf-page-topbar flex min-h-[58px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-2 transition-colors duration-300 lg:px-6`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <Sidebar.Trigger className="md:hidden" />
+          <Sidebar.Trigger className="size-8 lg:hidden" aria-label="Toggle sidebar navigation" aria-expanded={openMobile}><ListIcon size={16} /></Sidebar.Trigger>
           <Breadcrumbs size="sm">
             <span
               onClickCapture={(event) => {
@@ -56,22 +57,7 @@ export function AppPageHeader({
           </Breadcrumbs>
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <PublishStrip />
-          {!onSystemLogs ? (
-            <LinkButton
-              variant="ghost"
-              size="sm"
-              icon={FileTextIcon}
-              href={`${adminBasename()}/system-logs`}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                event.preventDefault();
-                navigate("/system-logs");
-              }}
-            >
-              <span className="hidden md:inline">Logs</span>
-            </LinkButton>
-          ) : null}
+          {compact ? actions : null}
           <Button
             type="button"
             variant="ghost"
@@ -85,17 +71,19 @@ export function AppPageHeader({
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[1400px] px-6 md:px-8 lg:px-10">
-        <header className="mb-4 flex flex-wrap items-start justify-between gap-4 pt-6">
+      {status !== "idle" || changesError ? <div className={`bf-page-publish transition-colors duration-300 border-b border-kumo-line px-4 py-2 sm:px-6 ${publishBarToneClass(status)}`}><PublishStrip /></div> : null}
+
+      {compact ? <h1 className="sr-only">{title}</h1> : <div className="mx-auto w-full px-4">
+        <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-kumo-line py-8">
           <div className="flex min-w-0 flex-col">
-            <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-kumo-default md:text-3xl">{title}</h1>
+            <h1 className="mb-2 text-xl font-semibold tracking-tight text-kumo-default">{title}</h1>
             {description ? (
-              <p className="max-w-2xl text-base leading-5 text-kumo-subtle lg:text-lg">{description}</p>
+              <p className="max-w-2xl text-sm leading-5 text-kumo-subtle">{description}</p>
             ) : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
         </header>
-      </div>
+      </div>}
     </div>
   );
 }

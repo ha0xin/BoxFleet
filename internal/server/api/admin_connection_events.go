@@ -7,48 +7,9 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/db"
 )
 
-// Admin reads over the sing-box 1.14 daemon connection stream.
-//
-// These sit beside the /network-events endpoints rather than replacing them.
-// The `service.api` config block does not parse on 1.13, so nodes still on the
-// old version produce journal-scraped log_events and nothing here. The split is
-// deliberate and visible: /connection-events/nodes tells the
-// admin UI exactly which nodes stream, so a mixed-version fleet reads as "this
-// node has a richer source" instead of as columns that are mysteriously empty.
-//
-// Every byte figure returned here is an estimate. sing-box drops silently when
-// a subscriber buffer fills, evicts its closed-connection ring at 1000 entries,
-// and resets connection ids on restart, so the coverage block travels with each
-// aggregate and callers must render it. Nothing here is "traffic": per-user
-// billing stays on the V2Ray counters that /traffic/series reads.
-
-// adminConnectionVolume is the measure tuple every aggregate carries. Opened
-// and closed are separate because a long-lived session contributes bytes to
-// several consecutive buckets — summing "connections" must use opened.
-type adminConnectionVolume struct {
-	ConnectionsOpened int64 `json:"connections_opened"`
-	ConnectionsClosed int64 `json:"connections_closed"`
-	UplinkBytes       int64 `json:"uplink_bytes"`
-	DownlinkBytes     int64 `json:"downlink_bytes"`
-	TotalBytes        int64 `json:"total_bytes"`
-	DurationMsTotal   int64 `json:"duration_ms_total"`
-}
-
-// adminConnectionCoverage is the collector's own loss telemetry. It is on every
-// response that carries bytes so a client cannot render the estimate without
-// the figure that qualifies it.
-type adminConnectionCoverage struct {
-	ConnectionsObserved     int64   `json:"connections_observed"`
-	ConnectionsAttributed   int64   `json:"connections_attributed"`
-	ConnectionsUnattributed int64   `json:"connections_unattributed"`
-	ConnectionsOrphaned     int64   `json:"connections_orphaned"`
-	StreamResets            int64   `json:"stream_resets"`
-	DroppedBuckets          int64   `json:"dropped_buckets"`
-	BytesObserved           int64   `json:"bytes_observed"`
-	BytesAttributed         int64   `json:"bytes_attributed"`
-	AttributionRatio        float64 `json:"attribution_ratio"`
-	Reports                 int64   `json:"reports"`
-}
+// Diagnostic reads over the opt-in sing-box connection source. Session byte
+// totals are lifetime estimates; interval-byte aggregate endpoints are retired.
+// Unified Logs and connection-start analytics live under /network-events.
 
 type adminConnectionEvent struct {
 	NodeName          string `json:"node_name"`
@@ -82,36 +43,6 @@ type adminConnectionEventsResponse struct {
 	Total  int64                  `json:"total"`
 	Limit  int64                  `json:"limit"`
 	Offset int64                  `json:"offset"`
-}
-
-type adminConnectionPoint struct {
-	BucketStart string `json:"bucket_start"`
-	adminConnectionVolume
-}
-
-type adminConnectionSeriesResponse struct {
-	Bucket        string                  `json:"bucket"`
-	OffsetMinutes int                     `json:"offset_minutes"`
-	Start         string                  `json:"start"`
-	End           string                  `json:"end"`
-	Points        []adminConnectionPoint  `json:"points"`
-	Totals        adminConnectionVolume   `json:"totals"`
-	Coverage      adminConnectionCoverage `json:"coverage"`
-}
-
-type adminConnectionHost struct {
-	Host string `json:"host"`
-	adminConnectionVolume
-}
-
-type adminConnectionHostsResponse struct {
-	Sort          string                  `json:"sort"`
-	Hosts         []adminConnectionHost   `json:"hosts"`
-	Totals        adminConnectionVolume   `json:"totals"`
-	DistinctHosts int64                   `json:"distinct_hosts"`
-	Limit         int64                   `json:"limit"`
-	Truncated     bool                    `json:"truncated"`
-	Coverage      adminConnectionCoverage `json:"coverage"`
 }
 
 // adminConnectionTelemetryNode never carries the secret. The renderer emits it
@@ -153,85 +84,12 @@ func adminConnectionEventsHandler(store *db.DB) http.HandlerFunc {
 	}
 }
 
-func adminConnectionSeriesHandler(store *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		params, ok := parseSeriesParams(w, r)
-		if !ok {
-			return
-		}
-		filter, ok := connectionEventScopeFilter(w, r)
-		if !ok {
-			return
-		}
-		filter.Start = params.StartRFC3339()
-		filter.End = params.EndRFC3339()
-		result, err := store.ConnectionSeries(r.Context(), db.ConnectionSeriesFilter{
-			ConnectionEventFilter: filter,
-			Bucket:                params.Bucket,
-			OffsetMinutes:         params.OffsetMinutes,
-		})
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		points := make([]adminConnectionPoint, 0, len(result.Points))
-		for _, point := range result.Points {
-			points = append(points, adminConnectionPoint{
-				BucketStart:           db.BucketKey(point.BucketStart),
-				adminConnectionVolume: adminConnectionVolumeOf(point.ConnectionVolume),
-			})
-		}
-		writeJSON(w, adminConnectionSeriesResponse{
-			Bucket:        string(params.Bucket),
-			OffsetMinutes: params.OffsetMinutes,
-			Start:         params.StartRFC3339(),
-			End:           params.EndRFC3339(),
-			Points:        points,
-			Totals:        adminConnectionVolumeOf(result.Totals),
-			Coverage:      adminConnectionCoverageOf(result.Coverage),
-		})
-	}
-}
-
-func adminConnectionHostsHandler(store *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// queryGroup is the shared whitelist mapper; reading `sort` through it
-		// keeps an unknown value a 422 instead of a silent fallback to bytes.
-		sort, ok := queryGroup(w, r, "bytes", "bytes", "connections")
-		if !ok {
-			return
-		}
-		filter, ok := connectionEventScopeFilter(w, r)
-		if !ok {
-			return
-		}
-		result, err := store.ConnectionHostUsage(
-			r.Context(),
-			filter,
-			db.ConnectionHostSort(sort),
-			queryBoundedLimit(r, 20, 100),
-		)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		hosts := make([]adminConnectionHost, 0, len(result.Hosts))
-		for _, host := range result.Hosts {
-			hosts = append(hosts, adminConnectionHost{
-				Host:                  host.Host,
-				adminConnectionVolume: adminConnectionVolumeOf(host.ConnectionVolume),
-			})
-		}
-		writeJSON(w, adminConnectionHostsResponse{
-			Sort:          sort,
-			Hosts:         hosts,
-			Totals:        adminConnectionVolumeOf(result.Totals),
-			DistinctHosts: result.DistinctHosts,
-			Limit:         int64(len(hosts)),
-			Truncated:     result.Truncated,
-			Coverage:      adminConnectionCoverageOf(result.Coverage),
-		})
-	}
+// Lifetime snapshots cannot answer bytes transferred within a time window.
+// Keep an explicit tombstone so callers cannot mistake removal for empty data.
+func adminConnectionAggregatesRetiredHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	writeJSON(w, map[string]string{"error": "Interval byte analytics are retired: connection snapshots contain lifetime totals. Use /api/admin/network-events/series and /api/admin/network-events/hosts for connection counts; use /api/admin/traffic/series for user traffic."})
 }
 
 // adminConnectionTelemetryNodesHandler is what makes the mixed-version fleet
@@ -277,34 +135,4 @@ func connectionEventScopeFilter(w http.ResponseWriter, r *http.Request) (db.Conn
 		Start:    start,
 		End:      end,
 	}, true
-}
-
-func adminConnectionVolumeOf(volume db.ConnectionVolume) adminConnectionVolume {
-	return adminConnectionVolume{
-		ConnectionsOpened: volume.ConnectionsOpened,
-		ConnectionsClosed: volume.ConnectionsClosed,
-		UplinkBytes:       volume.UplinkBytes,
-		DownlinkBytes:     volume.DownlinkBytes,
-		// Precomputed so no client has to re-derive the figure it ranks on.
-		TotalBytes:      volume.TotalBytes(),
-		DurationMsTotal: volume.DurationMsTotal,
-	}
-}
-
-func adminConnectionCoverageOf(coverage db.ConnectionCoverageTotals) adminConnectionCoverage {
-	return adminConnectionCoverage{
-		ConnectionsObserved:     coverage.ConnectionsObserved,
-		ConnectionsAttributed:   coverage.ConnectionsAttributed,
-		ConnectionsUnattributed: coverage.ConnectionsUnattributed,
-		ConnectionsOrphaned:     coverage.ConnectionsOrphaned,
-		StreamResets:            coverage.StreamResets,
-		DroppedBuckets:          coverage.DroppedBuckets,
-		BytesObserved:           coverage.BytesObserved,
-		BytesAttributed:         coverage.BytesAttributed,
-		// Computed here, not in the browser: the "empty window reports 1"
-		// convention lives with the coverage type and must not be re-invented
-		// per client.
-		AttributionRatio: coverage.ConnectionAttributionRatio(),
-		Reports:          coverage.Reports,
-	}
 }

@@ -2,8 +2,8 @@
 //
 // Upstream:  github.com/SagerNet/sing-box
 // File:      daemon/started_service.proto
-// Tag:       v1.14.0-beta.2
-// Commit:    03c3bf4c01e7b1fd165d0c46ff376828fa878aab
+// Tag:       v1.14.2
+// Commit:    af6e64c3b69e6132ebaee0e1a3d24e93903f6709
 //
 // Only the connection-subscription surface is vendored. See README.md for the
 // trimming rationale, the regeneration commands, and the re-verification

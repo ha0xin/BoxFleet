@@ -537,7 +537,7 @@ export function OverviewPage({ overview }: { overview: Overview | null }) {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <div className="grid auto-rows-min grid-cols-6 gap-4 tabular-nums">
             <div className="col-span-6">
               <section aria-label="Analytics" className="w-full space-y-3">

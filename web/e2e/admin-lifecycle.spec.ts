@@ -5,21 +5,24 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Nodes", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Enroll", exact: true }).click();
   await page.getByLabel("Node name").fill("edge-ui");
-  await page.getByLabel("Public host").fill("203.0.113.50");
+  await page.getByRole("dialog").getByLabel("Public host").fill("203.0.113.50");
   await page.getByRole("button", { name: "Generate bootstrap" }).click();
   await expect(page.getByText("Install command", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expectRowVisible(page, "edge-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("alice-ui");
   await page.getByRole("button", { name: "Create user" }).click();
   await expectRowVisible(page, "alice-ui");
 
   await page.getByRole("button", { name: "Proxies", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("vless-ui");
   await page.getByLabel("Listen port", { exact: true }).fill("39091");
@@ -27,11 +30,65 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "vless-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Manage access" }).click();
   await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
   await page.getByRole("checkbox", { name: /vless-ui/ }).check();
   await page.getByRole("button", { name: "Grant access (1)" }).click();
+  await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  const activation = await page.request.patch("/api/admin/nodes/edge-ui", { data: { status: "active" } });
+  expect(activation.ok()).toBeTruthy();
+  const beforeRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
+  expect(beforeRotation.nodes).toHaveLength(1);
+  const subscriptionRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/\/api\/admin\/users\/[^/]+\/(subscription|proxy-provider)(?:\?|$)/.test(request.url())) {
+      subscriptionRequests.push(request.url());
+    }
+  });
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Connection info" }).click();
+  const connectionDialog = page.getByRole("dialog", { name: "Connection info", exact: true });
+  await expect(connectionDialog.getByRole("button", { name: "Copy details" })).toBeVisible();
+  await expect(connectionDialog.getByText("Mihomo subscription", { exact: true })).toHaveCount(0);
+  await expect(connectionDialog.getByRole("button", { name: "Generate link" })).toHaveCount(0);
+  await expect(connectionDialog.getByText("Configuration behavior", { exact: true })).toHaveCount(0);
+  for (const width of [1440, 632, 390]) {
+    await page.setViewportSize({ width, height: 824 });
+    const box = await connectionDialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    const overflow = await connectionDialog.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(overflow).toBe(false);
+  }
+  await page.screenshot({ path: "test-results/user-connection-info-mobile.png" });
+  await connectionDialog.getByRole("button", { name: "Done", exact: true }).click();
+  expect(subscriptionRequests).toEqual([]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Rotate connection keys" }).click();
+  const rotationDialog = page.getByRole("dialog", { name: "Rotate connection keys" });
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(rotationDialog).toBeVisible();
+    const box = await rotationDialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    await expect(rotationDialog.getByRole("button", { name: "Rotate all keys" })).toBeVisible();
+  }
+  await page.screenshot({ path: "test-results/credential-rotation-mobile.png" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rotationDialog.getByRole("button", { name: "Rotate all keys" }).click();
+  await expect(rotationDialog.getByText("1 connection key replaced")).toBeVisible();
+  const afterRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
+  expect(afterRotation).not.toEqual(beforeRotation);
+  await rotationDialog.getByRole("button", { name: "Done" }).click();
+  await openRowActions(page, "alice-ui");
+  await page.getByRole("menuitem", { name: "Manage access" }).click();
   await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
   await page.getByRole("button", { name: "Revoke vless-ui" }).click();
   await expect(page.getByRole("heading", { name: "Revoke access" })).toBeVisible();
@@ -40,6 +97,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await page.getByRole("button", { name: "Done", exact: true }).click();
 
   await page.getByRole("button", { name: "Proxies", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();
   await openRowActions(page, "vless-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete proxy" })).toBeVisible();
@@ -49,6 +107,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "vless-ui");
 
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete user" })).toBeVisible();
@@ -58,6 +117,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await expectRowVisible(page, "alice-ui");
 
   await page.getByRole("button", { name: "Nodes", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Nodes", exact: true })).toBeVisible();
   await openRowActions(page, "edge-ui");
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(page.getByRole("heading", { name: "Delete node" })).toBeVisible();
@@ -70,6 +130,7 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
 test("Mihomo configurations use tables, templates, and a two-column processor pipeline", async ({ page }) => {
   await page.goto(".");
   await page.getByRole("button", { name: "Users", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("mihomo-ui");
   await page.getByRole("button", { name: "Create user" }).click();
@@ -134,3 +195,101 @@ async function expectRowVisible(page: Page, rowText: string) {
 async function expectRowHidden(page: Page, rowText: string) {
   await expect(page.getByRole("row").filter({ hasText: rowText })).toHaveCount(0);
 }
+
+test("deleted node name can be enrolled with a fresh identity on narrow screens", async ({ page }) => {
+  const enrolled = await page.request.post("/api/admin/nodes/bootstrap", { data: { name: "reused-ui", public_host: "192.0.2.80" } });
+  expect(enrolled.ok()).toBeTruthy();
+  const old = (await enrolled.json()).node;
+  await page.setViewportSize({ width: 390, height: 824 });
+  await page.goto("nodes?search=reused-ui");
+  await openRowActions(page, "reused-ui");
+  await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete node" });
+  await expect(dialog).toContainText("Delete reused-ui and revoke its agent token?");
+  const box = await dialog.boundingBox();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("No nodes match this filter.", { exact: true })).toBeVisible();
+  const replacement = await page.request.post("/api/admin/nodes/bootstrap", { data: { name: "reused-ui", public_host: "192.0.2.81" } });
+  expect(replacement.ok()).toBeTruthy();
+  const fresh = (await replacement.json()).node;
+  expect(fresh.id).not.toBe(old.id);
+  expect((await page.request.get(`/api/admin/nodes/${old.id}`)).status()).toBe(422);
+  expect((await page.request.get(`/api/admin/nodes/${fresh.id}`)).ok()).toBeTruthy();
+  await page.reload();
+  await expectRowVisible(page, "reused-ui");
+  await expect(page.getByText("192.0.2.81", { exact: true })).toBeVisible();
+});
+
+test("deletion previews dependencies, handles narrow screens, and rechecks changes", async ({ page }) => {
+  const enrolled = await page.request.post("/api/admin/nodes/bootstrap", {data: {name: "impact-ui", public_host: "192.0.2.90"}});
+  expect(enrolled.ok()).toBeTruthy();
+  const node = (await enrolled.json()).node;
+  const created = await page.request.post(`/api/admin/nodes/${node.id}/proxies`, {data: {name: "impact-proxy", protocol: "vless_reality", listen_port: 443, enabled: true, settings_json: "{}"}});
+  expect(created.ok()).toBeTruthy();
+  const proxy = await created.json();
+  const allPaths = await (await page.request.get("/api/admin/paths")).json();
+  const path = allPaths.find((p: {proxy_id: string}) => p.proxy_id === proxy.id);
+  expect(path).toBeTruthy();
+  const user = await page.request.post("/api/admin/users", {data: {name: "impact-user"}});
+  expect(user.ok()).toBeTruthy();
+  const grant = await page.request.post("/api/admin/users/impact-user/paths", {data: {path_id: path.id}});
+  expect(grant.ok()).toBeTruthy();
+  await page.goto("nodes?search=impact-ui");
+  await openRowActions(page, "impact-ui");
+  await page.getByRole("menuitem", {name: "Delete", exact: true}).click();
+  const dialog = page.getByRole("dialog", {name: "Delete node"});
+  await expect(dialog.getByText("Affected resources")).toBeVisible();
+  await expect(dialog.getByText("impact-proxy", {exact: true}).first()).toBeVisible();
+  await expect(dialog.getByText(`impact-user → ${path.display_name || "impact-proxy / direct"}`, {exact: true})).toBeVisible();
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({width, height: 824});
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBeTruthy();
+  }
+  await page.screenshot({path: "/tmp/boxfleet-deletion-impact-390.png"});
+  await expect(dialog.getByRole("columnheader", {name: "Resource", exact: true})).toBeVisible();
+  await expect(dialog.getByRole("columnheader", {name: "Change", exact: true})).toBeVisible();
+  expect((await page.request.post("/api/admin/users", {data: {name: "impact-user-2"}})).ok()).toBeTruthy();
+  expect((await page.request.post("/api/admin/users/impact-user-2/paths", {data: {path_id: path.id}})).ok()).toBeTruthy();
+  await dialog.getByRole("button", {name: "Delete", exact: true}).click();
+  await expect(dialog).toContainText("Affected resources changed");
+  expect((await page.request.get(`/api/admin/nodes/${node.id}`)).ok()).toBeTruthy();
+  await dialog.getByRole("button", {name: "Delete", exact: true}).click();
+  await expect(dialog).toBeHidden();
+  expect((await page.request.get(`/api/admin/nodes/${node.id}`)).status()).toBe(422);
+});
+
+test("Paths pagination survives refresh and keeps cross-page dialers on narrow screens", async ({ page }) => {
+  const paths = Array.from({ length: 11 }, (_, index) => ({
+    id: `path-${index}`, name: `route-${index}`, display_name: `Published ${index}`,
+    endpoint_id: `endpoint-${index}`, proxy_id: `proxy-${index}`, proxy_name: `Proxy ${index}`,
+    node_name: "edge", host_id: "host", host: "192.0.2.1", host_tag: "",
+    dialer_path_id: index === 10 ? "path-0" : "", enabled: true,
+    visibility: "selectable", managed: true, sort_order: index, created_at: "", updated_at: ""
+  }));
+  await page.route("**/api/admin/paths", (route) => route.fulfill({ json: paths }));
+  await page.goto("paths?limit=10");
+  await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Published 10", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Auto", { exact: true })).toHaveCount(10);
+  await expect(page.getByRole("columnheader", { name: "Visibility", exact: true })).toHaveCount(0);
+  await expect(page.getByText("route-0", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(page).toHaveURL(/page=2/);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Published 0", exact: true })).toBeVisible();
+  for (const width of [1440, 849, 390]) {
+    await page.setViewportSize({ width, height: 824 });
+    await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+  await page.screenshot({ path: "/tmp/boxfleet-paths-pagination-390.png" });
+  await page.getByRole("button", { name: "Previous page", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+});

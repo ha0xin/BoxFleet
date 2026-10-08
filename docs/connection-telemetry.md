@@ -7,19 +7,48 @@ message. BoxFleet can consume it when a node is explicitly opted in.
 This path is **opt-in per node and off by default**:
 
 - `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` is
-  `v1.14.0-beta.2`. This prerelease pin is an explicit operator exception to
-  the original stable-only gate; rollout must be canary-first.
+  `v1.14.2`, the stable 1.14 target; rollout is canary-first.
 - 1.13's config parser rejects the `services` block this stream needs —
   `services[0]: unknown inbound type: api`. Rendering it unconditionally would
   break every node.
 - The journalctl regex scraper (`log_events`) is unchanged, still the fleet
-  default, and still the only source that covers every node. The two coexist
-  permanently; neither replaces the other in this release.
+  default, and still the only source that covers every node. The two coexist during migration; removal of the old source follows the
+  fleet-wide switch described in [the roadmap](roadmap.md).
 
 The decision to build it ahead of the switch is
 [ADR 0002](adr/0002-opt-in-connection-telemetry.md). The operator-approved
 beta.2 exception and its required preflight are recorded in
 [ADR 0001](adr/0001-network-event-telemetry-source.md).
+
+## Unified Logs
+
+Network Events now displays journal and connection-stream records in **Logs**.
+The former `?view=connections` URL redirects to Logs. The table, connection-start chart,
+search, user/node filters and Service activity use the same server-side source selection.
+Missing journal byte, protocol and duration fields display `—`; their API numeric
+values are `null`. Existing aggregate history retains its Count and cannot be
+reconstructed into individual connections.
+
+Updated agents send one record per session, keyed by authenticated node ID,
+sing-box connection ID and creation time. NEW / UPDATE / CLOSED update that row;
+lifetime byte totals merge by maximum, including after agent restart. Reports
+remain bounded and retryable. Coverage retains interval byte deltas; billing
+continues to use V2Ray counters. Old agents' five-minute reports are accepted
+until they are upgraded; those existing aggregates remain aggregates.
+
+A node switches its primary Logs source on its first accepted stream report,
+not merely when its version changes or the opt-in configuration is written.
+The server stores source intervals: journal history preceding the switch remains
+visible, and journal records in a streaming interval are excluded from all unified
+reads. Disabling/removing the opt-in ends the interval and resumes journal
+visibility. A temporary stream failure does not silently fall back and double
+count journal rows. Raw source tables are preserved during migration.
+
+Deploy the server migration first, then upgrade agents to get individual records.
+This change does not opt nodes in automatically, delete old logs, or change
+user traffic counters. The connection-only list remains available for diagnostics.
+Interval byte series and host rankings are retired (HTTP 410): cumulative session
+totals cannot measure bytes transferred inside a selected time window.
 
 ## What it adds
 
@@ -56,7 +85,7 @@ fleet-wide default is off structurally rather than by convention.
 -- CHECK refuses anything under 32.
 INSERT INTO node_connection_telemetry (node_id, enabled, listen_address, listen_port, secret)
 SELECT id, 1, '127.0.0.1', 9091, lower(hex(randomblob(32)))
-FROM nodes WHERE name = 'azus';
+FROM nodes WHERE name = 'example-node';
 ```
 
 Then publish. The change surfaces through the normal pipeline —
@@ -219,49 +248,42 @@ and correct. `dropped_buckets` growing steadily is a sizing problem, not a bug.
 
 ## Reading the data
 
-Admin endpoints, all behind `adminAuthMiddleware`. They sit beside the
-`/network-events` family and are never merged with it: which producer a row came
-from is a fact the UI has to be able to state, and only one of the two covers the
-whole fleet.
+Admin endpoints are behind `adminAuthMiddleware`. `/network-events` is the
+unified Logs contract, including `source`, nullable rich fields, stable IDs and
+`event_time`. List filters, connection-start charts and service/host counts all
+use the half-open interval **[start, end)** on `event_time`: session creation time
+for individual connections, the first observation (`window_start`) for journal
+and legacy aggregate records. Updating a session does not move its start or
+create another connection. `window_end` is the last observation, not the chart
+bucket. Legacy Count still represents several connections with one observation
+window; it cannot be reconstructed into precise individual start times.
+
+The UI labels per-session bytes as **lifetime** totals, even when the selected
+window covers only part of the session. Legacy aggregates have no per-session
+lifetime total and display `—` in those columns. An open status means “last
+observed open”, not proof that the connection is still alive.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/admin/connection-events` | Paged aggregate rows, newest bucket first |
-| `GET /api/admin/connection-events/series` | Bucketed volume, zero-filled, plus totals and coverage |
-| `GET /api/admin/connection-events/hosts` | Bytes or connections per destination host |
-| `GET /api/admin/connection-events/nodes` | Which nodes actually stream. An empty list is today's normal fleet-wide answer |
+| `GET /api/admin/connection-events` | Diagnostic source rows, newest bucket first; legacy rows contain interval deltas, session rows contain lifetime totals |
+| `GET /api/admin/connection-events/series` | Retired; HTTP 410 with migration guidance |
+| `GET /api/admin/connection-events/hosts` | Retired; HTTP 410 with migration guidance |
+| `GET /api/admin/connection-events/nodes` | Nodes with telemetry enabled |
 
-Shared filters: `node`, `user`, `host`, `start`, `end`. There is deliberately no
-`action` (the stream carries no classified action) and no `search`
-(`connection_events` has no full-text index). `start` and `end` are **required**
-on `/series` — an unbounded window cannot be zero-filled or span-clamped — and
-optional elsewhere. `/series` also takes `bucket` (`hour|day`) and
-`offset_minutes`, with the same span ceilings as every other series.
-`/hosts` takes `sort=bytes|connections` (default `bytes`, unknown values are 422)
-and `limit` (default 20, max 100), and returns `distinct_hosts` plus `truncated`
-so a partial ranking cannot read as a complete one.
-
-`connections_opened` and `connections_closed` are separate on purpose: a
-long-lived session contributes bytes to several consecutive buckets, so summing
-"connections" must use `opened`.
-
-The Network Events page reads these through a **Connection stream** panel. It
-queries `/connection-events/nodes` first and renders nothing but a short
-explanation when no node is opted in — which is every node today — so the panel
-never shows as an empty table that reads like breakage. When a node is opted in
-the panel makes clear it covers only those nodes, not the fleet, because the
-journal-based table above it covers everything.
-
-Byte figures in that panel always carry the attribution ratio from the coverage
-counters. Do not present them without it: they under-count by an amount that
-varies with load and cannot be bounded.
+The diagnostic list accepts `node`, `user`, `host`, optional `start`/`end`
+(observation-window overlap), `limit` and `offset`. It is not an interval traffic
+analytics API. Use `/network-events/series`, `/network-events/services` and
+`/network-events/hosts` for connection-start counts; use `/traffic/series` for
+billing traffic. Destination traffic analytics would require a separately stored,
+idempotent sequence of byte increments, with coverage and retention semantics.
+It must not be derived by bucketing mutable lifetime snapshots.
 
 ## Rolling back
 
 ```sql
 UPDATE node_connection_telemetry
 SET enabled = 0
-WHERE node_id = (SELECT id FROM nodes WHERE name = 'azus');
+WHERE node_id = (SELECT id FROM nodes WHERE name = 'example-node');
 ```
 
 Then publish, as for opting in. The rendered config returns to **byte-identical**
@@ -292,7 +314,8 @@ row at a finer dimension tuple and accumulates faster for the same traffic.
 
 Applied inline on ingest, in the same transaction as the write, exactly as
 `RecordLogEvents` does — there is no scheduler on the server.
-`connection_events` prunes on `bucket_start`, `connection_reports` on
+Legacy `connection_events` rows prune on `bucket_start`; session rows prune on
+`window_end` so a long-lived active session is retained. `connection_reports` prune on
 `window_end`.
 
 The setting is not in `AdminSettings` and not on the settings PATCH handler yet,
@@ -306,7 +329,7 @@ Bounded by construction, because node memory is a hard constraint:
 | Bound | Value | On hitting it |
 | --- | --- | --- |
 | Live connection identities | 4096 (~1.6 MB) | Connection refused, `dropped_buckets`++. Recovered in full from its close event |
-| Pending aggregation buckets | 2000 | Bucket dropped, `dropped_buckets`++, its bytes excluded from `bytes_observed` so the denominator stays honest |
+| Pending session snapshots | 2000 | Snapshot dropped, `dropped_buckets`++, its bytes excluded from `bytes_observed` so the denominator stays honest |
 | Accounted close ids | 2048 | Oldest evicted (FIFO). Larger than sing-box's 1000-entry replay ring, so a replay within one agent run can never double count |
 
 sing-box's own tracker spends roughly 1 KB per live connection, so a node at the

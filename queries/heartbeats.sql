@@ -62,5 +62,5 @@ SELECT
 FROM node_latest_heartbeats latest
 JOIN node_heartbeats h ON h.id = latest.heartbeat_id
 JOIN nodes n ON n.id = latest.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
 LIMIT 1;

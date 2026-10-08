@@ -247,7 +247,7 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 	if err != nil {
 		return Node{}, err
 	}
-	updated, err := db.GetNode(ctx, name)
+	updated, err := db.GetNode(ctx, nodeID)
 	if err != nil {
 		return Node{}, err
 	}
@@ -334,7 +334,7 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 		return Node{}, err
 	}
 	err = db.withTx(ctx, func(qtx *store.Queries) error {
-		existing, err := qtx.GetNodeByName(ctx, currentName)
+		existing, err := resolveNode(ctx, qtx, currentName, false)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("node %q not found", currentName)
@@ -349,7 +349,7 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 			HostsJson:  hostsJSON,
 			ApiBaseUrl: strings.TrimSpace(params.APIBaseURL),
 			Status:     status,
-			Name:       name,
+			ID:         existing.ID,
 		})
 		if err != nil {
 			return err
@@ -359,7 +359,7 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 	if err != nil {
 		return Node{}, err
 	}
-	updated, err := db.GetNode(ctx, name)
+	updated, err := db.GetNode(ctx, existingNode.ID)
 	if err != nil {
 		return Node{}, err
 	}
@@ -419,7 +419,7 @@ func (db *DB) RenameNode(ctx context.Context, oldName, newName string) (Node, er
 	}
 	var nodeID string
 	err := db.withTx(ctx, func(qtx *store.Queries) error {
-		existing, err := qtx.GetNodeByName(ctx, oldName)
+		existing, err := resolveNode(ctx, qtx, oldName, false)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("node %q not found", oldName)
@@ -571,10 +571,10 @@ func nodePageSort(sort, direction string) string {
 }
 
 func (db *DB) GetNode(ctx context.Context, name string) (Node, error) {
-	node, err := db.q.GetNodeByName(ctx, normalizeName(name))
+	node, err := resolveNode(ctx, db.q, name, false)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Node{}, fmt.Errorf("node %q not found", name)
+			return Node{}, fmt.Errorf("node %q not found: %w", name, sql.ErrNoRows)
 		}
 		return Node{}, err
 	}
@@ -591,7 +591,7 @@ func (db *DB) SetNodeStatus(ctx context.Context, name, status string) error {
 	}
 	affected, err := db.q.SetNodeStatus(ctx, store.SetNodeStatusParams{
 		Status: status,
-		Name:   node.Name,
+		Name:   node.ID,
 	})
 	if err != nil {
 		return err
@@ -609,11 +609,23 @@ func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 		return Node{}, err
 	}
 	err = db.withTx(ctx, func(qtx *store.Queries) error {
-		affected, err := qtx.SoftDeleteNode(ctx, node.Name)
+		affected, err := qtx.SoftDeleteNode(ctx, node.ID)
 		if err != nil {
 			return err
 		}
 		if err := requireAffected(affected, "node", name); err != nil {
+			return err
+		}
+		if err := qtx.DeleteNodeAliases(ctx, node.ID); err != nil {
+			return err
+		}
+		if err := qtx.ArchiveNodeProxies(ctx, node.ID); err != nil {
+			return err
+		}
+		if err := qtx.DeleteArchivedProxyAliases(ctx); err != nil {
+			return err
+		}
+		if err := retireResourceDependenciesTx(ctx, qtx); err != nil {
 			return err
 		}
 		return qtx.RevokeNodeTokensByNodeID(ctx, node.ID)
@@ -621,26 +633,15 @@ func (db *DB) SoftDeleteNode(ctx context.Context, name string) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	return db.getNodeIncludingDeleted(ctx, node.Name)
+	return db.getNodeIncludingDeleted(ctx, node.ID)
 }
 
 func (db *DB) RestoreNode(ctx context.Context, name string) (Node, error) {
-	node, err := db.getNodeIncludingDeleted(ctx, name)
-	if err != nil {
-		return Node{}, err
-	}
-	affected, err := db.q.RestoreNode(ctx, node.Name)
-	if err != nil {
-		return Node{}, err
-	}
-	if err := requireAffected(affected, "deleted node", name); err != nil {
-		return Node{}, err
-	}
-	return db.GetNode(ctx, node.Name)
+	return Node{}, errors.New("deleted nodes cannot be restored; enroll a new node")
 }
 
 func (db *DB) getNodeIncludingDeleted(ctx context.Context, name string) (Node, error) {
-	node, err := db.q.GetNodeByNameIncludingDeleted(ctx, normalizeName(name))
+	node, err := resolveNode(ctx, db.q, name, true)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Node{}, fmt.Errorf("node %q not found", name)
@@ -673,4 +674,19 @@ func mapNode(row store.Node) Node {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+func resolveNode(ctx context.Context, q *store.Queries, reference string, includingDeleted bool) (store.Node, error) {
+	reference = normalizeName(reference)
+	node, err := q.GetNodeByIDIncludingDeleted(ctx, reference)
+	if errors.Is(err, sql.ErrNoRows) {
+		if includingDeleted {
+			return q.GetNodeByNameIncludingDeleted(ctx, reference)
+		}
+		return q.GetNodeByName(ctx, reference)
+	}
+	if err == nil && node.DeletedAt.Valid && !includingDeleted {
+		return store.Node{}, sql.ErrNoRows
+	}
+	return node, err
 }

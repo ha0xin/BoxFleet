@@ -367,7 +367,7 @@ func startFakeDaemon(t *testing.T, secret string, handle subscribeHandler) strin
 	return listener.Addr().String()
 }
 
-// fakeStreamAuthInterceptor mirrors daemon/server.go:39-66 at v1.14.0-beta.2,
+// fakeStreamAuthInterceptor mirrors daemon/server.go:39-66 at v1.14.2,
 // including the empty-secret bypass. Reproducing the real check — rather than a
 // convenient approximation — is what makes the credential tests meaningful:
 // they assert the client speaks the header sing-box actually reads.

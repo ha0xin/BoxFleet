@@ -50,6 +50,6 @@ SELECT
   l.ingested_at
 FROM system_logs l
 JOIN nodes n ON n.id = l.node_id
-WHERE n.name = sqlc.arg(node_name)
+WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
 ORDER BY l.observed_at DESC
 LIMIT sqlc.arg(limit);

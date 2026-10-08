@@ -14,7 +14,6 @@ import {
   PlusIcon,
   ProhibitIcon,
   TrashIcon,
-  UserIcon
 } from "@phosphor-icons/react";
 import { Badge, Button, DropdownMenu, Input, Meter, Table } from "@cloudflare/kumo";
 
@@ -26,6 +25,7 @@ import { adminKeys, queryString, refreshIntervals } from "@/admin/query";
 import { useUrlFilters, type UseUrlFiltersOptions } from "@/admin/use-url-filters";
 import { ConnectionInfoDialog, ManageAccessDialog, UserFormDialog } from "./user-dialogs";
 import type { UserDialogState } from "./user-dialogs";
+import { RotateCredentialsDialog } from "./rotate-credentials-dialog";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
@@ -88,8 +88,7 @@ const defaultFilters: UserFilterValues = { search: "", status: "all", sort: "nam
 // what lets it be spread straight into a query key.
 const urlFilters: UseUrlFiltersOptions<UserFilterValues> = {
   schema: filterSchema,
-  defaults: defaultFilters,
-  perPage: 10
+  defaults: defaultFilters
 };
 
 /**
@@ -129,10 +128,10 @@ export function rawBytes(traffic: TrafficVolume): number {
  * hard content ceiling and are pinned to it.
  */
 const userColumns: TableColumnWidth[] = [
-  { min: 192 }, // User
+  200, // User
   120, // Status
   116, // Traffic
-  { min: 192 }, // Quota — the meter plus its up/down legend
+  { min: 240 }, // Quota — the meter plus its up/down legend
   96, // Access
   116, // Expires
   52 // Actions
@@ -197,6 +196,7 @@ export function UsersPage() {
   const { request } = useAdminApi();
   const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(urlFilters);
   const [dialog, setDialog] = useState<UserDialogState>(null);
+  const [rotateTarget, setRotateTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
 
   // react-hook-form is the draft layer for the search box only; `values` re-syncs
@@ -204,13 +204,13 @@ export function UsersPage() {
   const form = useForm<UserFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminUser>(request, (req, user) =>
-    req(`/api/admin/users/${encodeURIComponent(user.name)}`, {
+    req(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ status: user.status === "disabled" ? "active" : "disabled" })
     })
   );
   const restore = useAdminMutation<AdminUser>(request, (req, user) =>
-    req(`/api/admin/users/${encodeURIComponent(user.name)}/restore`, { method: "POST" })
+    req(`/api/admin/users/${encodeURIComponent(user.id)}/restore`, { method: "POST" })
   );
 
   // One request per page carries the rows, the derived status and the traffic
@@ -264,14 +264,8 @@ export function UsersPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-kumo-default">User inventory</h2>
-              <p className="text-sm text-kumo-subtle">
-                {total > 0 ? `${total} ${total === 1 ? "user" : "users"}` : "No users"}
-              </p>
-            </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
@@ -318,7 +312,7 @@ export function UsersPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard>
+            <TableCard tableId="users">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(userColumns) }}>
                 <TableColgroup widths={userColumns} />
                 <Table.Header variant="compact">
@@ -344,11 +338,8 @@ export function UsersPage() {
                       <Table.Row key={row.id}>
                         <Table.Cell sticky="left">
                           <div className="flex min-w-0 items-center gap-2">
-                            <UserIcon className="size-4 shrink-0 text-kumo-subtle" />
                             <div className="min-w-0">
-                              <div className="truncate text-base font-medium text-kumo-default" title={row.name}>
-                                {row.name}
-                              </div>
+                              <Button variant="ghost" className="bf-resource-link" disabled={!!row.deleted_at} onClick={() => setDialog({ mode: "edit", user: row })} title={row.name}>{row.name}</Button>
                               {row.display_name ? (
                                 <div className="truncate text-sm text-kumo-subtle">{row.display_name}</div>
                               ) : null}
@@ -409,6 +400,9 @@ export function UsersPage() {
                                   {row.status === "disabled" ? "Enable" : "Disable"}
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Separator />
+                                <DropdownMenu.Item icon={ArrowsClockwiseIcon} onClick={() => setRotateTarget(row)}>
+                                  Rotate connection keys
+                                </DropdownMenu.Item>
                                 <DropdownMenu.Item variant="danger" icon={TrashIcon} onClick={() => setDeleteTarget(row)}>
                                   Delete
                                 </DropdownMenu.Item>
@@ -439,16 +433,18 @@ export function UsersPage() {
       {dialog?.mode === "connection" ? (
         <ConnectionInfoDialog request={request} user={dialog.user} onClose={() => setDialog(null)} />
       ) : null}
+      {rotateTarget ? <RotateCredentialsDialog request={request} user={rotateTarget} onClose={() => setRotateTarget(null)} /> : null}
       {deleteTarget ? (
         <SoftDeleteDialog
           request={request}
+          resource={{ kind: "user", id: deleteTarget.id }}
           title="Delete user"
           description={
             <>
-              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>? The user and its credentials will disappear from the default inventory and can be restored from the Deleted filter.
+              Delete <span className="font-medium text-kumo-default">{deleteTarget.name}</span>?
             </>
           }
-          endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.name)}`}
+          endpoint={`/api/admin/users/${encodeURIComponent(deleteTarget.id)}`}
           onClose={() => setDeleteTarget(null)}
         />
       ) : null}

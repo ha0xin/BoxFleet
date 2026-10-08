@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ const (
 )
 
 type Options struct {
+	MaintenanceContext context.Context
 	DB                 *db.DB
 	ArtifactDir        string
 	AdminToken         string
@@ -50,13 +52,15 @@ func NewRouter(options Options) http.Handler {
 	operationNotifier := newNodeOperationNotifier()
 	updateCatalog := newUpdateCatalog(options)
 	updateCampaigns := newUpdateCampaignController(options.DB, operationNotifier)
+	if options.MaintenanceContext != nil {
+		go updateCampaigns.run(options.MaintenanceContext)
+	}
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, "ok")
 	})
 	router.Get("/install.sh", installScriptHandler(options))
 	router.Get("/sub/{token}/mihomo.yaml", subscriptionMihomoProfileHandler(options.DB))
-	router.Get("/sub/{token}", subscriptionProviderHandler(options.DB))
 	router.Get("/api/node/config", nodeConfigHandler(options.DB))
 	router.Post("/api/node/apply-result", nodeApplyResultHandler(options.DB))
 	router.Post("/api/node/heartbeat", nodeHeartbeatHandler(options.DB))
@@ -75,6 +79,7 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/config/changes", adminConfigChangesHandler(options.DB))
 		r.Post("/config/publish", adminPublishChangedConfigsHandler(options.DB))
 		r.Get("/proxies", adminProxiesHandler(options.DB))
+		r.Get("/deletion-impact", adminDeletionImpactHandler(options.DB))
 		r.Get("/paths", adminPathsHandler(options.DB))
 		r.Post("/paths", adminCreatePathHandler(options.DB))
 		r.Patch("/paths/{path}", adminUpdatePathHandler(options.DB))
@@ -110,6 +115,7 @@ func NewRouter(options Options) http.Handler {
 		r.Patch("/users/{user}", adminUpdateUserHandler(options.DB))
 		r.Delete("/users/{user}", adminDeleteUserHandler(options.DB))
 		r.Post("/users/{user}/restore", adminRestoreUserHandler(options.DB))
+		r.Post("/users/{user}/credentials/rotate", adminRotateUserCredentialsHandler(options.DB))
 		r.Get("/users/{user}/proxies", adminUserProxiesHandler(options.DB))
 		r.Post("/users/{user}/proxies", adminIssueUserProxyCredentialHandler(options.DB))
 		r.Delete("/users/{user}/proxies/{node}/{proxy}", adminDeleteUserProxyCredentialHandler(options.DB))
@@ -118,12 +124,7 @@ func NewRouter(options Options) http.Handler {
 		r.Delete("/users/{user}/paths/{path}", adminRevokeUserPathHandler(options.DB))
 		r.Get("/users/{user}/connection-info", adminUserConnectionInfoHandler(options.DB))
 		r.Get("/users/{user}/node-info", adminUserNodeInfoHandler(options.DB))
-		r.Get("/users/{user}/proxy-provider", adminUserProxyProviderHandler(options.DB))
 		r.Put("/users/{user}/mihomo-profile", adminAssignUserMihomoProfileHandler(options.DB))
-		r.Get("/users/{user}/subscription", adminUserSubscriptionHandler(options.DB))
-		r.Post("/users/{user}/subscription", adminIssueUserSubscriptionHandler(options.DB))
-		r.Post("/users/{user}/subscription/rotate", adminRotateUserSubscriptionHandler(options.DB))
-		r.Delete("/users/{user}/subscription", adminRevokeUserSubscriptionHandler(options.DB))
 		r.Get("/mihomo/profiles", adminListMihomoProfilesHandler(options.DB))
 		r.Post("/mihomo/profiles", adminCreateMihomoProfileHandler(options.DB))
 		r.Get("/mihomo/profiles/{profile}", adminMihomoProfileHandler(options.DB))

@@ -366,6 +366,17 @@ func (q *Queries) ListProxyAccessesByUserNode(ctx context.Context, arg ListProxy
 	return items, nil
 }
 
+const proxyAuthNameExists = `-- name: ProxyAuthNameExists :one
+SELECT EXISTS(SELECT 1 FROM proxy_accesses WHERE auth_name = ?1)
+`
+
+func (q *Queries) ProxyAuthNameExists(ctx context.Context, authName string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, proxyAuthNameExists, authName)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const restoreProxyAccess = `-- name: RestoreProxyAccess :execrows
 UPDATE proxy_accesses
 SET
@@ -385,6 +396,26 @@ type RestoreProxyAccessParams struct {
 
 func (q *Queries) RestoreProxyAccess(ctx context.Context, arg RestoreProxyAccessParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, restoreProxyAccess, arg.CredentialJson, arg.ProxyUserID, arg.ProxyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const rotateProxyAccessCredential = `-- name: RotateProxyAccessCredential :execrows
+UPDATE proxy_accesses
+SET credential_json = ?1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2 AND deleted_at IS NULL
+`
+
+type RotateProxyAccessCredentialParams struct {
+	CredentialJson string `json:"credential_json"`
+	ID             string `json:"id"`
+}
+
+func (q *Queries) RotateProxyAccessCredential(ctx context.Context, arg RotateProxyAccessCredentialParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rotateProxyAccessCredential, arg.CredentialJson, arg.ID)
 	if err != nil {
 		return 0, err
 	}

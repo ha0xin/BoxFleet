@@ -9,7 +9,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   ArrowsClockwiseIcon,
-  BracketsCurlyIcon,
   CodeIcon,
   CopyIcon,
   FunnelIcon,
@@ -20,6 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Loader, Select, Surface, Switch, Table, Tabs, Text } from "@cloudflare/kumo";
 
+import { DEFAULT_PER_PAGE } from "@/admin/use-url-filters";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { MihomoCodeEditor } from "@/components/mihomo-code-editor";
 import { useAdminApi, type AdminRequest } from "@/admin/api";
@@ -29,7 +29,7 @@ import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { AdminPagination, SortHead, TableCard, TableEmpty, TableError, TableLoading } from "@/components/admin-table";
 import { copyText, formatDateTime } from "@/utils";
-import { formatRelativeTime, rowLinkClassName } from "./operations-common";
+import { formatRelativeTime } from "./operations-common";
 import type {
   AdminUser,
   MihomoPreview,
@@ -110,7 +110,7 @@ export function MihomoProfilesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <div className="border-b border-kumo-line">
             <Tabs
               variant="underline"
@@ -152,7 +152,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
   onSubscription: (profile: MihomoProfile) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConfigurationFilter>("all");
@@ -191,7 +191,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
         setFilter={(value) => { setFilter(value as ConfigurationFilter); setPage(1); }}
         options={[{ value: "all", label: "All" }, { value: "yaml", label: "YAML" }, { value: "javascript", label: "JavaScript" }]}
       />
-      <TableCard>
+      <TableCard tableId="mihomo-configurations" widths={[{ min: 240 }, 160, 200, 140, 52]}>
         <Table>
           <Table.Header variant="compact"><Table.Row>
             <SortHead label="Configuration" column="name" sort={sort} direction={direction} setSort={setSort} />
@@ -204,7 +204,7 @@ function ConfigurationInventory({ profiles, loading, error, onEdit, onSubscripti
             {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((profile) => {
               const enabled = profile.document.rewrites.filter((rewrite) => rewrite.enabled).length;
               return <Table.Row key={profile.id}>
-                <Table.Cell><div className="flex min-w-52 items-center gap-2"><BracketsCurlyIcon className="size-4 shrink-0 text-kumo-subtle" /><Link to={`/mihomo-profiles/${profile.id}/edit`} className={rowLinkClassName}>{profile.name}</Link></div></Table.Cell>
+                <Table.Cell><div className="flex min-w-0 items-center gap-2"><Link to={`/mihomo-profiles/${profile.id}/edit`} className="bf-resource-link">{profile.name}</Link></div></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{profile.proxy_user_name}</span></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{enabled} of {profile.document.rewrites.length} enabled</span></Table.Cell>
                 <Table.Cell><span className="whitespace-nowrap text-kumo-subtle">{formatRelativeTime(profile.updated_at)}</span></Table.Cell>
@@ -231,7 +231,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
   onOpen: (template: MihomoRewriteTemplate) => void;
 }) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<TemplateFilter>("all");
@@ -267,7 +267,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
         setFilter={(value) => { setFilter(value as TemplateFilter); setPage(1); }}
         options={[{ value: "all", label: "All" }, { value: "yaml", label: "YAML" }, { value: "javascript", label: "JavaScript" }]}
       />
-      <TableCard>
+      <TableCard tableId="mihomo-rewrites" widths={[{ min: 240 }, 140, 220, 140, 52]}>
         <Table>
           <Table.Header variant="compact"><Table.Row>
             <SortHead label="Rewrite" column="name" sort={sort} direction={direction} setSort={setSort} />
@@ -279,7 +279,7 @@ function TemplateInventory({ templates, loading, error, onOpen }: {
           <Table.Body>
             {error ? <TableError colSpan={5}>{error instanceof Error ? error.message : "Request failed."}</TableError> : loading ? <TableLoading colSpan={5} /> : visible.length ? visible.map((template) => (
               <Table.Row key={template.id}>
-                <Table.Cell><div className="flex min-w-52 items-center gap-2"><CodeIcon className="size-4 shrink-0 text-kumo-subtle" /><button type="button" className={rowLinkClassName} onClick={() => onOpen(template)}>{template.name}</button></div></Table.Cell>
+                <Table.Cell><div className="flex min-w-0 items-center gap-2"><Button variant="ghost" className="bf-resource-link" onClick={() => onOpen(template)}>{template.name}</Button></div></Table.Cell>
                 <Table.Cell><Badge variant="secondary">{template.kind === "javascript" ? "JavaScript" : "YAML"}</Badge></Table.Cell>
                 <Table.Cell>
                   <div className="flex items-center gap-2 whitespace-nowrap">
@@ -385,7 +385,7 @@ function ConfigurationPageShell({ title, description, actions, children }: {
     <div className="flex min-h-full flex-col bg-kumo-canvas">
       <AppPageHeader title={title} description={description} actions={actions} />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           {children}
         </div>
       </main>

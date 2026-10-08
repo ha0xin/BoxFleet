@@ -107,3 +107,12 @@ WHERE proxy_user_name = sqlc.arg(user_name)
   AND proxy_user_deleted_at IS NULL
   AND node_deleted_at IS NULL
 ORDER BY node_name, listen_port, proxy_name;
+
+-- name: RotateProxyAccessCredential :execrows
+UPDATE proxy_accesses
+SET credential_json = sqlc.arg(credential_json),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
+
+-- name: ProxyAuthNameExists :one
+SELECT EXISTS(SELECT 1 FROM proxy_accesses WHERE auth_name = sqlc.arg(auth_name));

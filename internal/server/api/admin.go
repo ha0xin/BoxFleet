@@ -217,18 +217,37 @@ type adminUserTraffic struct {
 }
 
 type adminNetworkEvent struct {
-	NodeName    string `json:"node_name"`
-	UserName    string `json:"user_name"`
-	AuthName    string `json:"auth_name"`
-	SourceIP    string `json:"source_ip"`
-	TargetHost  string `json:"target_host"`
-	TargetPort  int64  `json:"target_port"`
-	Action      string `json:"action"`
-	RawMessage  string `json:"raw_message"`
-	Count       int64  `json:"count"`
-	WindowStart string `json:"window_start"`
-	WindowEnd   string `json:"window_end"`
-	CreatedAt   string `json:"created_at"`
+	EventTime         string  `json:"event_time"`
+	ID                string  `json:"id"`
+	Source            string  `json:"source"`
+	ConnectionID      string  `json:"connection_id"`
+	StartedAt         *string `json:"started_at"`
+	Domain            string  `json:"domain"`
+	Network           string  `json:"network"`
+	IPVersion         *int64  `json:"ip_version"`
+	Protocol          string  `json:"protocol"`
+	Inbound           string  `json:"inbound"`
+	InboundType       string  `json:"inbound_type"`
+	Rule              string  `json:"rule"`
+	Outbound          string  `json:"outbound"`
+	OutboundType      string  `json:"outbound_type"`
+	Chain             string  `json:"chain"`
+	UplinkBytes       *int64  `json:"uplink_bytes"`
+	DownlinkBytes     *int64  `json:"downlink_bytes"`
+	DurationMs        *int64  `json:"duration_ms"`
+	ConnectionsClosed *int64  `json:"connections_closed"`
+	NodeName          string  `json:"node_name"`
+	UserName          string  `json:"user_name"`
+	AuthName          string  `json:"auth_name"`
+	SourceIP          string  `json:"source_ip"`
+	TargetHost        string  `json:"target_host"`
+	TargetPort        int64   `json:"target_port"`
+	Action            string  `json:"action"`
+	RawMessage        string  `json:"raw_message"`
+	Count             int64   `json:"count"`
+	WindowStart       string  `json:"window_start"`
+	WindowEnd         string  `json:"window_end"`
+	CreatedAt         string  `json:"created_at"`
 }
 
 type adminNetworkEventsResponse struct {
@@ -1551,6 +1570,8 @@ func adminNodeRawNetworkLogsHandler(store *db.DB) http.HandlerFunc {
 func adminSystemLogsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, err := store.ListSystemLogsPage(r.Context(), db.SystemLogFilter{
+			Start:     strings.TrimSpace(r.URL.Query().Get("start")),
+			End:       strings.TrimSpace(r.URL.Query().Get("end")),
 			NodeName:  strings.TrimSpace(r.URL.Query().Get("node")),
 			Service:   strings.TrimSpace(r.URL.Query().Get("service")),
 			Level:     strings.TrimSpace(r.URL.Query().Get("level")),
@@ -1705,7 +1726,7 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	}
 	statusByNode := make(map[string]db.NodeConfigStatus, len(statuses))
 	for _, status := range statuses {
-		statusByNode[status.NodeName] = status
+		statusByNode[status.NodeID] = status
 	}
 	tokenNames, err := store.ListNodeNamesWithActiveTokens(ctx)
 	if err != nil {
@@ -1728,12 +1749,12 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 		// Base off adminNodeFromNode so list responses carry the same fields as
 		// single-node responses (notably Hosts) instead of a divergent literal.
 		item := adminNodeFromNode(node)
-		item.HasActiveToken = hasToken[node.Name]
+		item.HasActiveToken = !node.DeletedAt.Valid && hasToken[node.Name]
 		if operation, ok := operationByNodeID[node.ID]; ok {
 			operationCopy := operation
 			item.ActiveOperation = &operationCopy
 		}
-		if status, ok := statusByNode[node.Name]; ok {
+		if status, ok := statusByNode[node.ID]; ok {
 			applyAdminNodeStatus(&item, status)
 		}
 		out = append(out, item)
@@ -1859,6 +1880,9 @@ func adminNetworkEvents(events []db.LogEvent) []adminNetworkEvent {
 	out := make([]adminNetworkEvent, 0, len(events))
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
+			ID:          event.ID,
+			EventTime:   event.WindowStart,
+			Source:      "journal",
 			AuthName:    event.AuthName,
 			SourceIP:    event.SourceIp,
 			TargetHost:  event.TargetHost,
@@ -1878,18 +1902,37 @@ func adminNetworkEventDetails(events []db.LogEventDetail) []adminNetworkEvent {
 	out := make([]adminNetworkEvent, 0, len(events))
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
-			NodeName:    event.NodeName,
-			UserName:    event.UserName,
-			AuthName:    event.AuthName,
-			SourceIP:    event.SourceIp,
-			TargetHost:  event.TargetHost,
-			TargetPort:  event.TargetPort,
-			Action:      event.Action,
-			RawMessage:  event.RawMessage,
-			Count:       event.Count,
-			WindowStart: event.WindowStart,
-			WindowEnd:   event.WindowEnd,
-			CreatedAt:   event.CreatedAt,
+			EventTime:         event.EventTime,
+			ID:                event.ID,
+			Source:            event.Source,
+			ConnectionID:      event.ConnectionID,
+			StartedAt:         event.StartedAt,
+			Domain:            event.Domain,
+			Network:           event.Network,
+			IPVersion:         event.IPVersion,
+			Protocol:          event.Protocol,
+			Inbound:           event.Inbound,
+			InboundType:       event.InboundType,
+			Rule:              event.Rule,
+			Outbound:          event.Outbound,
+			OutboundType:      event.OutboundType,
+			Chain:             event.Chain,
+			UplinkBytes:       event.UplinkBytes,
+			DownlinkBytes:     event.DownlinkBytes,
+			DurationMs:        event.DurationMs,
+			ConnectionsClosed: event.ConnectionsClosed,
+			NodeName:          event.NodeName,
+			UserName:          event.UserName,
+			AuthName:          event.AuthName,
+			SourceIP:          event.SourceIp,
+			TargetHost:        event.TargetHost,
+			TargetPort:        event.TargetPort,
+			Action:            event.Action,
+			RawMessage:        event.RawMessage,
+			Count:             event.Count,
+			WindowStart:       event.WindowStart,
+			WindowEnd:         event.WindowEnd,
+			CreatedAt:         event.CreatedAt,
 		})
 	}
 	return out
@@ -2185,4 +2228,26 @@ func writeAdminError(w http.ResponseWriter, err error) {
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func adminRotateUserCredentialsHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		count, err := store.RotateUserCredentials(r.Context(), chi.URLParam(r, "user"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, map[string]int{"rotated": count})
+	}
+}
+
+func adminDeletionImpactHandler(store *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := store.ResourceDeletionImpact(r.Context(), r.URL.Query().Get("kind"), r.URL.Query().Get("id"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		writeJSON(w, result)
+	}
 }

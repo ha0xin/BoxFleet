@@ -12,8 +12,8 @@ installation, wire compatibility, and generated-config compatibility.
 
 ## Current state
 
-For the server `v0.12.x` release, agent `v0.8.0`, and sing-box pin
-`v1.14.0-beta.2`:
+For the next server candidate, agent `v0.8.0`, and stable sing-box pin
+`v1.14.2`:
 
 | Property | Status | Boundary |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ For the server `v0.12.x` release, agent `v0.8.0`, and sing-box pin
 | Independent publication | **No** | One server `v*` tag builds all artifacts in one workflow and publishes one GitHub Release. |
 | Independent update catalog | **No** | `boxfleet-update.json` is tied to the server release, and the server rejects a catalog whose `release` differs from its own version. |
 | Agent feature negotiation | Partial | Durable operations and optional telemetry use named capabilities. The basic node API has no negotiated API range. |
-| sing-box config negotiation | Partial | The normal renderer is qualified against the pinned beta.2 build. The opt-in 1.14 `services` block is not currently gated by the reported sing-box version. |
+| sing-box config negotiation | Partial | The normal renderer is qualified against the pinned stable 1.14.2 build. The opt-in 1.14 `services` block is not currently gated by the reported sing-box version. |
 
 The practical answer is therefore: components can be **deployed and upgraded
 separately**, but a new agent or sing-box artifact cannot yet be **published
@@ -65,7 +65,7 @@ Feature-level compatibility for the current server is narrower and more useful:
 
 | Feature | Minimum agent contract | sing-box contract | Current status |
 | --- | --- | --- | --- |
-| Config pull/apply, heartbeat, traffic and service logs | Legacy node API | Exact renderer-qualified beta.2 build | Normal fleet path on systemd and OpenRC |
+| Config pull/apply, heartbeat, traffic and service logs | Legacy node API | Renderer-qualified 1.14.2 build | Normal fleet path on systemd and OpenRC |
 | Managed agent update | `operations.v1`, `update.agent.v1`, `download.streaming.v1`, `install.versioned.v1`, `restart_resume.agent.v1` | Not applicable | Negotiated and enforced |
 | Managed sing-box update | `operations.v1`, `update.sing_box.v1`, `download.streaming.v1`, `install.versioned.v1`, `rollback.sing_box.v1` | Candidate version, `with_v2ray_api`, and live config verified by the updater | Negotiated and enforced |
 | Connection stream telemetry | `telemetry.connections.v1` | Qualified sing-box 1.14 daemon API build | Experimental, per-node opt-in, off by default |
@@ -81,7 +81,7 @@ concrete example of why product-version distance is not a safe compatibility
 test.
 
 For sing-box, `v1.13.14` is the immediate rollback pin and
-`v1.14.0-beta.2` is the current release target. Only the exact beta.2 build is
+`v1.14.2` is the current stable target. Only the exact pinned build is
 qualified by the five-check preflight. Other patches or minors are unsupported
 until the preflight moves the pin. The daemon stream remains experimental and
 per-node opt-in despite the beta qualification; enabling it on 1.13 causes the

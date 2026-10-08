@@ -150,6 +150,22 @@ func (q *Queries) ApplyNodeOperationEvent(ctx context.Context, arg ApplyNodeOper
 	return i, err
 }
 
+const cancelUnclaimedNodeOperation = `-- name: CancelUnclaimedNodeOperation :execrows
+UPDATE node_operations
+SET status = 'cancelled', phase = 'cancelled', cancel_requested = 1,
+finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND status = 'queued'
+`
+
+func (q *Queries) CancelUnclaimedNodeOperation(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, cancelUnclaimedNodeOperation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const claimNodeOperation = `-- name: ClaimNodeOperation :one
 UPDATE node_operations
 SET
@@ -165,9 +181,8 @@ WHERE id = ?3
   AND node_id = ?4
   AND cancel_requested = 0
   AND (not_before IS NULL OR not_before <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   AND (
-    status = 'queued'
+    (status = 'queued' AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
     OR (
       status = 'running'
       AND lease_expires_at IS NOT NULL

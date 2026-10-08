@@ -2,7 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS proxy_users (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   display_name TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'disabled', 'expired', 'quota_exceeded')),
@@ -14,21 +14,7 @@ CREATE TABLE IF NOT EXISTS proxy_users (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE TABLE IF NOT EXISTS subscription_tokens (
-  id TEXT PRIMARY KEY,
-  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
-  token TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  last_used_at TEXT,
-  revoked_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_subscription_tokens_proxy_user_id
-  ON subscription_tokens(proxy_user_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_tokens_active_user
-  ON subscription_tokens(proxy_user_id)
-  WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proxy_users_active_name ON proxy_users(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS mihomo_profiles (
   id TEXT PRIMARY KEY,
@@ -96,7 +82,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mihomo_profile_subscription_tokens_active
 
 CREATE TABLE IF NOT EXISTS nodes (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   public_host TEXT NOT NULL,
   hosts_json TEXT NOT NULL DEFAULT '[]',
   api_base_url TEXT NOT NULL DEFAULT '',
@@ -108,6 +94,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_active_name ON nodes(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS node_name_aliases (
   alias TEXT PRIMARY KEY,
@@ -152,12 +140,11 @@ CREATE TABLE IF NOT EXISTS proxies (
   route_rules_json TEXT NOT NULL DEFAULT '[]',
   deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  UNIQUE (node_id, name)
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxies_node_id ON proxies(node_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_proxies_name ON proxies(name) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_proxies_node_listener
   ON proxies(node_id, listen, listen_port, transport, protocol);
 
@@ -870,7 +857,8 @@ CREATE TABLE IF NOT EXISTS connection_events (
   window_start TEXT NOT NULL,
   window_end TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  connection_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_events_aggregate_key
@@ -893,3 +881,27 @@ CREATE INDEX IF NOT EXISTS idx_connection_events_user_bucket
 
 CREATE INDEX IF NOT EXISTS idx_connection_events_node_user_bucket
   ON connection_events(node_id, proxy_user_id, bucket_start);
+
+CREATE INDEX idx_connection_events_window ON connection_events(window_end, window_start);
+CREATE TABLE network_event_source_intervals (
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  PRIMARY KEY(node_id, started_at)
+);
+CREATE UNIQUE INDEX idx_network_source_active ON network_event_source_intervals(node_id) WHERE ended_at IS NULL;
+CREATE TRIGGER network_source_disabled AFTER UPDATE OF enabled ON node_connection_telemetry
+WHEN NEW.enabled=0 AND OLD.enabled=1 BEGIN
+ UPDATE network_event_source_intervals SET ended_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE node_id=NEW.node_id AND ended_at IS NULL;
+END;
+CREATE TRIGGER network_source_deleted BEFORE DELETE ON node_connection_telemetry BEGIN
+ UPDATE network_event_source_intervals SET ended_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE node_id=OLD.node_id AND ended_at IS NULL;
+END;
+CREATE VIEW network_event_records AS
+SELECT e.id, e.node_id, e.proxy_user_id, e.auth_name, e.source_ip, e.target_host, e.target_port, e.action, e.raw_message, e.count, e.aggregate_key, e.window_start, e.window_end, e.created_at, 'journal' AS source, NULL AS domain, NULL AS network, NULL AS ip_version, NULL AS protocol, NULL AS inbound, NULL AS inbound_type, NULL AS rule, NULL AS outbound, NULL AS outbound_type, NULL AS chain, NULL AS uplink_bytes, NULL AS downlink_bytes, NULL AS duration_ms_total, NULL AS connections_closed, NULL AS connection_id, NULL AS started_at, e.window_start AS event_time FROM log_events e
+WHERE e.proxy_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM network_event_source_intervals s WHERE s.node_id=e.node_id AND julianday(e.window_end)>=julianday(s.started_at) AND (s.ended_at IS NULL OR julianday(e.window_end)<julianday(s.ended_at)))
+UNION ALL
+SELECT e.id, e.node_id, e.proxy_user_id, e.auth_name, e.source_ip, e.target_host, e.target_port, 'connect', '', e.connections_opened, e.aggregate_key, e.window_start, e.window_end, e.created_at, 'stream' AS source, e.domain, e.network, e.ip_version, e.protocol, e.inbound, e.inbound_type, e.rule, e.outbound, e.outbound_type, e.chain, e.uplink_bytes, e.downlink_bytes, e.duration_ms_total, e.connections_closed, e.connection_id, CASE WHEN e.connection_id <> '' THEN e.bucket_start ELSE NULL END AS started_at, CASE WHEN e.connection_id <> '' THEN e.bucket_start ELSE e.window_start END AS event_time FROM connection_events e
+WHERE e.connection_id = '' OR EXISTS (SELECT 1 FROM network_event_source_intervals s WHERE s.node_id=e.node_id AND julianday(e.window_end)>=julianday(s.started_at) AND (s.ended_at IS NULL OR julianday(e.window_end)<julianday(s.ended_at)));
+CREATE INDEX idx_log_events_event_time ON log_events(window_start, id) WHERE proxy_user_id IS NOT NULL;
+CREATE INDEX idx_connection_events_event_time ON connection_events((CASE WHEN connection_id <> '' THEN bucket_start ELSE window_start END), id);

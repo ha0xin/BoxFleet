@@ -250,3 +250,59 @@ func TestAdminSystemLogsRejectsAnUnknownNode(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAdminRotateUserCredentials(t *testing.T) {
+	ctx := context.Background()
+	store := openAPITestDB(t)
+	if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: "rotate-user"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateNode(ctx, "rotate-node", "203.0.113.1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{NodeName: "rotate-node", Name: "vless", Protocol: db.ProtocolVLESSReality, ListenPort: 443, Enabled: true, SettingsJSON: `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BindUserToNode(ctx, "rotate-user", "rotate-node"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.IssueVLESSRealityCredential(ctx, db.IssueCredentialParams{UserName: "rotate-user", NodeName: "rotate-node", ProxyName: "vless"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(Options{DB: store, AdminToken: "secret"})
+	endpoint := "/api/admin/users/rotate-user/credentials/rotate"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, endpoint, nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", rec.Code)
+	}
+	unchanged, _ := store.GetProxyCredential(ctx, "rotate-user", "rotate-node", "vless")
+	if before.CredentialJSON != unchanged.CredentialJSON {
+		t.Fatal("unauthenticated request changed secret")
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, adminJSONRequest(t, http.MethodPost, endpoint, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rotation status = %d", rec.Code)
+	}
+	var response map[string]int
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response) != 1 || response["rotated"] != 1 {
+		t.Fatal("invalid rotation response")
+	}
+	after, err := store.GetProxyCredential(ctx, "rotate-user", "rotate-node", "vless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CredentialJSON == before.CredentialJSON || after.ID != before.ID || after.AuthName != before.AuthName {
+		t.Fatal("invalid credential rotation")
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, adminJSONRequest(t, http.MethodPost, "/api/admin/users/missing/credentials/rotate", nil))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing user status = %d", rec.Code)
+	}
+}

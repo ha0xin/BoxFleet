@@ -6,24 +6,13 @@ import (
 	"time"
 )
 
-// Connection telemetry is the second network-event producer: sing-box 1.14's
-// daemon gRPC SubscribeConnections stream, collected by the agent and shipped
-// here. It does not replace the journalctl scraper — the production fleet runs
-// 1.13, where the `service.api` config block does not parse — so both producers
-// coexist and this one is opt-in per node.
-//
-// This file is the whole wire contract, imported by both internal/agent (the
-// collector) and internal/server/db (ingest). Aggregation happens on the node:
-// see the volume note on the connection_events table in
-// migrations/026_connection_telemetry.sql for why raw per-connection rows are
-// not shipped.
+// Connection telemetry is sing-box's daemon gRPC stream. Agents retain one
+// cumulative snapshot per connection and ship bounded periodic reports. The
+// server merges updates by node, connection ID and creation time. Legacy
+// agents' dimension buckets are still accepted during rolling upgrades.
 
 const (
-	// ConnectionBucketInterval is the aggregation grain, applied identically on
-	// both sides: the agent keys its in-memory map by the truncated bucket and
-	// the server re-truncates whatever a node sends. Five minutes rather than
-	// one is a roughly 4x row reduction, and per-minute resolution is not
-	// needed here — the per-minute connection-count chart stays on log_events.
+	// ConnectionBucketInterval applies only to legacy aggregated reports.
 	ConnectionBucketInterval = 5 * time.Minute
 
 	// ConnectionChainSeparator flattens Connection.chainList for storage and
@@ -48,12 +37,12 @@ const (
 // for a node that has not advertised it, and must not expect reports from one.
 const CapabilityConnectionTelemetryV1 = "telemetry.connections.v1"
 
-// ConnectionReport ships one collection window of aggregated connection
+// ConnectionReport ships one collection window of connection
 // telemetry. NodeName is decorative and server-overwritten from the bearer
 // token, as on every other *Report. (AgentBootID, Sequence) is the idempotency
 // key: the server's unique constraint collides on a retried POST and the whole
 // batch is skipped, mirroring TrafficReport exactly — bytes here are summed on
-// ingest, so a partially applied replay would silently inflate totals.
+// ingest for legacy reports. Session snapshots merge by maximum lifetime totals.
 type ConnectionReport struct {
 	NodeName    string             `json:"node_name"`
 	Sequence    int64              `json:"sequence"`
@@ -120,10 +109,14 @@ func (c ConnectionCoverage) ConnectionAttributionRatio() float64 {
 	return float64(c.BytesAttributed) / float64(c.BytesObserved)
 }
 
-// ConnectionBucket is one (bucket_start, dimensions) aggregate. Every string
-// field maps to a field of sing-box's Connection message; see DimensionKey for
-// which of them participate in aggregation.
+// ConnectionBucket is one session snapshot when ConnectionID is present, or
+// a legacy dimension aggregate when it is absent. The wire field name remains
+// buckets so a server can be upgraded before its agents.
 type ConnectionBucket struct {
+	// ConnectionID plus StartedAt identifies one session across reports and agent restarts.
+	ConnectionID string `json:"connection_id,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+
 	// BucketStart is an RFC3339 UTC instant truncated to
 	// ConnectionBucketInterval. The server re-truncates it — a node is not
 	// trusted to place its own rows on the time axis.
@@ -160,7 +153,8 @@ type ConnectionBucket struct {
 	// times.
 	ConnectionsOpened int64 `json:"connections_opened"`
 	ConnectionsClosed int64 `json:"connections_closed"`
-	// UplinkBytes and DownlinkBytes are summed deltas of Connection.uplinkTotal
+	// UplinkBytes and DownlinkBytes are cumulative totals for session snapshots,
+	// or summed deltas for legacy buckets, from Connection.uplinkTotal
 	// and .downlinkTotal (proto fields 16/17). Fields 14/15 are never populated
 	// server-side by sing-box; nothing is built on them.
 	UplinkBytes   int64 `json:"uplink_bytes"`
@@ -253,7 +247,16 @@ func NormalizeConnectionInstant(value string) string {
 // must be a no-op, which is what TestConnectionBucketNormalizeIsIdempotent
 // pins.
 func (b ConnectionBucket) Normalize() (ConnectionBucket, bool) {
-	b.BucketStart = TruncateConnectionBucket(b.BucketStart)
+	b.ConnectionID = strings.TrimSpace(b.ConnectionID)
+	b.StartedAt = NormalizeConnectionInstant(b.StartedAt)
+	if b.ConnectionID != "" {
+		if b.StartedAt == "" {
+			return b, false
+		}
+		b.BucketStart = b.StartedAt
+	} else {
+		b.BucketStart = TruncateConnectionBucket(b.BucketStart)
+	}
 	b.AuthName = strings.TrimSpace(b.AuthName)
 	b.SourceIP = NormalizeConnectionHost(b.SourceIP)
 	b.Domain = NormalizeConnectionHost(b.Domain)
@@ -311,6 +314,9 @@ func (b ConnectionBucket) Normalize() (ConnectionBucket, bool) {
 // Call Normalize first — DimensionKey does not re-normalise, so that the agent
 // pays for it once per connection rather than once per event.
 func (b ConnectionBucket) DimensionKey() string {
+	if b.ConnectionID != "" {
+		return "session" + ConnectionDimensionSeparator + b.ConnectionID + ConnectionDimensionSeparator + b.StartedAt
+	}
 	parts := []string{
 		b.BucketStart,
 		b.AuthName,
@@ -334,11 +340,19 @@ func (b ConnectionBucket) DimensionKey() string {
 // Merge folds another bucket's measures into this one. Dimensions are assumed
 // equal — the caller reached this bucket through its DimensionKey.
 func (b *ConnectionBucket) Merge(other ConnectionBucket) {
-	b.ConnectionsOpened += other.ConnectionsOpened
-	b.ConnectionsClosed += other.ConnectionsClosed
-	b.UplinkBytes += other.UplinkBytes
-	b.DownlinkBytes += other.DownlinkBytes
-	b.DurationMsTotal += other.DurationMsTotal
+	if b.ConnectionID != "" {
+		b.ConnectionsOpened = max(b.ConnectionsOpened, other.ConnectionsOpened)
+		b.ConnectionsClosed = max(b.ConnectionsClosed, other.ConnectionsClosed)
+		b.UplinkBytes = max(b.UplinkBytes, other.UplinkBytes)
+		b.DownlinkBytes = max(b.DownlinkBytes, other.DownlinkBytes)
+		b.DurationMsTotal = max(b.DurationMsTotal, other.DurationMsTotal)
+	} else {
+		b.ConnectionsOpened += other.ConnectionsOpened
+		b.ConnectionsClosed += other.ConnectionsClosed
+		b.UplinkBytes += other.UplinkBytes
+		b.DownlinkBytes += other.DownlinkBytes
+		b.DurationMsTotal += other.DurationMsTotal
+	}
 	if other.WindowStart != "" && (b.WindowStart == "" || other.WindowStart < b.WindowStart) {
 		b.WindowStart = other.WindowStart
 	}

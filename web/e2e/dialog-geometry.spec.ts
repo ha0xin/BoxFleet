@@ -42,7 +42,7 @@ test("dialogs honour their size and never overflow their content", async ({ page
   expect(enroll.overflowing).toEqual([]);
 
   await page.getByLabel("Node name").fill("geometry-node");
-  await page.getByLabel("Public host").fill("203.0.113.50");
+  await page.getByRole("dialog").getByLabel("Public host").fill("203.0.113.50");
   await page.getByRole("button", { name: "Generate bootstrap" }).click();
   await expect(page.getByText("Install command", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Done", exact: true }).click();
@@ -60,11 +60,11 @@ test("dialogs honour their size and never overflow their content", async ({ page
   expect(hostWidth).toBeGreaterThan(190);
   await page.keyboard.press("Escape");
 
-  // SoftDeleteDialog is the canonical confirm, reused across pages.
+  // Resource deletion includes a dependency preview and uses the base dialog.
   await openRowActions(page, "geometry-node");
   await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
   const confirm = await dialogGeometry(page);
-  expect(confirm.width).toBe(SIZE_WIDTH.sm);
+  expect(confirm.width).toBe(SIZE_WIDTH.base);
   expect(confirm.overflowing).toEqual([]);
   await page.keyboard.press("Escape");
 

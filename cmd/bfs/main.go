@@ -86,6 +86,7 @@ func runServer(ctx context.Context) error {
 		logger.Warn().Msg("admin API authentication disabled by --allow-insecure-admin")
 	}
 	router := api.NewRouter(api.Options{
+		MaintenanceContext: ctx,
 		DB:                 store,
 		ArtifactDir:        artifactDir,
 		AdminToken:         adminToken,

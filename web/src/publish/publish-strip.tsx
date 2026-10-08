@@ -5,7 +5,7 @@ import { usePublishStatus } from "./publish-status";
 import type { PublishStatus } from "./publish-status";
 
 /**
- * Extra className applied to the 58px top bar container so the whole bar tints
+ * Extra className applied to the publication notice container so it tints
  * with the current publish status. Returns "" for idle so the bar keeps its
  * default look. `applied` adds the slide-to-unlock sheen overlay.
  */
@@ -25,8 +25,8 @@ export function publishBarToneClass(status: PublishStatus): string {
 }
 
 /**
- * Right-aligned content of the global publish bar. Rendered inside the existing
- * top bars (PageTopBar / AppPageHeader); the bar background is tinted separately
+ * Content of the global publication notice below AppPageHeader; its
+ * background is tinted separately
  * via `publishBarToneClass`. Renders nothing when idle.
  */
 export function PublishStrip() {

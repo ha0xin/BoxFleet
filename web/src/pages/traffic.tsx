@@ -455,7 +455,7 @@ export function TrafficPage() {
       columnHelper.accessor("label", {
         header: "User",
         cell: (info) => (
-          <span className="block max-w-52 truncate font-medium text-kumo-default" title={info.getValue()}>
+          <span className="block truncate font-medium text-kumo-default" title={info.getValue()}>
             {info.getValue()}
           </span>
         )
@@ -548,7 +548,7 @@ export function TrafficPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           <Collapsible.Root open={filterOpen} onOpenChange={setFilterOpen}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -780,7 +780,7 @@ export function TrafficPage() {
               />
             ) : null}
 
-            <TableCard>
+            <TableCard tableId="traffic-users" widths={[180, { min: 240 }, 140, 140, 140]}>
               <Table className="min-w-[860px]">
                 <Table.Header variant="compact">
                   <Table.Row>

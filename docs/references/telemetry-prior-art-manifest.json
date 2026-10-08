@@ -1,0 +1,225 @@
+{
+  "retrieved_at": "2026-10-07T13:13:41.834024+00:00",
+  "projects": [
+    {
+      "repository": "coder/websocket",
+      "commit": "9c8faadccd1b679e811a79ce506f8a10237251ad",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "5fd5393d4d3095741658019bf7e86ebbe4a5272cfcffeae6c7e9032e3fc4c97f",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/README.md"
+        },
+        {
+          "path": "conn.go",
+          "sha256": "f5aabddca411a9ccbf2938f976d9152f373e52bb1de138c305110807e1c7b0e4",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/conn.go"
+        },
+        {
+          "path": "read.go",
+          "sha256": "bc8fe2d1003a6acdd078da05e490edc5f0b5a5df69b28ae6f5004c7c526cfeb6",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/read.go"
+        },
+        {
+          "path": "dial.go",
+          "sha256": "613ea3bb251a13de7c0f47839947a7e5f867acb9555bad1499d1a514b9a772d7",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/dial.go"
+        },
+        {
+          "path": "accept.go",
+          "sha256": "3578bc97e032fdee9ff5fbcecf4e02f2f9d0928184b92466702858de76d8b6af",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/accept.go"
+        },
+        {
+          "path": "example_test.go",
+          "sha256": "7f9b32c01472b9d1c197ef74dee2d473f018702cee66358aa1c502dfe3bdb2fa",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/example_test.go"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "cc0975a5f6305145bdd7b41ce9479632fdac3870e6ac4281f28017f18c767c4e",
+          "url": "https://github.com/coder/websocket/blob/9c8faadccd1b679e811a79ce506f8a10237251ad/LICENSE.txt"
+        }
+      ],
+      "missing": [
+        "ping.go"
+      ]
+    },
+    {
+      "repository": "tidwall/wal",
+      "commit": "4b09f9519cba3b6178dcfcbc1b43106b95dba6aa",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "21e8225fd12a5b9c6645b4f7461c3e01981d8afe610df73a4d9e8384c59d8ca5",
+          "url": "https://github.com/tidwall/wal/blob/4b09f9519cba3b6178dcfcbc1b43106b95dba6aa/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "cdcfb9e2c81da49a9f9edd6bb7e6caf60db3c3c4befe6f645a267b028557aa17",
+          "url": "https://github.com/tidwall/wal/blob/4b09f9519cba3b6178dcfcbc1b43106b95dba6aa/LICENSE"
+        },
+        {
+          "path": "wal.go",
+          "sha256": "a6543f31432be383a47493edd31f13b56284905c588b9f5a94af86c4159d355c",
+          "url": "https://github.com/tidwall/wal/blob/4b09f9519cba3b6178dcfcbc1b43106b95dba6aa/wal.go"
+        },
+        {
+          "path": "wal_test.go",
+          "sha256": "3d93eb303608016594f9d8ecf29d608958841d1cbe77681b0f8c42602e5681e9",
+          "url": "https://github.com/tidwall/wal/blob/4b09f9519cba3b6178dcfcbc1b43106b95dba6aa/wal_test.go"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "nsqio/go-diskqueue",
+      "commit": "ff2a02e5299f130a68a7ffa6d200b9bb55671b73",
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "982acf9bc7b52e1a5d75f8a697fb72acbfcfe4f978fbff5b708b4a207823a7a5",
+          "url": "https://github.com/nsqio/go-diskqueue/blob/ff2a02e5299f130a68a7ffa6d200b9bb55671b73/README.md"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "24042dc4546dfca814e4a2ce8298b67fa7b36c365fc8c9576f308b950f963421",
+          "url": "https://github.com/nsqio/go-diskqueue/blob/ff2a02e5299f130a68a7ffa6d200b9bb55671b73/LICENSE"
+        },
+        {
+          "path": "diskqueue.go",
+          "sha256": "0f41588c465f277451b0aa7392f20fd69e93b72e2331c0aa82f3c7fabd8269c3",
+          "url": "https://github.com/nsqio/go-diskqueue/blob/ff2a02e5299f130a68a7ffa6d200b9bb55671b73/diskqueue.go"
+        },
+        {
+          "path": "diskqueue_test.go",
+          "sha256": "e3ae9ac155cfbb59c6d1fcf6729f0a5f05b945e1dd91aa480c6fe21412b085fc",
+          "url": "https://github.com/nsqio/go-diskqueue/blob/ff2a02e5299f130a68a7ffa6d200b9bb55671b73/diskqueue_test.go"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "open-telemetry/opentelemetry-collector",
+      "commit": "adcbe6852f7f1aecddfdf5f31c57c00ba3e5ee85",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector/blob/adcbe6852f7f1aecddfdf5f31c57c00ba3e5ee85/LICENSE"
+        },
+        {
+          "path": "exporter/exporterhelper/README.md",
+          "sha256": "fe1f6f0f3bf74d9a107ce5885c561f8edbb79f5ef461ea14b51c49d38f022a97",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector/blob/adcbe6852f7f1aecddfdf5f31c57c00ba3e5ee85/exporter/exporterhelper/README.md"
+        },
+        {
+          "path": "exporter/exporterhelper/internal/queue/persistent_queue.go",
+          "sha256": "a98bd9990c2405d0b24cdee951ccacec01b58b4dc347ceb6b7c256ceea789d98",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector/blob/adcbe6852f7f1aecddfdf5f31c57c00ba3e5ee85/exporter/exporterhelper/internal/queue/persistent_queue.go"
+        },
+        {
+          "path": "exporter/exporterhelper/internal/queue/persistent_queue_test.go",
+          "sha256": "84f1d7967de7d362aa7235a893b4c32600e9b89aaad71724cd8c42f9d7ae3138",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector/blob/adcbe6852f7f1aecddfdf5f31c57c00ba3e5ee85/exporter/exporterhelper/internal/queue/persistent_queue_test.go"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "open-telemetry/opentelemetry-collector-contrib",
+      "commit": "37ea4a814c84a4097400c609c2f9fed291bfa250",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/37ea4a814c84a4097400c609c2f9fed291bfa250/LICENSE"
+        },
+        {
+          "path": "extension/storage/filestorage/README.md",
+          "sha256": "ba6b58efb9ed9a6bbb7e9a684733d7ae2a2a7cd1764915ce00aa37d8234d14bd",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/37ea4a814c84a4097400c609c2f9fed291bfa250/extension/storage/filestorage/README.md"
+        },
+        {
+          "path": "extension/storage/filestorage/client.go",
+          "sha256": "4ac7186fbd0e8149368ade0f12a2cb3b1c26e1f85dd1943145e88891df5d2e3b",
+          "url": "https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/37ea4a814c84a4097400c609c2f9fed291bfa250/extension/storage/filestorage/client.go"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "vectordotdev/vector",
+      "commit": "403f671bfa330b41890f6ef6b7c42fb33fdace14",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "60222c28c1a7f6a92c7df98e5c5f4459e624e6e285e0b9b94467af5f6ab3343d",
+          "url": "https://github.com/vectordotdev/vector/blob/403f671bfa330b41890f6ef6b7c42fb33fdace14/LICENSE"
+        },
+        {
+          "path": "lib/vector-buffers/src/variants/disk_v2/mod.rs",
+          "sha256": "88b54987a886e534d77a781b2f74b1f03d575c1dd71ac0fd4d84517057ff7bb7",
+          "url": "https://github.com/vectordotdev/vector/blob/403f671bfa330b41890f6ef6b7c42fb33fdace14/lib/vector-buffers/src/variants/disk_v2/mod.rs"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "fluent/fluent-bit",
+      "commit": "a415d1b089d13d56366443a480e7433e9fdd27e6",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "url": "https://github.com/fluent/fluent-bit/blob/a415d1b089d13d56366443a480e7433e9fdd27e6/LICENSE"
+        },
+        {
+          "path": "src/flb_storage.c",
+          "sha256": "740c66e2ee3a05394c77c738099a4a6b6e6cbb7307cc3c92f2d5099b2b1a608b",
+          "url": "https://github.com/fluent/fluent-bit/blob/a415d1b089d13d56366443a480e7433e9fdd27e6/src/flb_storage.c"
+        },
+        {
+          "path": "plugins/out_forward/forward.c",
+          "sha256": "ec2846f3060440033fbf6880a4da12e6a9b521da91f142fda28e8d4ebf807fdf",
+          "url": "https://github.com/fluent/fluent-bit/blob/a415d1b089d13d56366443a480e7433e9fdd27e6/plugins/out_forward/forward.c"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "repository": "elastic/beats",
+      "commit": "e30e9beb7d3110cf4066a0300846189078c3b5f8",
+      "files": [
+        {
+          "path": "LICENSE.txt",
+          "sha256": "7f0eb504dd0b8b090b52cff384296249be3168374f271b142ce03130c987c8e5",
+          "url": "https://github.com/elastic/beats/blob/e30e9beb7d3110cf4066a0300846189078c3b5f8/LICENSE.txt"
+        },
+        {
+          "path": "libbeat/publisher/queue/diskqueue/acks.go",
+          "sha256": "b6ad18096d53900ea2743708874536ea56633fa064da55fa104b1f9fdeff8a78",
+          "url": "https://github.com/elastic/beats/blob/e30e9beb7d3110cf4066a0300846189078c3b5f8/libbeat/publisher/queue/diskqueue/acks.go"
+        },
+        {
+          "path": "libbeat/publisher/queue/diskqueue/consumer.go",
+          "sha256": "ec77f8984bd60c01e30c735cab149fd69ee90c2cb6a64d9a33d2a94c7a28e2b8",
+          "url": "https://github.com/elastic/beats/blob/e30e9beb7d3110cf4066a0300846189078c3b5f8/libbeat/publisher/queue/diskqueue/consumer.go"
+        },
+        {
+          "path": "libbeat/publisher/queue/diskqueue/checksum.go",
+          "sha256": "0bcce082b94e7eee6c26695ac4c70c5e94bfdf5383d026ff0f6722b2c1794027",
+          "url": "https://github.com/elastic/beats/blob/e30e9beb7d3110cf4066a0300846189078c3b5f8/libbeat/publisher/queue/diskqueue/checksum.go"
+        },
+        {
+          "path": "libbeat/publisher/queue/diskqueue/state_file.go",
+          "sha256": "54fe784c657ec297661b577fc81bd3990e126ca6c393d69789a6205723c6ba50",
+          "url": "https://github.com/elastic/beats/blob/e30e9beb7d3110cf4066a0300846189078c3b5f8/libbeat/publisher/queue/diskqueue/state_file.go"
+        }
+      ],
+      "missing": [
+        "libbeat/publisher/queue/diskqueue/README.md"
+      ]
+    }
+  ]
+}

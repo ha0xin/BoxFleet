@@ -70,7 +70,7 @@ describe("useUrlFilters", () => {
     expect(page.search()).toBe("");
     expect(page.state().filters).toEqual(nodeDefaults);
     expect(page.state().page).toBe(1);
-    expect(page.state().perPage).toBe(10);
+    expect(page.state().perPage).toBe(50);
     expect(page.state().offset).toBe(0);
     expect(page.state().activeFilterCount).toBe(0);
 
@@ -134,20 +134,20 @@ describe("useUrlFilters", () => {
       sort: "status",
       direction: "asc"
     });
-    expect(page.state().offset).toBe(10);
+    expect(page.state().offset).toBe(50);
   });
 
   it("resets to the first page when the page size changes", () => {
     const page = setup("?page=5", nodeOptions);
 
-    page.act((state) => state.setPerPage(50));
+    page.act((state) => state.setPerPage(25));
 
     expect(page.state().page).toBe(1);
-    expect(page.state().perPage).toBe(50);
-    expect(page.search()).toBe("?limit=50");
+    expect(page.state().perPage).toBe(25);
+    expect(page.search()).toBe("?limit=25");
 
     // Back to the default size, so the param disappears again.
-    page.act((state) => state.setPerPage(10));
+    page.act((state) => state.setPerPage(50));
     expect(page.search()).toBe("");
   });
 
@@ -161,7 +161,7 @@ describe("useUrlFilters", () => {
       direction: "asc"
     });
     expect(page.state().page).toBe(1);
-    expect(page.state().perPage).toBe(10);
+    expect(page.state().perPage).toBe(50);
   });
 
   it("clamps an oversized page size and ignores a fractional page", () => {

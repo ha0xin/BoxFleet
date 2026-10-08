@@ -132,7 +132,7 @@ describe("SystemLogsPage", () => {
       direction: "asc"
     });
     // Paging is the server's: one page of rows, the full count in the footer.
-    await waitFor(() => expect(screen.getByText("Showing 26-50 of 60")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("60 total", { exact: false })).toBeTruthy());
   });
 
   it("omits the all sentinel, which the server has no value for", async () => {

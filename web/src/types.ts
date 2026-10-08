@@ -298,15 +298,6 @@ export type UserConnectionInfo = {
   }>;
 };
 
-export type AdminSubscription = {
-  active: boolean;
-  url: string;
-  mihomo_url?: string;
-  provider_url?: string;
-  created_at: string;
-  last_used_at: string;
-};
-
 export type MihomoRewrite = {
   id: string;
   template_id?: string;
@@ -370,6 +361,25 @@ export type TrafficRow = {
 };
 
 export type NetworkEvent = {
+  event_time?: string;
+  id?: string;
+  source?: "journal" | "stream";
+  connection_id?: string | null;
+  started_at?: string | null;
+  domain?: string | null;
+  network?: string | null;
+  ip_version?: number | null;
+  protocol?: string | null;
+  inbound?: string | null;
+  inbound_type?: string | null;
+  rule?: string | null;
+  outbound?: string | null;
+  outbound_type?: string | null;
+  chain?: string | null;
+  uplink_bytes?: number | null;
+  downlink_bytes?: number | null;
+  duration_ms?: number | null;
+  connections_closed?: number | null;
   node_name: string;
   user_name: string;
   auth_name: string;
@@ -689,3 +699,7 @@ export type Page =
   | "network-events"
   | "system-logs"
   | "settings";
+
+export type DeletionResourceKind = "node" | "proxy" | "user" | "path";
+export type DeletionImpactItem = { kind: string; id: string; name: string; effect: string };
+export type DeletionImpact = { items: DeletionImpactItem[]; blocked?: string };

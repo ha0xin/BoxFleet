@@ -1,25 +1,254 @@
-import type { ReactNode } from "react";
-import { SortAscendingIcon, SortDescendingIcon, WarningCircleIcon } from "@phosphor-icons/react";
-import { Empty, Loader, Pagination, Table } from "@cloudflare/kumo";
+import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, horizontalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { logTimezone, useLogFields } from "./log-workspace";
+import { LogRowDetails } from "./log-row-details";
+import { getCoreRowModel, useReactTable, type ColumnSizingState, type VisibilityState } from "@tanstack/react-table";
+import { ArrowsCounterClockwiseIcon, GearSixIcon, PencilSimpleIcon, ArrowDownIcon, CaretUpDownIcon, DotsSixVerticalIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { Button, DropdownMenu, Empty, Input, Loader, Pagination, Table } from "@cloudflare/kumo";
 
 export type SortDirection = "asc" | "desc";
 
+type TableElement = ReactElement<{ children?: ReactNode; label?: string; widths?: readonly TableColumnWidth[]; className?: string; colSpan?: number; style?: React.CSSProperties; resizeHandle?: ReactNode; dragHandle?: ReactNode; "aria-label"?: string }>;
+const emptyRows: unknown[] = [];
+
+function elements(children: ReactNode): TableElement[] {
+  return Children.toArray(children).filter(isValidElement) as TableElement[];
+}
+
+function textOf(node: ReactNode): string {
+  return Children.toArray(node).map((child) => isValidElement(child)
+    ? textOf((child.props as { children?: ReactNode }).children)
+    : typeof child === "string" || typeof child === "number" ? String(child) : "").join("");
+}
+
+function findHeaders(node: ReactNode): TableElement[] {
+  for (const child of elements(node)) {
+    if (child.type === Table.Header) return elements(child.props.children).flatMap((row) => elements(row.props.children));
+    const found = findHeaders(child.props.children);
+    if (found.length) return found;
+  }
+  return [];
+}
+
+function findWidths(node: ReactNode): readonly TableColumnWidth[] | undefined {
+  for (const child of elements(node)) {
+    if (child.type === TableColgroup) return child.props.widths;
+    const found = findWidths(child.props.children);
+    if (found) return found;
+  }
+}
+
+/** Stored preferences are local to a table and its column schema, never its data. */
+export function readTablePreferences(key: string, count: number, fallbackKeys: string[] = []): { sizing: ColumnSizingState; visibility: VisibilityState } {
+  try {
+    const storedKey = [key, ...fallbackKeys].find((candidate) => localStorage.getItem(candidate) !== null);
+    const value = JSON.parse(storedKey ? localStorage.getItem(storedKey)! : "{}");
+    const sizing: ColumnSizingState = {};
+    const visibility: VisibilityState = {};
+    for (let index = 0; index < count; index++) {
+      const width = value?.sizing?.[index];
+      if (typeof width === "number" && Number.isFinite(width)) sizing[index] = Math.max(64, Math.min(1200, width));
+      if (index > 0 && value?.visibility?.[index] === false) visibility[index] = false;
+    }
+    return { sizing, visibility };
+  } catch {
+    return { sizing: {}, visibility: {} };
+  }
+}
+
+/** Width defaults can change without discarding manually sized/hidden columns. */
+function legacyPreferenceKeys(tableId: string, labels: string[], exactKey: string): string[] {
+  try {
+    const prefix = `boxfleet.table.v1.${tableId}.`;
+    const matches = Object.keys(localStorage).filter((key) => {
+      if (!key.startsWith(prefix)) return false;
+      try { return JSON.stringify(JSON.parse(key.slice(prefix.length)).labels) === JSON.stringify(labels); }
+      catch { return false; }
+    });
+    return [exactKey, ...matches.reverse().filter((key) => key !== exactKey)];
+  } catch { return []; }
+}
+
 /**
- * Canonical chrome for admin data tables: rounded card with a hairline border
- * and a thin-scrollbar horizontal scroll area. Pages render `<Table>` inside.
- *
- * The card is only half of the horizontal-overflow contract. Every admin page
- * root is a grid item, and a grid item's default `min-width: auto` means it can
- * never be narrower than its min-content size — so a wide table's minimum width
- * leaks straight past this scroll container and widens the whole page instead.
- * Page roots must therefore carry `min-w-0`; see `docs/web-ui.md`.
+ * Native Kumo table presentation with TanStack's column sizing/visibility.
+ * Pages still own their rows, query state and server pagination. No DOM mutation
+ * or second data model is needed to give every inventory the same table tools.
  */
-export function TableCard({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={`overflow-hidden rounded-lg border border-kumo-line bg-kumo-base ${className}`}>
-      <div className="bf-table-scroll overflow-x-auto overscroll-x-contain">{children}</div>
-    </div>
+function ReorderableHead({ cell, id, label }: { cell: TableElement; id: string; label: string }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const dragHandle = <Button variant="ghost" size="xs" shape="square" icon={DotsSixVerticalIcon} aria-label={`Drag ${label} column`} ref={setActivatorNodeRef} {...attributes} {...listeners} className="bf-column-drag" />;
+  const content = cell.type === SortHead ? cloneElement(cell, { dragHandle }) : cloneElement(cell, {}, dragHandle, cell.props.children);
+  return cloneElement(content, { ref: setNodeRef, style: { transform: CSS.Translate.toString(transform), transition, zIndex: isDragging ? 5 : undefined } } as React.Attributes);
+}
+
+export function TableCard({ children, className = "", tableId, widths, variant = "resource", loadMore }: {
+  children: ReactNode;
+  className?: string;
+  tableId?: string;
+  widths?: readonly TableColumnWidth[];
+  variant?: "resource" | "log";
+  loadMore?: { hasMore: boolean; loading: boolean; fetch: () => void };
+}) {
+  const handleId = useId();
+  const logFields = useLogFields();
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    try { const value = JSON.parse(localStorage.getItem(`boxfleet.table.order.${tableId}`) ?? "[]"); return Array.isArray(value) && value.every((id) => typeof id === "string" && /^\d+$/.test(id)) && new Set(value).size === value.length ? value : []; } catch { return []; }
+  });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const headers = findHeaders(children);
+  const labels = headers.map((head, index) => head.props.label ?? (textOf(head.props.children).trim() || `Column ${index + 1}`));
+  const declared = widths ?? findWidths(children) ?? labels.map((label, index) => label === "Actions" ? 52 : index === 0 ? { min: 220 } : 160);
+  const schema = JSON.stringify({ labels, declared });
+  const storageKey = `boxfleet.table.v2.${tableId ?? "anonymous"}.${JSON.stringify(labels)}`;
+  const legacyKey = `boxfleet.table.v1.${tableId ?? "anonymous"}.${schema}`;
+  const [preferences, setPreferences] = useState(() => tableId ? readTablePreferences(storageKey, labels.length, legacyPreferenceKeys(tableId, labels, legacyKey)) : { sizing: {}, visibility: {} });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const tailRef = useRef<HTMLDivElement>(null);
+  const fetchMore = loadMore?.fetch;
+  const hasMore = loadMore?.hasMore;
+  const loadingMore = loadMore?.loading;
+  useEffect(() => {
+    if (!hasMore || loadingMore || !fetchMore || !tailRef.current || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) fetchMore();
+    }, { root: scrollRef.current, rootMargin: "0px 0px 80px 0px" });
+    observer.observe(tailRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, fetchMore]);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setAvailableWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!tableId) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(preferences)); } catch { /* Storage can be disabled. */ }
+  }, [storageKey, tableId, preferences]);
+
+  const definitions = useMemo(() => {
+    const spec = JSON.parse(schema) as { labels: string[]; declared: TableColumnWidth[] };
+    const sizes = spec.declared.map((width) => typeof width === "number" ? width : width.min);
+    // Spare space belongs to the widest flexible content column, rather than
+    // making every name column equally wide. Manual widths override this default.
+    const flexible = spec.declared.reduce<number>((best, width, index) => typeof width !== "number" && (best < 0 || sizes[index] > sizes[best]) ? index : best, -1);
+    if (flexible >= 0) sizes[flexible] += Math.max(0, availableWidth - (variant === "resource" ? 44 : 0) - sizes.reduce((sum, size) => sum + size, 0));
+    return spec.labels.map((label, index) => ({ id: String(index), header: label, size: sizes[index], minSize: sizes[index] < 64 ? sizes[index] : 64, maxSize: 1200, enableResizing: label !== "Actions" && label !== "Details", enableHiding: index > 0 && label !== "Actions" && label !== "Details" }));
+  }, [schema, availableWidth, variant]);
+  const table = useReactTable({
+    data: emptyRows,
+    columns: definitions,
+    getCoreRowModel: getCoreRowModel(),
+    columnResizeMode: "onChange",
+    state: { columnSizing: preferences.sizing, columnVisibility: preferences.visibility, columnOrder: variant === "log" ? columnOrder.filter((id) => Number(id) < definitions.length) : [] },
+    onColumnSizingChange: (update) => setPreferences((previous) => ({ ...previous, sizing: typeof update === "function" ? update(previous.sizing) : update })),
+    onColumnVisibilityChange: (update) => setPreferences((previous) => ({ ...previous, visibility: typeof update === "function" ? update(previous.visibility) : update }))
+  });
+  useEffect(() => {
+    if (tableId) { try { localStorage.setItem(`boxfleet.table.order.${tableId}`, JSON.stringify(columnOrder)); } catch { /* Storage may be unavailable. */ } }
+  }, [columnOrder, tableId]);
+  const registerFields = logFields?.register;
+  useEffect(() => {
+    if (variant !== "log" || !registerFields) return;
+    const spec = JSON.parse(schema) as { labels: string[] };
+    registerFields({ fields: table.getAllLeafColumns().filter((column) => column.getCanHide()).map((column) => ({ id: column.id, label: spec.labels[Number(column.id)], visible: preferences.visibility[column.id] !== false, toggle: (visible: boolean) => setPreferences((previous) => ({ ...previous, visibility: { ...previous.visibility, [column.id]: visible } })) })), reset: () => { setPreferences({ sizing: {}, visibility: {} }); setColumnOrder([]); } });
+    return () => registerFields(null);
+  }, [registerFields, variant, schema, preferences, table]);
+  const timeColumn = labels.findIndex((label) => /^(Timestamp|Time|Started|Bucket)$/.test(label));
+  const settings = (
+    <DropdownMenu>
+      <DropdownMenu.Trigger render={variant === "log" ? <Button variant="secondary" size="xs" icon={PencilSimpleIcon} aria-label="Fields">Fields</Button> : <Button variant="ghost" size="sm" shape="square" icon={GearSixIcon} aria-label="Edit columns" />} />
+      <DropdownMenu.Content>
+        <DropdownMenu.Group>
+          <DropdownMenu.Label>Fields</DropdownMenu.Label>
+          <Input aria-label="Search table fields" placeholder="Search fields…" value={fieldSearch} onChange={(event) => setFieldSearch(event.target.value)} className="m-1" />
+          {table.getAllLeafColumns().filter((column) => column.getCanHide() && labels[Number(column.id)].toLowerCase().includes(fieldSearch.toLowerCase())).map((column) => (
+            <DropdownMenu.CheckboxItem key={column.id} checked={column.getIsVisible()} closeOnClick={false} onCheckedChange={(visible) => column.toggleVisibility(visible)}>
+              {labels[Number(column.id)]}
+            </DropdownMenu.CheckboxItem>
+          ))}
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item icon={ArrowsCounterClockwiseIcon} onClick={() => { setPreferences({ sizing: {}, visibility: {} }); setColumnOrder([]); }}>Reset columns</DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
   );
+  function resizeHandle(index: number) {
+    const column = table.getColumn(String(index));
+    if (!column?.getCanResize()) return null;
+    const header = table.getFlatHeaders().find((item) => item.column.id === column.id)!;
+    return <><span id={`${handleId}-${index}`} className="sr-only" aria-hidden="true">{`Resize ${labels[index]} column`}</span><Table.ResizeHandle
+      aria-labelledby={`${handleId}-${index}`}
+      role="separator"
+      aria-orientation="vertical"
+      aria-valuemin={column.columnDef.minSize}
+      aria-valuemax={1200}
+      aria-valuenow={Math.round(column.getSize())}
+      tabIndex={0}
+      onMouseDown={header.getResizeHandler()}
+      onTouchStart={header.getResizeHandler()}
+      onDoubleClick={() => column.resetSize()}
+      onKeyDown={(event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key === "Home") column.resetSize();
+        else table.setColumnSizing((current) => ({ ...current, [column.id]: Math.max(column.columnDef.minSize ?? 64, Math.min(1200, column.getSize() + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 40 : 10))) }));
+      }}
+    /></>;
+  }
+  const fillerWidth = Math.max(variant === "resource" ? 44 : 0, availableWidth - table.getTotalSize());
+  const hasFiller = variant === "resource" || fillerWidth > 0;
+  const visibleCount = table.getVisibleLeafColumns().length + (hasFiller ? 1 : 0);
+  function findFeedback(node: ReactNode): TableElement | undefined {
+    for (const child of elements(node)) {
+      if (child.type === TableEmpty || child.type === TableError || child.type === TableLoading) return child;
+      const found = findFeedback(child.props.children);
+      if (found) return found;
+    }
+  }
+  const feedback = findFeedback(children);
+  function decorate(node: ReactNode, inHeader = false): ReactNode {
+    return Children.map(node, (child) => {
+      if (!isValidElement(child)) return child;
+      const element = child as TableElement;
+      if (element.type === TableColgroup) return null;
+      if (element.type === Table) return cloneElement(element, { style: { ...element.props.style, minWidth: undefined, width: table.getTotalSize() + fillerWidth }, className: `${element.props.className ?? ""} bf-data-table` },
+        <colgroup>{table.getVisibleLeafColumns().map((column) => <col key={column.id} style={{ width: column.getSize() }} />)}{hasFiller ? <col style={{ width: fillerWidth }} /> : null}</colgroup>, decorate(element.props.children));
+      if (element.type === Table.Header) return cloneElement(element, {}, decorate(element.props.children, true));
+      if (feedback && element.type === feedback.type) return null;
+      if (element.type === LogRowDetails) return cloneElement(element, { colSpan: visibleCount });
+      if (element.type === Table.Row) {
+        const cells = elements(element.props.children);
+        if (cells.length === 1 && cells[0].props.colSpan) return cloneElement(element, {}, cloneElement(cells[0], { colSpan: visibleCount }));
+        return cloneElement(element, {}, table.getVisibleLeafColumns().map((column) => {
+          const index = Number(column.id);
+          const cell = cells[index];
+          if (!cell) return null;
+          const extras = <>{variant === "log" && index === timeColumn ? <>{cell.type !== SortHead ? <ArrowDownIcon size={20} weight="bold" className="ml-1 inline-block align-middle text-kumo-link" aria-label="Newest first" /> : null}<span className="bf-log-timezone ml-1 text-xs text-kumo-subtle">{logTimezone()}</span><span className="ml-2 inline-flex align-middle">{settings}</span></> : null}{resizeHandle(index)}</>;
+          const decorated = inHeader && cell.type === SortHead ? cloneElement(cell, { key: column.id, resizeHandle: extras }) : inHeader ? cloneElement(cell, { key: column.id, "aria-label": labels[index] }, labels[index] === "Details" ? <span className="sr-only">Details</span> : cell.props.children, extras) : cloneElement(cell, { key: column.id });
+          return inHeader && variant === "log" && labels[index] !== "Details" ? <ReorderableHead key={column.id} cell={decorated} id={column.id} label={labels[index]} /> : decorated;
+        }), hasFiller ? inHeader ? <Table.Head key="settings" sticky="right" className="bf-table-settings">{variant === "resource" ? settings : null}</Table.Head> : <Table.Cell key="settings" sticky="right" className="bf-table-settings" /> : null);
+      }
+      if (element.props.children) return cloneElement(element, {}, decorate(element.props.children, inHeader));
+      return element;
+    });
+  }
+  return <div className={`bf-table-card bf-table-${variant} overflow-hidden rounded-lg border border-kumo-line bg-kumo-base ${className}`} data-table-id={tableId} style={availableWidth ? { "--bf-table-viewport-width": `${availableWidth}px` } as React.CSSProperties : undefined}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
+      if (!over || active.id === over.id) return;
+      const order = table.getAllLeafColumns().map((column) => column.id);
+      const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
+      setColumnOrder(next);
+    }}><SortableContext items={table.getVisibleLeafColumns().filter((column) => labels[Number(column.id)] !== "Details").map((column) => column.id)} strategy={horizontalListSortingStrategy}>
+      <div ref={scrollRef} className="bf-table-scroll overflow-x-auto overscroll-x-contain">{decorate(children)}{loadMore?.hasMore ? <div ref={tailRef} className="h-px" aria-hidden="true" /> : null}</div>
+    </SortableContext></DndContext>
+    {feedback ? <Table className="w-full"><Table.Body>{cloneElement(feedback, { colSpan: 1 })}</Table.Body></Table> : null}
+  </div>;
 }
 
 /**
@@ -72,8 +301,8 @@ export function tableMinWidth(widths: readonly TableColumnWidth[]): number {
  * between them.
  *
  * Must be the table's first child, before `<Table.Header>`. This is also the
- * substrate Kumo's `Table.ResizeHandle` needs, so a future draggable-resize pass
- * only has to feed these widths from TanStack's `column.getSize()`.
+ * declaration consumed by TableCard, which replaces it with TanStack sizes.
+ * Outside TableCard it remains a standard fixed-layout colgroup.
  */
 export function TableColgroup({ widths }: { widths: readonly TableColumnWidth[] }) {
   return (
@@ -97,7 +326,11 @@ export function SortHead<Column extends string>({
   direction,
   setSort,
   className,
-  sticky
+  sticky,
+  resizeHandle,
+  dragHandle,
+  ref,
+  style
 }: {
   label: string;
   column: Column;
@@ -106,23 +339,36 @@ export function SortHead<Column extends string>({
   setSort: (column: Column) => void;
   className?: string;
   sticky?: "left" | "right";
+  resizeHandle?: ReactNode; dragHandle?: ReactNode;
+  ref?: React.Ref<HTMLTableCellElement>;
+  style?: React.CSSProperties;
 }) {
   const active = sort === column;
-  const Icon = active && direction === "desc" ? SortDescendingIcon : SortAscendingIcon;
+  const Icon = active ? ArrowDownIcon : CaretUpDownIcon;
   return (
     <Table.Head
       className={className}
+      ref={ref}
+      style={style}
       sticky={sticky}
+      aria-label={label}
       aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
     >
+      {dragHandle}
       <button
         type="button"
-        className="inline-flex items-center gap-1 whitespace-nowrap text-left font-medium text-kumo-default hover:text-kumo-strong"
+        className="bf-sort-button inline-flex min-w-0 items-center gap-1.5 text-left font-medium text-inherit hover:text-kumo-default"
         onClick={() => setSort(column)}
       >
-        {label}
-        <Icon className={`size-3.5 ${active ? "text-kumo-default" : "text-kumo-subtle"}`} />
+        <span className="min-w-0 truncate">{label}</span>
+        <Icon
+          weight="bold"
+          aria-hidden="true"
+          data-sort-indicator={active ? direction : "none"}
+          className={`bf-sort-icon pointer-events-none size-3 shrink-0 opacity-50 ${active ? "transition-transform duration-200 ease-in-out" : ""} ${active && direction === "asc" ? "rotate-180" : ""}`}
+        />
       </button>
+      {resizeHandle}
     </Table.Head>
   );
 }
@@ -187,6 +433,7 @@ export function AdminPagination({
   if (total <= 0) {
     return <div className="mt-1 text-sm text-kumo-subtle">0 items</div>;
   }
+  if (total <= perPage && page === 1) return <div className="mt-1 text-sm text-kumo-subtle">Showing 1-{total} of {total}</div>;
   return (
     <Pagination page={page} setPage={setPage} perPage={perPage} totalCount={total} className="mt-1">
       <Pagination.Info>

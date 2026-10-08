@@ -1,8 +1,9 @@
 # Deployment
 
-BoxFleet deploys prebuilt Linux amd64 artifacts. Do not build on production
-hosts. For the current management server, follow the stricter
-[azus runbook](azus-runbook.md).
+BoxFleet supports prebuilt Linux amd64 artifacts and Docker server images.
+Development can run directly on a workstation or in a separate Docker container.
+For Docker development, server images and operations, see the
+[Docker runbook](../deploy/docker/README.md).
 
 ## Releases
 
@@ -34,46 +35,56 @@ file before use.
 
 ## Management server
 
-The host layout is:
+The supplied Compose configuration runs the production server as a Docker
+container with persistent storage. Development uses a separate checkout and
+database; production does not mount the source tree. See the
+[Docker runbook](../deploy/docker/README.md). The following is an example
+deployment layout; database and artifact paths match the supplied Compose mounts.
 
 ```text
-/opt/boxfleet/bin/bfs
-/opt/boxfleet/server/boxfleet.db
-/opt/boxfleet/backups/
-/etc/boxfleet/server.env
+/opt/boxfleet/deploy/compose.yml        production Compose definition
+/opt/boxfleet/deploy/.env               immutable image selection
+/opt/boxfleet/server/boxfleet.db        persistent SQLite database
+/opt/boxfleet/artifacts/                optional local node artifacts
+/opt/boxfleet/backups/                  rollback snapshots
+/etc/boxfleet/server.env               authentication and server configuration
 ```
 
-The service normally runs:
-
-```ini
-[Service]
-EnvironmentFile=/etc/boxfleet/server.env
-ExecStart=/opt/boxfleet/bin/bfs --addr 0.0.0.0:18081 --db /opt/boxfleet/server/boxfleet.db
-Restart=always
-RestartSec=5s
+```sh
+ssh '<user>@<host>'
+cd /opt/boxfleet/deploy
+docker compose -p boxfleet ps
+docker compose -p boxfleet logs --tail=50 bfs
+curl -fsS http://127.0.0.1:18081/healthz
 ```
 
-Before replacement:
+The runtime process uses UID/GID 10001; the database directory and DB must be
+writable by it, including SQLite WAL/SHM files. Keep server.env mode 0600 and
+outside image build contexts. Configure admin authentication and the admin
+prefix for the deployment.
 
-1. Verify local and remote SHA256 values.
-2. Run the server candidate with `--help`.
-3. Prepare a backup directory for the server binary and SQLite files.
+Configure HTTPS ingress for the public server hostname. With a host-managed
+Cloudflare Tunnel, use origin `http://127.0.0.1:18081`. The supplied Docker
+configuration publishes that port only on loopback; the development backend
+uses host port 18082. Preserve the public hostname during host migrations so
+node and subscription URLs remain valid.
 
-Stop, replace, restart, and smoke-test inside an `ERR`-trapped script that
-backs up the binary plus DB/WAL/SHM files after stopping the service and restores
-them on failure. Startup applies embedded migrations. A
-server-only release replaces only `bfs`; never update node
-components on the management host.
+Before a runtime upgrade, run the required checks, record the image digest,
+compare migrations and preserve the previous image. For schema/data changes,
+stop the writer and take a consistent database backup before startup applies
+embedded migrations. Never mount a production DB into development or run two
+bfs instances against it. Retain the previous rollback snapshot after success;
+a failed upgrade must not prune backups. Container recreation is not a backup.
 
-After all smoke checks pass and the rollback trap is disarmed, retain only the
-backup created by that deployment. It is the rollback copy of the immediately
-previous server version and database state. Delete older backup directories
-only at that point; a failed deployment must not prune any backups, and a
-cleanup failure must not roll back a healthy release.
+For host migration, stop the source writer, checkpoint SQLite and transfer
+source-to-target directly over SSH/rsync. Verify DB SHA256, integrity, foreign
+keys, table counts and traffic totals before accepting new reports. Once the
+new host accepts writes, rollback requires reconciling its latest data.
 
-Admin auth is mandatory through `BOXFLEET_ADMIN_TOKEN` unless the explicit
-development-only `--allow-insecure-admin` flag is used. A hidden admin prefix
-may be configured with `BOXFLEET_ADMIN_PATH_TOKEN`.
+Server and node component versions remain independent. A development image
+with a commit-based VERSION cannot use the release-bound node installer and
+update catalog. Preserve the deployed release identity for a host migration;
+prepare matching published artifacts when promoting a new source release.
 
 ## Node bootstrap
 
@@ -116,9 +127,13 @@ After deployment verify without printing secrets:
 
 ```bash
 curl -fsS http://127.0.0.1:18081/healthz
-sudo systemctl is-active boxfleet-server
-sudo journalctl -u boxfleet-server -n 30 --no-pager
+# For the supplied Docker deployment, run from the repository root:
+docker compose -p boxfleet -f deploy/docker/compose.server.yml ps
+docker compose -p boxfleet -f deploy/docker/compose.server.yml logs --tail=30 bfs
 ```
+
+For an artifact deployment managed by systemd, inspect the configured server
+unit with `systemctl` and `journalctl` instead.
 
 Also confirm:
 

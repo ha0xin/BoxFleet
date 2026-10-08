@@ -111,8 +111,8 @@ wide as a hostname. The fix is to say what each column is worth:
 ```tsx
 const nodeColumns: TableColumnWidth[] = [{ min: 104 }, 144, /* … */ 52];
 
-<TableCard>
-  <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
+<TableCard tableId="nodes" widths={nodeColumns}>
+  <Table layout="fixed">
     <TableColgroup widths={nodeColumns} />
     …
 ```
@@ -123,15 +123,11 @@ const nodeColumns: TableColumnWidth[] = [{ min: 104 }, 144, /* … */ 52];
   column's natural width — not by guessing.
 - **`{ min }`** marks a flexible column that takes the leftover width. Use it
   only for genuinely open-ended text (names, hosts, endpoints, log messages).
-- Fixed table layout divides the leftover **equally** between flexible columns.
-  That is the one distribution every browser implements identically, so it is
-  what the helpers rely on. Percentage `<col>` widths do bias the split in
-  Chrome but over-constrain the table, and `calc()` percentages are ignored
-  entirely — do not reach for either. A column that must stay narrower than its
-  peers gets a px width instead of being made flexible.
-- `tableMinWidth` therefore reserves the *largest* flexible floor for every
-  flexible column. Below that width `TableCard`'s scroll container takes over,
-  which is the correct behaviour, not a bug.
+- `TableCard` sets explicit column sizes through TanStack, so the browser does
+  not divide spare width equally. The largest flexible column receives spare
+  space by default; resized columns retain the operator's chosen size.
+- `tableMinWidth` / `TableColgroup` remain compatible with older declarations;
+  inside `TableCard` the declared widths are read and replaced by managed sizes.
 - Never put `min-w-[NNNNpx]` on a `<Table>`. It is a page-wide constraint
   wearing a table's clothing — see below.
 
@@ -160,26 +156,50 @@ Verify with geometry, never by eye: the sidebar `<main>` must have
 `scrollWidth - clientWidth === 0` at every viewport, and `.bf-table-scroll` must
 be the element that scrolls when a table is genuinely wider than its card.
 
-### Draggable column resizing
+### Cloudflare table presentation and column preferences
 
-Kumo does ship `Table.ResizeHandle` (`Table.ResizeHandle` in
-`node_modules/@cloudflare/kumo/dist/src/components/table/table.d.ts`;
-`Table.Head` is already `group relative` so the handle positions itself). It is
-an affordance only — no drag logic, no state, no persistence — and Kumo's own
-docs pair it with TanStack Table:
-`refs/kumo/packages/kumo-docs-astro/src/pages/components/table.mdx`. **`npx kumo
-docs Table` lists it with empty props and no example and never mentions
-resizing**, the same CLI blind spot recorded above for charts.
+Resource inventories follow the Domains table: 44px rows and header, 13px
+header labels, 14px cells, 12px horizontal cell padding, canvas header background, line separators, and
+icon-plus-text statuses. Sort indicators match Domains: 12px bold Phosphor
+CaretUpDown when inactive, ArrowDown when active (rotated for ascending),
+subtle text at 50% opacity, and a 200ms direction transition. Log sort arrows
+are 20px and brand-colored when active; styles target only the sort icon,
+never Fields or other header controls. Log tables follow Observability: 44px rows, 13px
+headers, monospaced timestamps/messages, a vertically scrolling body with a
+sticky header, a Fields menu, and expandable JSON details. Journal events and
+the opt-in connection stream remain separate datasets and keep their existing
+server-side query and aggregation contracts.
 
-It is deliberately not wired up. Resizing is an escape hatch on top of good
-defaults, not a substitute for them, and it would cost: converting the
-hand-rolled pages to TanStack column definitions, a persistence layer, and a
-keyboard path (`getResizeHandler` binds only mouse and touch, so shipping it
-as-is adds a focusable control per header that does nothing on Enter). If it is
-ever added, `layout="fixed"` plus `TableColgroup` is already the substrate — feed
-the widths from `column.getSize()` — and it should start on a page that is
-already TanStack-driven. Pass `className="bg-kumo-elevated"` to the handle so it
-matches the compact header; Kumo hardcodes `bg-kumo-base`.
+`TableCard` composes native Kumo `Table` elements with TanStack Table's column
+sizing and visibility. Supply a stable `tableId`, plus `widths` or the existing
+`TableColgroup`. It retains page-owned row rendering, server sorting, filtering
+and resource pagination. Network Events and System Logs use TanStack Query infinite
+queries backed by the existing offset API; a sentinel inside the table scroller
+loads and appends the next batch. Failed batches retain loaded rows and expose
+Retry. Refresh lives in the query toolbar’s Log actions menu and starts a new
+query snapshot at the top of the table. Log data does not refresh on a timer,
+window focus, or reconnect. Explicit widths prevent the browser from distributing spare
+space equally across name columns; the largest flexible content column takes
+remaining space. Table overflow stays inside `.bf-table-scroll`.
+
+Kumo's `Table.ResizeHandle` provides the styled native button; TanStack supplies
+mouse/touch drag handlers. Arrow keys adjust by 10px, Shift+Arrow by 40px, Home
+or double-click restores that column's default. The column menu can hide fields
+and reset all columns. Width and visibility preferences are stored locally,
+scoped by table ID and column labels rather than width defaults. Previous schema-keyed
+preferences migrate without discarding manually sized or hidden columns; malformed or unavailable storage falls
+back safely. Preferences contain no row data.
+
+The pinned-column gradient is disabled in these tables: Kumo renders it even
+when no content is obscured, so it can cover the next column's label. Pinning
+still uses Kumo's opaque background. Empty/loading/error content renders under
+the horizontally scrolling header at the card's visible width, keeping it
+readable on phones.
+
+Geometry and interaction checks live in `e2e/responsive.spec.ts`: drag and
+keyboard resizing, reload persistence, hide/reset, log detail alignment, and
+390/768/1024/1440/1920px page overflow. Do not rely solely on CLI Table docs:
+they omit the resizing example; verify the actual component source/API.
 
 ## Charts
 
@@ -266,15 +286,17 @@ whenever the operator paged.
 - Mihomo Profiles owns complete configuration pipelines, live templates,
   preview, and configuration-scoped subscriptions.
 - Network Events is the reference server-paginated, URL-synchronised table and
-  the reference server-bucketed chart. Its activity chart reads
+  the reference server-bucketed chart. Its connection-start chart reads
   `/api/admin/network-events/series`, and its audit panel ranks services from
   `/api/admin/network-events/services` with per-host drill-down from
   `/api/admin/network-events/hosts`. The audit panel counts **connections**,
-  never bytes: `log_events` has no byte columns and a destination host can never
-  be attributed bytes. Grouping by action yields one series against a real
-  server — only `connect` rows exist — so the page charts `group=total` and keeps
-  the `StatusBadge` action row as its legend, fed by the server's unbucketed
-  `actions` histogram rather than by the visible page.
+  never bytes. List filters, series and rankings share `event_time` and the
+  half-open interval `[start, end)`: session start for individual connections,
+  first observation for journal/legacy aggregates. The table shows Started,
+  last-observed status and lifetime bytes for sessions. Legacy records cannot
+  supply per-session lifetime bytes. Only `connect` rows exist, so the chart
+  uses `group=total`. Retired `/connection-events/series` and `/hosts` return 410;
+  mutable session totals must never be presented as interval traffic.
 - Traffic charts bucketed uplink/downlink volume from
   `/api/admin/traffic/series`, with a per-user table whose row sparklines come
   from one batched `group=user` response — never one request per user.
@@ -328,3 +350,58 @@ cleanup. Any component test that renders more than once must call
 `afterEach(cleanup)` itself. ECharts needs a real canvas and `ResizeObserver`,
 neither of which jsdom provides, so chart success paths belong in the Playwright
 pass; unit-test the pure projection helpers instead.
+
+
+### Log workbench
+
+Network Events and System Logs share `LogWorkspace`: compact breadcrumb shell,
+query toolbar, searchable Fields sidebar, local timezone label, inline JSON
+with Kumo clipboard controls, and TanStack column sizing/visibility. Log columns
+can also be reordered with dnd-kit, using pointer or keyboard controls; local
+preferences survive reload. Resource inventories keep the Domains layout.
+Network Events puts the service audit and opt-in connection stream in separate
+URL-linked tabs. These data sources remain separate and retain their existing
+coverage and byte attribution semantics.
+
+System Logs accepts optional RFC3339 `start` and `end` query parameters on the
+server, using an inclusive start and exclusive end. Pagination and counts use
+the same time predicates. Relative time presets are anchored when selected or
+refreshed, rather than filtering the currently fetched page in the browser.
+
+
+Connection log inventories omit Action and its legend/filter because journal
+network events with attributable users and destinations currently carry only
+`connect`. Mocks follow that same data shape. Raw JSON retains the original
+field. Keep drag handles at the right edge of log headers so header text and
+cell content share their left inset. Publication notices sit below the 58px
+breadcrumb bar, rather than wrapping its action cluster into extra rows.
+
+Navigation uses Kumo’s dialog sidebar below 1024px: the desktop rail is hidden,
+a menu button in the breadcrumb bar opens it, and selecting a destination closes
+it. At 1024px and above, the desktop rail keeps its expanded/collapsed preference.
+Resource name controls have no underline, including on hover.
+Page titles and resource content use 16px side gutters, matching log toolbars and charts
+at tablet/desktop widths. Main log grids retain the left gutter and extend flush to
+the right viewport edge, with no fixed blank settings column in overflowing log tables. Log disclosure cells have no horizontal padding; their
+26px buttons sit inside the narrow rail without clipping.
+
+### User connection key rotation
+
+Users → row actions → **Rotate connection keys** replaces all non-deleted
+VLESS UUIDs and Shadowsocks 2022 user passwords in a single transaction,
+including disabled credentials without enabling them. Credentials attached to
+deleted proxies/nodes are excluded. It preserves credential IDs and `auth_name`,
+PathAccess grants, node bindings, quotas, traffic ledgers and subscription URLs.
+
+`POST /api/admin/users/{user}/credentials/rotate` returns `{ "rotated": N }`
+without secrets. Rotation stages a config change: use **Review & apply** to
+publish it; old keys stop accepting new connections when each node applies the
+new config. Clients then refresh their subscription or import new connection
+info. Rotating credentials does not itself revoke existing established sessions.
+
+### Unified network Logs
+
+Logs displays journal history and opt-in connection sessions through one API and
+shared server filters. Stream-specific numeric fields are nullable for journal
+records and display `—`. The removed Connection stream route redirects to Logs.
+Session snapshots share a stable row ID across updates.

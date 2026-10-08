@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MemoryRouter } from "react-router-dom";
 import { AdminApiProvider } from "@/admin/api";
 import { PathsPage } from "./paths";
 
@@ -36,9 +37,11 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
+      <MemoryRouter>
       <AdminApiProvider token="">
         <PathsPage />
       </AdminApiProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }

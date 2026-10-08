@@ -121,7 +121,7 @@ FROM proxy_accesses c
 JOIN proxies p ON p.id = c.proxy_id
 JOIN nodes n ON n.id = p.node_id
 JOIN user_node_bindings b ON b.proxy_user_id = c.proxy_user_id AND b.node_id = n.id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
   AND c.auth_name = ?2
 `
 
@@ -232,7 +232,7 @@ SELECT
   d.billable_bytes
 FROM traffic_usage_totals d
 JOIN proxy_users u ON u.id = d.proxy_user_id
-WHERE u.name = ?1
+WHERE (u.id = ?1 OR (u.name = ?1 AND u.deleted_at IS NULL))
   AND u.deleted_at IS NULL
 ORDER BY d.direction
 `

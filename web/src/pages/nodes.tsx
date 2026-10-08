@@ -9,7 +9,6 @@ import {
   CheckCircleIcon,
   DownloadSimpleIcon,
   FunnelIcon,
-  HardDrivesIcon,
   PencilSimpleIcon,
   PlusIcon,
   ProhibitIcon,
@@ -63,24 +62,23 @@ const defaultFilters: NodeFilterValues = { search: "", status: "all", sort: "nam
 
 // Module scope on purpose: `useUrlFilters` reads these every render, and inlining
 // them would re-parse the URL each time and break `filters`' referential stability.
-const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters, perPage: 10 };
+const nodeUrlFilters = { schema: filterSchema, defaults: defaultFilters };
 
 /**
  * Column widths, in table order. The px values are each column's measured
  * max-content need — including the widest state, so an "0.4.1 → 0.5.0" upgrade
- * arrow still fits without truncating a version number. Node, public host and
- * update label are the only columns whose content has no ceiling, so they take
+ * arrow still fits without truncating a version number. Node and public host
+ * labels are the columns whose content has no ceiling, so they take
  * the leftover width and truncate.
  */
 const nodeColumns: TableColumnWidth[] = [
-  { min: 104 }, // Node
+  160, // Node
   144, // Status — "Needs attention" is the widest badge and must not truncate
-  { min: 104 }, // Public host
+  { min: 220 }, // Public host
   112, // Agent
   112, // sing-box
   92, // Config
   108, // Last seen
-  { min: 104 }, // Update
   52 // Actions
 ];
 
@@ -162,8 +160,7 @@ function ConfigVersion({ node }: { node: AdminNode }) {
   );
 }
 
-// Single source of truth for a node's update eligibility: the Update cell and
-// the kebab menu items both read this, so they can never disagree.
+// Shared eligibility for component updates in the row actions menu.
 export function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
   label: string;
   available: boolean;
@@ -208,13 +205,10 @@ export function NodesPage() {
   const form = useForm<NodeFilterValues>({ resolver: zodResolver(filterSchema), values: filters });
 
   const toggleStatus = useAdminMutation<AdminNode>(request, (req, node) =>
-    req(`/api/admin/nodes/${encodeURIComponent(node.name)}`, {
+    req(`/api/admin/nodes/${encodeURIComponent(node.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ status: node.status === "disabled" ? "active" : "disabled" })
     })
-  );
-  const restore = useAdminMutation<AdminNode>(request, (req, node) =>
-    req(`/api/admin/nodes/${encodeURIComponent(node.name)}/restore`, { method: "POST" })
   );
 
   // The updater form reads the committed filters rather than this render's
@@ -287,7 +281,7 @@ export function NodesPage() {
         }
       />
       <main className="w-full grow bg-kumo-canvas">
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-6 pb-8 md:px-8 lg:px-10">
+        <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
           {campaign ? (
             <Banner
               variant={campaign.campaign.status === "paused" ? "error" : "default"}
@@ -303,14 +297,6 @@ export function NodesPage() {
             <Banner variant="alert" title="Managed updates unavailable" description={release.update_error} />
           ) : null}
           <section className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-kumo-default">Node inventory</h2>
-                <p className="text-sm text-kumo-subtle">
-                  {total > 0 ? `${total} ${total === 1 ? "node" : "nodes"}` : "No nodes"}
-                </p>
-              </div>
-            </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <form
@@ -368,7 +354,7 @@ export function NodesPage() {
               </DropdownMenu>
             </div>
 
-            <TableCard>
+            <TableCard tableId="nodes-v2">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(nodeColumns) }}>
                 <TableColgroup widths={nodeColumns} />
                 <Table.Header variant="compact">
@@ -380,7 +366,6 @@ export function NodesPage() {
                     <SortHead label="sing-box" column="sing_box_version" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head>Config</Table.Head>
                     <SortHead label="Last seen" column="last_seen_at" sort={filters.sort} direction={filters.direction} setSort={setSort} />
-                    <Table.Head>Update</Table.Head>
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
                     </Table.Head>
@@ -388,9 +373,9 @@ export function NodesPage() {
                 </Table.Header>
                 <Table.Body>
                   {nodesQuery.error ? (
-                    <TableError colSpan={9}>{error}</TableError>
+                    <TableError colSpan={8}>{error}</TableError>
                   ) : nodesQuery.isLoading ? (
-                    <TableLoading colSpan={9} />
+                    <TableLoading colSpan={8} />
                   ) : nodes.length > 0 ? (
                     nodes.map((node) => {
                       const health = node.deleted_at
@@ -401,8 +386,7 @@ export function NodesPage() {
                         <Table.Row key={node.id}>
                           <Table.Cell sticky="left">
                             <div className="flex min-w-0 items-center gap-2">
-                              <HardDrivesIcon className="size-4 shrink-0 text-kumo-subtle" />
-                              <span className="truncate text-base font-medium text-kumo-default" title={node.name}>{node.name}</span>
+                              <Button variant="ghost" className="bf-resource-link" disabled={!!node.deleted_at} onClick={() => setDialog({ mode: "edit", node })} title={node.name}>{node.name}</Button>
                             </div>
                           </Table.Cell>
                           <Table.Cell>
@@ -433,25 +417,10 @@ export function NodesPage() {
                               {formatRelativeTime(nodeTimestamp(node))}
                             </span>
                           </Table.Cell>
-                          <Table.Cell>
-                            {updateStatus.available ? (
-                              <StatusBadge tone="info">Update available</StatusBadge>
-                            ) : (
-                              <span className="block truncate text-kumo-subtle" title={updateStatus.label}>
-                                {updateStatus.label}
-                              </span>
-                            )}
-                          </Table.Cell>
                           <Table.Cell className="text-right">
                             <RowActionsMenu label={`Actions for ${node.name}`}>
                               {node.deleted_at ? (
-                                <DropdownMenu.Item
-                                  icon={ArrowsClockwiseIcon}
-                                  disabled={restore.isPending}
-                                  onClick={() => restore.mutate(node)}
-                                >
-                                  Restore
-                                </DropdownMenu.Item>
+                                <DropdownMenu.Item disabled>Deleted</DropdownMenu.Item>
                               ) : (
                                 <>
                                   {node.active_operation ? (
@@ -516,7 +485,7 @@ export function NodesPage() {
                       );
                     })
                   ) : (
-                    <TableEmpty colSpan={9}>No nodes match this filter.</TableEmpty>
+                    <TableEmpty colSpan={8}>No nodes match this filter.</TableEmpty>
                   )}
                 </Table.Body>
               </Table>

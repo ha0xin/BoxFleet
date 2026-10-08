@@ -5,9 +5,9 @@ telemetry source that
 [ADR 0001](../../docs/adr/0001-network-event-telemetry-source.md) identifies as
 the eventual replacement for the journalctl regex scraper.
 
-**This package is inert until a node opts in.** The production fleet runs
-sing-box 1.13, whose config parser rejects the `service.api` block this stream
-needs. Nothing here is reachable unless a node is explicitly configured for it.
+**This package is inert until a node opts in.** The stable target is sing-box
+1.14.2. Older nodes remain on their existing collector until explicitly upgraded
+and configured for the daemon API.
 
 - `daemonpb/` — the vendored proto, its generated stubs, and the committed
   upstream descriptor the conformance tests diff against. Trimmed to one RPC.
@@ -23,8 +23,8 @@ sing-box actually performs.
 | | |
 | --- | --- |
 | Repository | `github.com/SagerNet/sing-box` |
-| Tag | **`v1.14.0-beta.2`** |
-| Commit | `03c3bf4c01e7b1fd165d0c46ff376828fa878aab` |
+| Tag | **`v1.14.2`** |
+| Commit | `af6e64c3b69e6132ebaee0e1a3d24e93903f6709` |
 | Source file | `daemon/started_service.proto` |
 
 The same tag appears in the proto header, in both generated files, and in the
@@ -36,7 +36,7 @@ proto is vendored rather than read from there.
 
 ## What is vendored, and what is not
 
-Upstream's `StartedService` declares 34 RPCs. `daemonpb` declares one:
+Upstream's `StartedService` declares additional control-plane RPCs. `daemonpb` declares one:
 
 ```
 rpc SubscribeConnections(SubscribeConnectionsRequest) returns (stream ConnectionEvents)
@@ -80,7 +80,7 @@ upstream exactly, and all four do:
 4. every field number, type and cardinality in the reachable messages
 
 `daemonpb/upstream_conformance_test.go` asserts all four — mechanically, not by
-hand. `daemonpb/testdata/upstream-v1.14.0-beta.2.descriptorset.binpb` is the
+hand. `daemonpb/testdata/upstream-v1.14.2.descriptorset.binpb` is the
 real compiled upstream descriptor, captured at the pinned tag, and the test
 compares the vendored descriptor against it field by field. It also asserts that
 the set of omitted fields is exactly `{Connection.14, Connection.15}`, so an
@@ -150,7 +150,7 @@ CANDIDATE=v1.14.0
 PATH="$(go env GOPATH)/bin:$PATH" buf build refs/sing-box/daemon \
   --path refs/sing-box/daemon/started_service.proto \
   -o "internal/singboxapi/daemonpb/testdata/upstream-${CANDIDATE}.descriptorset.binpb"
-git rm internal/singboxapi/daemonpb/testdata/upstream-v1.14.0-beta.2.descriptorset.binpb
+git rm internal/singboxapi/daemonpb/testdata/upstream-v1.14.2.descriptorset.binpb
 
 # 3. Update upstreamTag in daemonpb/contract_test.go, plus the tag and commit in
 #    the proto header and in the table at the top of this file. Then:

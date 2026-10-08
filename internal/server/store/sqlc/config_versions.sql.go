@@ -137,7 +137,7 @@ FROM nodes n
 LEFT JOIN node_config_status s ON s.node_id = n.id
 LEFT JOIN config_versions target ON target.id = s.target_config_version_id
 LEFT JOIN config_versions current ON current.id = s.current_config_version_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
 `
 
 type GetNodeConfigStatusByNodeNameRow struct {
@@ -186,7 +186,7 @@ SELECT
 FROM node_config_status s
 JOIN nodes n ON n.id = s.node_id
 JOIN config_versions cv ON cv.id = s.target_config_version_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
 `
 
 func (q *Queries) GetTargetConfigByNodeName(ctx context.Context, nodeName string) (ConfigVersion, error) {
@@ -217,7 +217,7 @@ SELECT
   cv.published_at
 FROM config_versions cv
 JOIN nodes n ON n.id = cv.node_id
-WHERE n.name = ?1
+WHERE (n.id = ?1 OR (n.name = ?1 AND n.deleted_at IS NULL))
 ORDER BY cv.version DESC
 `
 

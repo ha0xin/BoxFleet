@@ -16,9 +16,12 @@ There is no invisible built-in processor on this path. New configurations start
 with a link to the global `BoxFleet Basic` template, so the fast path is ready
 to save while the complete pipeline remains visible and switchable.
 
-The legacy proxy-provider response remains available at `/sub/{token}`. The
-complete profile is available at `/sub/{token}/mihomo.yaml` and is returned as
-`mihomo_url` by the admin subscription API.
+Subscriptions belong exclusively to Mihomo Profiles. The complete profile is
+available at `/sub/{token}/mihomo.yaml` and is returned as `url` by the profile
+subscription API. Connection info only displays connection details; it cannot
+create subscriptions. Migration 31 removes all legacy user-scoped links,
+including their `/sub/{token}` provider and `/sub/{token}/mihomo.yaml` URLs.
+Existing Mihomo Profile links and credentials are preserved.
 
 ## Rewrite contracts
 

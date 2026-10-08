@@ -78,7 +78,7 @@ export type UrlFilters<Filters extends FilterRecord> = {
 
 const PAGE_PARAM = "page";
 const LIMIT_PARAM = "limit";
-const DEFAULT_PER_PAGE = 10;
+export const DEFAULT_PER_PAGE = 50;
 const DEFAULT_MAX_PER_PAGE = 100;
 
 /** A positive integer, or `fallback` for anything a hand-edited URL can hold. */

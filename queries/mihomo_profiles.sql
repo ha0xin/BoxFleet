@@ -60,7 +60,7 @@ ON CONFLICT(proxy_user_id) DO UPDATE SET
 SELECT COALESCE(binding.profile_id, 'mhp_default') AS profile_id
 FROM proxy_users u
 LEFT JOIN proxy_user_mihomo_profiles binding ON binding.proxy_user_id = u.id
-WHERE u.name = sqlc.arg(proxy_user_name)
+WHERE (u.id = sqlc.arg(proxy_user_name) OR (u.name = sqlc.arg(proxy_user_name) AND u.deleted_at IS NULL))
   AND u.deleted_at IS NULL;
 
 -- name: CreateMihomoRewriteTemplate :exec

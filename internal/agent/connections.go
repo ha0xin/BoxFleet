@@ -20,11 +20,9 @@ import (
 )
 
 // The connection collector is the node side of the sing-box 1.14 daemon gRPC
-// telemetry path. It is a *second* network-event producer that coexists with the
-// journalctl scraper (ReportLogs); it never disables it. The production fleet
-// runs sing-box 1.13, where the `service.api` config block does not parse at all,
-// so this whole path is opt-in per node and off unless the server rendered the
-// block into the config the agent applied.
+// telemetry path. It coexists with the journalctl scraper during migration;
+// the server selects the primary source for Logs. Collection remains opt-in
+// and starts only when the rendered config includes the loopback API service.
 //
 // Everything here is best-effort telemetry, not accounting. Per-user billing
 // stays on the V2Ray counters (ReportTraffic). See
@@ -38,7 +36,7 @@ const (
 	// defaultConnectionUpdateInterval paces UPDATE events for live connections.
 	// sing-box defaults to one second, which on a node carrying thousands of
 	// connections is thousands of proto messages per second for data that is
-	// bucketed at five-minute resolution anyway. Five seconds cuts that by 5x.
+	// shipped in periodic reports. Five seconds cuts that by 5x.
 	//
 	// A longer interval does not lose bytes on its own: a connection's final
 	// totals arrive on its CLOSED event, so the tail between the last tick and
@@ -328,7 +326,7 @@ func (c *ConnectionCollector) noteStreamError(err error) {
 	fmt.Fprintf(os.Stderr, "boxfleet-agent connection stream failed, retrying: %v\n", err)
 }
 
-// apply folds one batch into the aggregate. It is the only writer of the
+// apply folds one batch into per-session snapshots. It is the only writer of the
 // collector's maps besides Drain.
 func (c *ConnectionCollector) apply(batch *daemonpb.ConnectionEvents, now time.Time) {
 	if batch == nil {
@@ -397,7 +395,7 @@ func (c *ConnectionCollector) applyNew(event *daemonpb.ConnectionEvent, now time
 		if c.accounted.contains(id) || closedAtMs <= c.startupCloseHighWaterMs {
 			return
 		}
-		tracked, ok := c.newTracked(connection)
+		tracked, ok := c.newTracked(id, connection)
 		if !ok {
 			return
 		}
@@ -419,7 +417,7 @@ func (c *ConnectionCollector) applyNew(event *daemonpb.ConnectionEvent, now time
 		c.coverage.DroppedBuckets++
 		return
 	}
-	tracked, ok := c.newTracked(connection)
+	tracked, ok := c.newTracked(id, connection)
 	if !ok {
 		return
 	}
@@ -484,7 +482,7 @@ func (c *ConnectionCollector) applyClosed(event *daemonpb.ConnectionEvent, now t
 	if connection == nil {
 		return
 	}
-	tracked, ok := c.newTracked(connection)
+	tracked, ok := c.newTracked(id, connection)
 	if !ok {
 		return
 	}
@@ -539,8 +537,8 @@ func (c *ConnectionCollector) touch(tracked *trackedConnection) {
 	}
 }
 
-// record folds one measurement into the aggregation map at the bucket holding
-// `at`.
+// record retains one cumulative snapshot per session; coverage uses interval
+// deltas. The bounded map is drained into periodic reports, without time bucketing.
 func (c *ConnectionCollector) record(tracked *trackedConnection, at time.Time, uplink, downlink, opened, closed, durationMs int64) {
 	if uplink == 0 && downlink == 0 && opened == 0 && closed == 0 {
 		return
@@ -548,10 +546,10 @@ func (c *ConnectionCollector) record(tracked *trackedConnection, at time.Time, u
 	at = at.UTC()
 	instant := at.Format(model.ConnectionInstantLayout)
 	bucket := tracked.template
-	bucket.BucketStart = at.Truncate(model.ConnectionBucketInterval).Format(model.ConnectionInstantLayout)
+	bucket.BucketStart = bucket.StartedAt
 	bucket.WindowStart, bucket.WindowEnd = instant, instant
-	bucket.UplinkBytes, bucket.DownlinkBytes = uplink, downlink
-	bucket.ConnectionsOpened, bucket.ConnectionsClosed = opened, closed
+	bucket.UplinkBytes, bucket.DownlinkBytes = tracked.uplink, tracked.downlink
+	bucket.ConnectionsOpened, bucket.ConnectionsClosed = 1, closed
 	bucket.DurationMsTotal = durationMs
 
 	key := bucket.DimensionKey()
@@ -580,12 +578,14 @@ func (c *ConnectionCollector) record(tracked *trackedConnection, at time.Time, u
 // per-event path is a map lookup and a few additions. It reports false for a
 // connection whose dimensions cannot be normalised (no usable destination host),
 // which no real sing-box connection produces.
-func (c *ConnectionCollector) newTracked(connection *daemonpb.Connection) (*trackedConnection, bool) {
+func (c *ConnectionCollector) newTracked(id string, connection *daemonpb.Connection) (*trackedConnection, bool) {
 	host, port := singboxapi.Endpoint(connection)
 	template := model.ConnectionBucket{
 		// Any valid instant will do: Normalize only needs to parse it, and
 		// record overwrites it per event.
 		BucketStart:  time.UnixMilli(0).UTC().Format(model.ConnectionInstantLayout),
+		ConnectionID: id,
+		StartedAt:    time.UnixMilli(connection.GetCreatedAt()).UTC().Format(model.ConnectionInstantLayout),
 		AuthName:     connection.GetUser(),
 		TargetHost:   host,
 		TargetPort:   int64(port),
@@ -628,7 +628,7 @@ func (c *ConnectionCollector) Drain(now time.Time) (buckets []model.ConnectionBu
 	if len(c.buckets) == 0 && c.coverage == (model.ConnectionCoverage{}) {
 		return nil, model.ConnectionCoverage{}, windowStart, false
 	}
-	// Sorted by the map key — which is the dimension key already — so a report is
+	// Sorted by session identity so a report is
 	// byte-for-byte reproducible from the same events, without re-deriving a
 	// sort key per comparison.
 	keys := make([]string, 0, len(c.buckets))
