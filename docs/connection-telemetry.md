@@ -23,7 +23,7 @@ beta.2 exception and its required preflight are recorded in
 ## Unified Logs
 
 Network Events now displays journal and connection-stream records in **Logs**.
-The former `?view=connections` URL redirects to Logs. The table, activity chart,
+The former `?view=connections` URL redirects to Logs. The table, connection-start chart,
 search, user/node filters and Service activity use the same server-side source selection.
 Missing journal byte, protocol and duration fields display `—`; their API numeric
 values are `null`. Existing aggregate history retains its Count and cannot be
@@ -46,8 +46,9 @@ count journal rows. Raw source tables are preserved during migration.
 
 Deploy the server migration first, then upgrade agents to get individual records.
 This change does not opt nodes in automatically, delete old logs, or change
-user traffic counters. The separate connection aggregate APIs remain available
-for diagnostics; destination-volume analytics are outside this UI change.
+user traffic counters. The connection-only list remains available for diagnostics.
+Interval byte series and host rankings are retired (HTTP 410): cumulative session
+totals cannot measure bytes transferred inside a selected time window.
 
 ## What it adds
 
@@ -248,33 +249,34 @@ and correct. `dropped_buckets` growing steadily is a sizing problem, not a bug.
 ## Reading the data
 
 Admin endpoints are behind `adminAuthMiddleware`. `/network-events` is the
-unified Logs contract, including `source`, nullable rich fields, and stable IDs.
-The following connection-only endpoints remain available for diagnostics.
+unified Logs contract, including `source`, nullable rich fields, stable IDs and
+`event_time`. List filters, connection-start charts and service/host counts all
+use the half-open interval **[start, end)** on `event_time`: session creation time
+for individual connections, the first observation (`window_start`) for journal
+and legacy aggregate records. Updating a session does not move its start or
+create another connection. `window_end` is the last observation, not the chart
+bucket. Legacy Count still represents several connections with one observation
+window; it cannot be reconstructed into precise individual start times.
+
+The UI labels per-session bytes as **lifetime** totals, even when the selected
+window covers only part of the session. Legacy aggregates have no per-session
+lifetime total and display `—` in those columns. An open status means “last
+observed open”, not proof that the connection is still alive.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/admin/connection-events` | Paged aggregate rows, newest bucket first |
-| `GET /api/admin/connection-events/series` | Bucketed volume, zero-filled, plus totals and coverage |
-| `GET /api/admin/connection-events/hosts` | Bytes or connections per destination host |
-| `GET /api/admin/connection-events/nodes` | Which nodes actually stream. An empty list is today's normal fleet-wide answer |
+| `GET /api/admin/connection-events` | Diagnostic source rows, newest bucket first; legacy rows contain interval deltas, session rows contain lifetime totals |
+| `GET /api/admin/connection-events/series` | Retired; HTTP 410 with migration guidance |
+| `GET /api/admin/connection-events/hosts` | Retired; HTTP 410 with migration guidance |
+| `GET /api/admin/connection-events/nodes` | Nodes with telemetry enabled |
 
-Shared filters: `node`, `user`, `host`, `start`, `end`. There is deliberately no
-`action` (the stream carries no classified action) and no `search`
-(`connection_events` has no full-text index). `start` and `end` are **required**
-on `/series` — an unbounded window cannot be zero-filled or span-clamped — and
-optional elsewhere. `/series` also takes `bucket` (`hour|day`) and
-`offset_minutes`, with the same span ceilings as every other series.
-`/hosts` takes `sort=bytes|connections` (default `bytes`, unknown values are 422)
-and `limit` (default 20, max 100), and returns `distinct_hosts` plus `truncated`
-so a partial ranking cannot read as a complete one.
-
-`connections_opened` and `connections_closed` are separate on purpose: a
-long-lived session contributes bytes to several consecutive buckets, so summing
-"connections" must use `opened`.
-
-Logs reads the unified `/network-events` API. Byte totals in connection-only
-aggregate responses remain estimates and carry coverage counters. They must
-not replace per-user billing counters.
+The diagnostic list accepts `node`, `user`, `host`, optional `start`/`end`
+(observation-window overlap), `limit` and `offset`. It is not an interval traffic
+analytics API. Use `/network-events/series`, `/network-events/services` and
+`/network-events/hosts` for connection-start counts; use `/traffic/series` for
+billing traffic. Destination traffic analytics would require a separately stored,
+idempotent sequence of byte increments, with coverage and retention semantics.
+It must not be derived by bucketing mutable lifetime snapshots.
 
 ## Rolling back
 

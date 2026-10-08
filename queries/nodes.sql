@@ -47,7 +47,7 @@ SELECT
   updated_at
 FROM nodes
 WHERE deleted_at IS NULL
-  AND (id = sqlc.arg(name) OR name = sqlc.arg(name)
+  AND (name = sqlc.arg(name)
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -57,7 +57,7 @@ WHERE deleted_at IS NULL
 -- name: GetNodeByNameIncludingDeleted :one
 SELECT *
 FROM nodes
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name)
+WHERE (name = sqlc.arg(name)
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -115,7 +115,7 @@ SET
   api_base_url = sqlc.arg(api_base_url),
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = sqlc.arg(name)
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SoftDeleteNode :execrows
@@ -137,3 +137,6 @@ WHERE name = sqlc.arg(name)
 
 -- name: DeleteNodeAliases :exec
 DELETE FROM node_name_aliases WHERE node_id = sqlc.arg(node_id);
+
+-- name: GetNodeByIDIncludingDeleted :one
+SELECT * FROM nodes WHERE id = sqlc.arg(id);

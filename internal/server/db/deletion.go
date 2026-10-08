@@ -279,7 +279,7 @@ func retireResourceDependenciesTx(ctx context.Context, q *store.Queries) error {
 		return err
 	}
 	for userID := range users {
-		user, err := q.GetProxyUserByNameIncludingDeleted(ctx, userID)
+		user, err := q.GetProxyUserByIDIncludingDeleted(ctx, userID)
 		if err != nil {
 			return err
 		}

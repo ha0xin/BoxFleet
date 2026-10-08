@@ -362,42 +362,42 @@ func TestNetworkEventAggregationsUseBoundedIndexes(t *testing.T) {
 		want  string
 	}{
 		{
-			name: "hour bucket aggregation uses the visible time-window index",
+			name: "hour bucket aggregation uses the start-time index",
 			query: `
 SELECT ` + bucketExpr("e.window_start", BucketHour, 0) + ` AS bucket_key, SUM(e.count) AS connections
 FROM log_events e
 WHERE e.proxy_user_id IS NOT NULL
-  AND e.window_end >= ?
-  AND e.window_start <= ?
+  AND e.window_start >= ?
+  AND e.window_start < ?
 GROUP BY bucket_key`,
 			args: []any{"2026-07-25T00:00:00Z", "2026-07-25T04:00:00Z"},
-			want: "idx_log_events_visible_window",
+			want: "idx_log_events_event_time",
 		},
 		{
-			name: "day bucket aggregation uses the visible time-window index",
+			name: "day bucket aggregation uses the start-time index",
 			query: `
 SELECT ` + bucketExpr("e.window_start", BucketDay, -480) + ` AS bucket_key, SUM(e.count) AS connections
 FROM log_events e
 WHERE e.proxy_user_id IS NOT NULL
-  AND e.window_end >= ?
-  AND e.window_start <= ?
+  AND e.window_start >= ?
+  AND e.window_start < ?
 GROUP BY bucket_key`,
 			args: []any{"2026-07-25T00:00:00Z", "2026-07-25T04:00:00Z"},
-			want: "idx_log_events_visible_window",
+			want: "idx_log_events_event_time",
 		},
 		{
-			name: "host aggregation uses the covering host index",
+			name: "host aggregation uses the start-time index",
 			query: `
 SELECT lower(e.target_host) AS host, SUM(e.count) AS connections, MAX(e.window_end) AS last_seen
 FROM log_events e
 WHERE e.proxy_user_id IS NOT NULL
-  AND e.window_end >= ?
-  AND e.window_start <= ?
+  AND e.window_start >= ?
+  AND e.window_start < ?
 GROUP BY host
 ORDER BY connections DESC, host ASC
 LIMIT ?`,
 			args: []any{"2026-07-25T00:00:00Z", "2026-07-25T04:00:00Z", 100},
-			want: "idx_log_events_visible_window_host",
+			want: "idx_log_events_event_time",
 		},
 	}
 	for _, tt := range tests {

@@ -95,7 +95,7 @@ func (db *DB) IssueShadowsocks2022Credential(ctx context.Context, params IssueCr
 func (db *DB) RotateUserCredentials(ctx context.Context, userName string) (int, error) {
 	count := 0
 	err := db.withTx(ctx, func(q *store.Queries) error {
-		user, err := q.GetProxyUserByName(ctx, normalizeName(userName))
+		user, err := resolveProxyUser(ctx, q, userName, false)
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (db *DB) issueProxyCredential(
 	if proxy.Protocol != expectedProtocol {
 		return ProxyCredential{}, fmt.Errorf("proxy %q on node %q is %s, not %s", params.ProxyName, params.NodeName, proxy.Protocol, expectedProtocol)
 	}
-	binding, err := db.GetUserNodeBinding(ctx, user.Name, proxy.NodeName)
+	binding, err := db.GetUserNodeBinding(ctx, user.ID, proxy.NodeID)
 	if err != nil {
 		return ProxyCredential{}, err
 	}

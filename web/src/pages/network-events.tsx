@@ -253,7 +253,7 @@ export function connectionStatus(event: Pick<NetworkEvent, "source" | "connectio
   if (event.connections_closed > 0) {
     return { label: "已关闭", description: "A connection close event was observed.", variant: "secondary" };
   }
-  return { label: "活动中", description: "No close event has been observed. This is the last reported state, not confirmation that the connection is still active; reports can be delayed or close events missed.", variant: "info" };
+  return { label: "最近观测为活动", description: "No close event has been observed. This is the last reported state, not confirmation that the connection is still active; reports can be delayed or close events missed.", variant: "info" };
 }
 
 /** Render the two largest non-zero units using compact table labels. */
@@ -378,10 +378,10 @@ export function ActivityPanel({
     <Panel>
       <PanelHeader>
         <div>
-          <h3 className="text-sm font-semibold text-kumo-default">Connection activity</h3>
+          <h3 className="text-sm font-semibold text-kumo-default">Connection starts</h3>
           <p className="text-sm text-kumo-subtle">
             {bounded
-              ? `${formatCount(connections)} connections in this range, bucketed by ${granularity}`
+              ? `${formatCount(connections)} connections started in this range, bucketed by ${granularity}`
               : "Connections over time across the current filters"}
           </p>
         </div>
@@ -806,12 +806,13 @@ export function NetworkEventsPage() {
 
   const columns = useMemo(() => [
     columnHelper.display({ id: "details", header: "Details", cell: () => null }),
-    columnHelper.accessor("window_end", {
-      header: "Time",
+    columnHelper.accessor((row) => row.event_time ?? row.started_at ?? row.window_start, {
+      id: "event_time",
+      header: "Started",
       cell: (info) => (
         <div
           className="flex min-w-0 items-baseline justify-between gap-3 whitespace-nowrap"
-          title={info.row.original.created_at}
+          title={`Last observed: ${info.row.original.window_end}`}
         >
           <span className="font-mono text-xs text-kumo-default">{parseDateParam(info.getValue()) ? format(parseDateParam(info.getValue())!, "yyyy-MM-dd HH:mm:ss.SSS") : "—"}</span>
         </div>
@@ -858,8 +859,8 @@ export function NetworkEventsPage() {
       }
     }),
     columnHelper.accessor("network", { header: "Network", cell: (info) => info.getValue() || "—" }),
-    columnHelper.accessor("uplink_bytes", { header: "Upload", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
-    columnHelper.accessor("downlink_bytes", { header: "Download", cell: (info) => info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
+    columnHelper.accessor("uplink_bytes", { header: "Upload (lifetime)", cell: (info) => !info.row.original.connection_id || info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
+    columnHelper.accessor("downlink_bytes", { header: "Download (lifetime)", cell: (info) => !info.row.original.connection_id || info.getValue() == null ? "—" : formatBytes(info.getValue()!) }),
     columnHelper.accessor("duration_ms", { header: "Duration", cell: (info) => <span className="whitespace-nowrap text-kumo-subtle tabular-nums">{info.getValue() == null || !info.row.original.connections_closed ? "—" : formatDurationMs(info.getValue()!)}</span> }),
     columnHelper.accessor("outbound", { header: "Outbound", cell: (info) => info.getValue() || "—" }),
     columnHelper.accessor("raw_message", {
@@ -1028,7 +1029,7 @@ export function NetworkEventsPage() {
               onTimeRangeChange={applyChartRange}
             />
 
-            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-unified" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 180, 220, 80, 160, 100, 120, 120, 120, 160, { min: 320 }]}>
+            <TableCard key={JSON.stringify(scopeKey)} loadMore={{ hasMore: !!eventsQuery.hasNextPage && !eventsQuery.isFetchNextPageError, loading: eventsQuery.isFetching, fetch: () => { void eventsQuery.fetchNextPage({ cancelRefetch: false }); } }} tableId="network-events-unified" variant="log" className="bf-log-edge" widths={[36, 270, 120, 136, 180, 220, 80, 160, 180, 100, 160, 180, 120, 160, { min: 320 }]}>
               <Table className="table-fixed">
                 <Table.Header variant="compact">
                   {table.getHeaderGroups().map((headerGroup) => (

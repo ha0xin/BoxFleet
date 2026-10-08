@@ -45,12 +45,16 @@ func (db *DB) BindUserToNode(ctx context.Context, userName, nodeName string) (Us
 	if err != nil {
 		return UserNodeBinding{}, err
 	}
-	return db.GetUserNodeBinding(ctx, user.Name, node.Name)
+	return db.GetUserNodeBinding(ctx, user.ID, node.ID)
 }
 
 func (db *DB) ListUserNodeBindings(ctx context.Context, userName string) ([]UserNodeBinding, error) {
 	if userName != "" {
-		rows, err := db.q.ListUserNodeBindingsByUserName(ctx, normalizeName(userName))
+		user, err := db.getProxyUserIncludingDeleted(ctx, userName)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := db.q.ListUserNodeBindingsByUserID(ctx, user.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -76,9 +80,13 @@ func (db *DB) GetUserNodeBinding(ctx context.Context, userName, nodeName string)
 	if err != nil {
 		return UserNodeBinding{}, err
 	}
+	user, err := db.getProxyUserIncludingDeleted(ctx, userName)
+	if err != nil {
+		return UserNodeBinding{}, err
+	}
 	binding, err := db.q.GetUserNodeBinding(ctx, store.GetUserNodeBindingParams{
-		UserName: normalizeName(userName),
-		NodeName: node.Name,
+		ProxyUserID: user.ID,
+		NodeID:      node.ID,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -189,7 +197,7 @@ func mapListBindingRow(row store.ListUserNodeBindingsRow) UserNodeBinding {
 	}
 }
 
-func mapListBindingByUserRow(row store.ListUserNodeBindingsByUserNameRow) UserNodeBinding {
+func mapListBindingByUserRow(row store.ListUserNodeBindingsByUserIDRow) UserNodeBinding {
 	return UserNodeBinding{
 		ID:                row.ID,
 		ProxyUserID:       row.ProxyUserID,

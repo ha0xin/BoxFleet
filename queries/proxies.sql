@@ -45,30 +45,10 @@ WHERE node_name = sqlc.arg(node_name)
 ORDER BY node_name, listen_port, name;
 
 -- name: GetProxyByNodeAndName :one
-SELECT *
-FROM proxy_details
-WHERE node_id = (
-    SELECT n.id
-    FROM nodes n
-    WHERE (n.id = sqlc.arg(node_name) OR (n.name = sqlc.arg(node_name) AND n.deleted_at IS NULL))
-       OR n.id = (
-         SELECT node_id
-         FROM node_name_aliases
-         WHERE alias = sqlc.arg(node_name)
-       )
-  )
-  AND deleted_at IS NULL
-  AND node_deleted_at IS NULL
-  AND id = (
-    SELECT p.id
-    FROM proxies p
-    WHERE (p.id = sqlc.arg(name) OR (p.deleted_at IS NULL AND p.name = sqlc.arg(name))
-       OR p.id = (
-         SELECT proxy_id
-         FROM proxy_name_aliases
-         WHERE alias = sqlc.arg(name)
-       ))
-  );
+SELECT * FROM proxy_details
+WHERE node_id = sqlc.arg(node_name)
+  AND (name = sqlc.arg(name) OR id = (SELECT proxy_id FROM proxy_name_aliases WHERE alias = sqlc.arg(name)))
+  AND deleted_at IS NULL AND node_deleted_at IS NULL;
 
 -- name: GetProxyByID :one
 SELECT *
@@ -79,9 +59,12 @@ WHERE id = sqlc.arg(id)
 
 -- name: GetProxyByNodeAndNameIncludingDeleted :one
 SELECT * FROM proxy_details
-WHERE (node_id = sqlc.arg(node_name) OR (node_name = sqlc.arg(node_name) AND node_deleted_at IS NULL))
-AND (id = sqlc.arg(name) OR name = sqlc.arg(name) OR id = (SELECT proxy_id FROM proxy_name_aliases WHERE alias = sqlc.arg(name)))
+WHERE node_id = sqlc.arg(node_name)
+  AND (name = sqlc.arg(name) OR id = (SELECT proxy_id FROM proxy_name_aliases WHERE alias = sqlc.arg(name)))
 ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1;
+
+-- name: GetProxyByIDIncludingDeleted :one
+SELECT * FROM proxy_details WHERE id = sqlc.arg(id);
 
 -- name: GetProxyIDByNameOrAlias :one
 SELECT id
@@ -121,7 +104,7 @@ SET
   outbound_rules_json = sqlc.arg(outbound_rules_json),
   route_rules_json = sqlc.arg(route_rules_json),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE node_id = sqlc.arg(node_id) AND name = sqlc.arg(name)
+WHERE node_id = sqlc.arg(node_id) AND id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SetProxyEnabled :execrows
@@ -129,7 +112,7 @@ UPDATE proxies
 SET
   enabled = sqlc.arg(enabled),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE node_id = sqlc.arg(node_id) AND name = sqlc.arg(name)
+WHERE node_id = sqlc.arg(node_id) AND id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SoftDeleteProxy :execrows

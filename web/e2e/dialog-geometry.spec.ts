@@ -60,11 +60,11 @@ test("dialogs honour their size and never overflow their content", async ({ page
   expect(hostWidth).toBeGreaterThan(190);
   await page.keyboard.press("Escape");
 
-  // SoftDeleteDialog is the canonical confirm, reused across pages.
+  // Resource deletion includes a dependency preview and uses the base dialog.
   await openRowActions(page, "geometry-node");
   await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
   const confirm = await dialogGeometry(page);
-  expect(confirm.width).toBe(SIZE_WIDTH.sm);
+  expect(confirm.width).toBe(SIZE_WIDTH.base);
   expect(confirm.overflowing).toEqual([]);
   await page.keyboard.press("Escape");
 

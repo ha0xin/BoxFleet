@@ -20,7 +20,7 @@ for (const width of [390, 651, 1440]) {
     await expect(raw).toContainText("192.168.100.123");
     await expect(raw).toContainText("tcp");
     await expect(raw).toContainText("1.0 KB");
-    await expect(raw).toContainText("1 minute");
+    await expect(raw).toContainText("1m");
     await expect(old.locator("td").nth(4)).toHaveText("—");
     await expect(old.locator("td").nth(9)).toHaveText("—");
     await raw.getByRole("button", { name: "Expand network event" }).click();

@@ -197,6 +197,7 @@ type NetworkEventRecord struct {
 	ConnectionsClosed interface{}    `json:"connections_closed"`
 	ConnectionID      interface{}    `json:"connection_id"`
 	StartedAt         interface{}    `json:"started_at"`
+	EventTime         string         `json:"event_time"`
 }
 
 type NetworkEventSourceInterval struct {

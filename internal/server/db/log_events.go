@@ -44,6 +44,7 @@ type LogEventPage struct {
 
 type LogEventDetail struct {
 	ID                string
+	EventTime         string
 	NodeID            string
 	NodeName          string
 	ProxyUserID       sql.NullString
@@ -341,11 +342,11 @@ func buildLogEventPredicates(scope logEventScope) (searchJoin string, where []st
 	if scope.StartTime != "" {
 		// Keep an indexed whole-second bound, then compare instants so journal
 		// RFC3339Nano timestamps and stream millisecond timestamps agree.
-		where = append(where, "e.window_end >= strftime('%Y-%m-%dT%H:%M:%S', ?) AND julianday(e.window_end) >= julianday(?)")
+		where = append(where, "e.event_time >= strftime('%Y-%m-%dT%H:%M:%S', ?) AND julianday(e.event_time) >= julianday(?)")
 		args = append(args, scope.StartTime, scope.StartTime)
 	}
 	if scope.EndTime != "" {
-		where = append(where, "e.window_start < strftime('%Y-%m-%dT%H:%M:%S', ?, '+1 second') AND julianday(e.window_start) <= julianday(?)")
+		where = append(where, "e.event_time < strftime('%Y-%m-%dT%H:%M:%S', ?, '+1 second') AND julianday(e.event_time) < julianday(?)")
 		args = append(args, scope.EndTime, scope.EndTime)
 	}
 	return searchJoin, where, args
@@ -416,7 +417,7 @@ SELECT
   e.created_at,
   n.name AS node_name,
   COALESCE(u.name, '') AS user_name,
- e.source, COALESCE(e.connection_id,''), e.started_at, COALESCE(e.domain,''), COALESCE(e.network,''), e.ip_version, COALESCE(e.protocol,''), COALESCE(e.inbound,''), COALESCE(e.inbound_type,''), COALESCE(e.rule,''), COALESCE(e.outbound,''), COALESCE(e.outbound_type,''), COALESCE(e.chain,''), e.uplink_bytes, e.downlink_bytes, e.duration_ms_total, e.connections_closed
+ e.event_time, e.source, COALESCE(e.connection_id,''), e.started_at, COALESCE(e.domain,''), COALESCE(e.network,''), e.ip_version, COALESCE(e.protocol,''), COALESCE(e.inbound,''), COALESCE(e.inbound_type,''), COALESCE(e.rule,''), COALESCE(e.outbound,''), COALESCE(e.outbound_type,''), COALESCE(e.chain,''), e.uplink_bytes, e.downlink_bytes, e.duration_ms_total, e.connections_closed
 FROM network_event_records e
 ` + searchJoin + `
 JOIN nodes n ON n.id = e.node_id
@@ -425,7 +426,7 @@ WHERE ` + whereSQL + `
 -- Event time is both the operator-facing chronology and the leading range
 -- column of the filter indexes. Ordering by ingestion time here forced SQLite
 -- to materialize and sort every matching event before returning one page.
-ORDER BY e.window_end DESC, e.window_start DESC, e.id DESC
+ORDER BY e.event_time DESC, e.id DESC
 LIMIT ?
 OFFSET ?`
 	sqlRows, err := db.sql.QueryContext(ctx, listQuery, listArgs...)
@@ -453,7 +454,7 @@ OFFSET ?`
 			&row.CreatedAt,
 			&row.NodeName,
 			&row.UserName,
-			&row.Source, &row.ConnectionID, &row.StartedAt, &row.Domain, &row.Network, &row.IPVersion, &row.Protocol, &row.Inbound, &row.InboundType, &row.Rule, &row.Outbound, &row.OutboundType, &row.Chain, &row.UplinkBytes, &row.DownlinkBytes, &row.DurationMs, &row.ConnectionsClosed,
+			&row.EventTime, &row.Source, &row.ConnectionID, &row.StartedAt, &row.Domain, &row.Network, &row.IPVersion, &row.Protocol, &row.Inbound, &row.InboundType, &row.Rule, &row.Outbound, &row.OutboundType, &row.Chain, &row.UplinkBytes, &row.DownlinkBytes, &row.DurationMs, &row.ConnectionsClosed,
 		); err != nil {
 			return 0, nil, err
 		}

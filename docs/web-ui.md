@@ -286,15 +286,17 @@ whenever the operator paged.
 - Mihomo Profiles owns complete configuration pipelines, live templates,
   preview, and configuration-scoped subscriptions.
 - Network Events is the reference server-paginated, URL-synchronised table and
-  the reference server-bucketed chart. Its activity chart reads
+  the reference server-bucketed chart. Its connection-start chart reads
   `/api/admin/network-events/series`, and its audit panel ranks services from
   `/api/admin/network-events/services` with per-host drill-down from
   `/api/admin/network-events/hosts`. The audit panel counts **connections**,
-  never bytes: `log_events` has no byte columns and a destination host can never
-  be attributed bytes. Grouping by action yields one series against a real
-  server — only `connect` rows exist — so the page charts `group=total` and keeps
-  the `StatusBadge` action row as its legend, fed by the server's unbucketed
-  `actions` histogram rather than by the visible page.
+  never bytes. List filters, series and rankings share `event_time` and the
+  half-open interval `[start, end)`: session start for individual connections,
+  first observation for journal/legacy aggregates. The table shows Started,
+  last-observed status and lifetime bytes for sessions. Legacy records cannot
+  supply per-session lifetime bytes. Only `connect` rows exist, so the chart
+  uses `group=total`. Retired `/connection-events/series` and `/hosts` return 410;
+  mutable session totals must never be presented as interval traffic.
 - Traffic charts bucketed uplink/downlink volume from
   `/api/admin/traffic/series`, with a per-user table whose row sparklines come
   from one batched `group=user` response — never one request per user.

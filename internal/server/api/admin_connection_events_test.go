@@ -171,94 +171,14 @@ func TestAdminConnectionEventsFilters(t *testing.T) {
 	}
 }
 
-func TestAdminConnectionSeriesEndpoint(t *testing.T) {
-	ctx := context.Background()
+func TestIntervalConnectionAnalyticsRetired(t *testing.T) {
 	store := openAPITestDB(t)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-	seedConnectionEvents(t, ctx, store)
-
-	var response adminConnectionSeriesResponse
-	adminGetJSON(t, router, "/api/admin/connection-events/series?start=2026-07-25T00:00:00Z&end=2026-07-25T03:00:00Z", &response)
-	if response.Bucket != "hour" || response.OffsetMinutes != 0 {
-		t.Fatalf("envelope = %#v", response)
-	}
-	// Four hourly buckets, zero-filled by the server; the client never buckets.
-	if len(response.Points) != 4 {
-		t.Fatalf("points = %#v", response.Points)
-	}
-	if response.Points[0].TotalBytes != 12288 || response.Points[1].TotalBytes != 0 {
-		t.Fatalf("first two buckets = %#v", response.Points[:2])
-	}
-	if response.Points[2].TotalBytes != 1024 || response.Points[2].ConnectionsOpened != 40 {
-		t.Fatalf("02:00 bucket = %#v", response.Points[2])
-	}
-	if response.Totals.TotalBytes != 13312 || response.Totals.ConnectionsOpened != 42 {
-		t.Fatalf("totals = %#v", response.Totals)
-	}
-	// Coverage rides along so a chart cannot be drawn without its caveat.
-	if response.Coverage.Reports != 1 || response.Coverage.StreamResets != 2 || response.Coverage.DroppedBuckets != 3 {
-		t.Fatalf("coverage = %#v", response.Coverage)
-	}
-	if response.Coverage.AttributionRatio != 0.75 {
-		t.Fatalf("attribution ratio = %v, want 750/1000", response.Coverage.AttributionRatio)
-	}
-}
-
-func TestAdminConnectionSeriesRequiresWindow(t *testing.T) {
-	ctx := context.Background()
-	store := openAPITestDB(t)
-	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-	seedConnectionEvents(t, ctx, store)
-
-	if code, _ := adminStatus(t, router, http.MethodGet, "/api/admin/connection-events/series", nil); code != http.StatusUnprocessableEntity {
-		t.Fatalf("missing window status = %d, want 422", code)
-	}
-	if code, _ := adminStatus(t, router, http.MethodGet,
-		"/api/admin/connection-events/series?start=2026-07-25T03:00:00Z&end=2026-07-25T00:00:00Z", nil); code != http.StatusUnprocessableEntity {
-		t.Fatalf("inverted window status = %d, want 422", code)
-	}
-}
-
-func TestAdminConnectionHostsEndpoint(t *testing.T) {
-	ctx := context.Background()
-	store := openAPITestDB(t)
-	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-	seedConnectionEvents(t, ctx, store)
-
-	var byBytes adminConnectionHostsResponse
-	adminGetJSON(t, router, "/api/admin/connection-events/hosts?start=2026-07-25T00:00:00Z&end=2026-07-25T03:00:00Z", &byBytes)
-	if byBytes.Sort != "bytes" || len(byBytes.Hosts) != 2 {
-		t.Fatalf("hosts = %#v", byBytes)
-	}
-	if byBytes.Hosts[0].Host != "example.com" || byBytes.Hosts[0].TotalBytes != 12288 {
-		t.Fatalf("byte ranking leader = %#v", byBytes.Hosts[0])
-	}
-	// The denominator is the unclipped window total, so a share column does not
-	// change meaning with the requested row count.
-	if byBytes.Totals.TotalBytes != 13312 || byBytes.DistinctHosts != 2 || byBytes.Truncated {
-		t.Fatalf("totals = %#v", byBytes)
-	}
-	if byBytes.Coverage.ConnectionsObserved != 10 || byBytes.Coverage.ConnectionsUnattributed != 2 {
-		t.Fatalf("coverage = %#v", byBytes.Coverage)
-	}
-
-	var byConnections adminConnectionHostsResponse
-	adminGetJSON(t, router, "/api/admin/connection-events/hosts?start=2026-07-25T00:00:00Z&end=2026-07-25T03:00:00Z&group=connections", &byConnections)
-	if byConnections.Sort != "connections" || byConnections.Hosts[0].Host != "telemetry.example.net" {
-		t.Fatalf("connection ranking = %#v", byConnections)
-	}
-
-	// A single row requested still reports the true host count and flags that
-	// the ranking is partial.
-	var clipped adminConnectionHostsResponse
-	adminGetJSON(t, router, "/api/admin/connection-events/hosts?start=2026-07-25T00:00:00Z&end=2026-07-25T03:00:00Z&limit=1", &clipped)
-	if len(clipped.Hosts) != 1 || !clipped.Truncated || clipped.DistinctHosts != 2 {
-		t.Fatalf("clipped ranking = %#v", clipped)
-	}
-
-	if code, _ := adminStatus(t, router, http.MethodGet,
-		"/api/admin/connection-events/hosts?group=duration", nil); code != http.StatusUnprocessableEntity {
-		t.Fatalf("unknown sort status = %d, want 422", code)
+	for _, path := range []string{"/api/admin/connection-events/series", "/api/admin/connection-events/hosts?group=bytes"} {
+		code, body := adminStatus(t, router, http.MethodGet, path, nil)
+		if code != http.StatusGone || !strings.Contains(string(body), "lifetime totals") {
+			t.Fatalf("%s: status=%d body=%s", path, code, body)
+		}
 	}
 }
 

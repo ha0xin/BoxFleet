@@ -159,7 +159,7 @@ export function TableCard({ children, className = "", tableId, widths, variant =
     registerFields({ fields: table.getAllLeafColumns().filter((column) => column.getCanHide()).map((column) => ({ id: column.id, label: spec.labels[Number(column.id)], visible: preferences.visibility[column.id] !== false, toggle: (visible: boolean) => setPreferences((previous) => ({ ...previous, visibility: { ...previous.visibility, [column.id]: visible } })) })), reset: () => { setPreferences({ sizing: {}, visibility: {} }); setColumnOrder([]); } });
     return () => registerFields(null);
   }, [registerFields, variant, schema, preferences, table]);
-  const timeColumn = labels.findIndex((label) => /^(Timestamp|Time|Bucket)$/.test(label));
+  const timeColumn = labels.findIndex((label) => /^(Timestamp|Time|Started|Bucket)$/.test(label));
   const settings = (
     <DropdownMenu>
       <DropdownMenu.Trigger render={variant === "log" ? <Button variant="secondary" size="xs" icon={PencilSimpleIcon} aria-label="Fields">Fields</Button> : <Button variant="ghost" size="sm" shape="square" icon={GearSixIcon} aria-label="Edit columns" />} />

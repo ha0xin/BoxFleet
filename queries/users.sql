@@ -94,13 +94,13 @@ SELECT
   created_at,
   updated_at
 FROM proxy_users
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE name = sqlc.arg(name)
   AND deleted_at IS NULL;
 
 -- name: GetProxyUserByNameIncludingDeleted :one
 SELECT *
 FROM proxy_users
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE name = sqlc.arg(name)
 ORDER BY deleted_at IS NULL DESC, created_at DESC LIMIT 1;
 
 -- name: SetProxyUserStatus :execrows
@@ -108,7 +108,7 @@ UPDATE proxy_users
 SET
   status = sqlc.arg(status),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SetProxyUserDisplayName :execrows
@@ -116,7 +116,7 @@ UPDATE proxy_users
 SET
   display_name = sqlc.arg(display_name),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SetProxyUserQuota :execrows
@@ -124,7 +124,7 @@ UPDATE proxy_users
 SET
   global_quota_bytes = sqlc.arg(global_quota_bytes),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SetProxyUserExpire :execrows
@@ -132,7 +132,7 @@ UPDATE proxy_users
 SET
   expire_at = sqlc.narg(expire_at),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: SoftDeleteProxyUser :execrows
@@ -141,7 +141,7 @@ SET
   status = 'disabled',
   deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: RestoreProxyUser :execrows
@@ -149,5 +149,8 @@ UPDATE proxy_users
 SET
   deleted_at = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE (id = sqlc.arg(name) OR name = sqlc.arg(name))
+WHERE id = sqlc.arg(id)
   AND deleted_at IS NOT NULL;
+
+-- name: GetProxyUserByIDIncludingDeleted :one
+SELECT * FROM proxy_users WHERE id = sqlc.arg(id);

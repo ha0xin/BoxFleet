@@ -69,7 +69,7 @@ func TestUnifiedLogsSessionUpdatesSourceAndSearch(t *testing.T) {
 		t.Fatalf("legacy=%+v", old)
 	}
 	boundary, err := d.ListLogEventsPage(ctx, LogEventFilter{Start: after, End: after})
-	if err != nil || boundary.Total != 1 {
+	if err != nil || boundary.Total != 0 {
 		t.Fatalf("mixed timestamp boundary: %+v err=%v", boundary, err)
 	}
 	nodeSearch, err := d.ListLogEventsPage(ctx, LogEventFilter{Search: "azus"})
@@ -92,9 +92,10 @@ func TestUnifiedLogsSessionUpdatesSourceAndSearch(t *testing.T) {
 
 func TestUnifiedLogsUsesTimeIndexes(t *testing.T) {
 	d := openTestDB(t)
-	plan := explainQueryPlan(t, context.Background(), d, `SELECT COUNT(*) FROM network_event_records e WHERE e.window_end >= ? AND e.window_start <= ?`, "2026-10-01T00:00:00Z", "2026-10-07T00:00:00Z")
+	_, predicates, args := buildLogEventPredicates(logEventScope{StartTime: "2026-10-01T00:00:00Z", EndTime: "2026-10-07T00:00:00Z"})
+	plan := explainQueryPlan(t, context.Background(), d, `SELECT COUNT(*) FROM network_event_records e WHERE `+strings.Join(predicates, " AND "), args...)
 	t.Log(plan)
-	if !strings.Contains(plan, "idx_log_events_visible_window") || !strings.Contains(plan, "idx_connection_events_window") {
+	if !strings.Contains(plan, "idx_log_events_event_time") || !strings.Contains(plan, "idx_connection_events_event_time") {
 		t.Fatalf("unbounded unified query: %s", plan)
 	}
 }

@@ -85,6 +85,29 @@ func (q *Queries) DeleteNodeNameAlias(ctx context.Context, arg DeleteNodeNameAli
 	return err
 }
 
+const getNodeByIDIncludingDeleted = `-- name: GetNodeByIDIncludingDeleted :one
+SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at FROM nodes WHERE id = ?1
+`
+
+func (q *Queries) GetNodeByIDIncludingDeleted(ctx context.Context, id string) (Node, error) {
+	row := q.db.QueryRowContext(ctx, getNodeByIDIncludingDeleted, id)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.PublicHost,
+		&i.HostsJson,
+		&i.ApiBaseUrl,
+		&i.Status,
+		&i.SingBoxVersion,
+		&i.LastSeenAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getNodeByName = `-- name: GetNodeByName :one
 SELECT
   id,
@@ -100,7 +123,7 @@ SELECT
   updated_at
 FROM nodes
 WHERE deleted_at IS NULL
-  AND (id = ?1 OR name = ?1
+  AND (name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -130,7 +153,7 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 const getNodeByNameIncludingDeleted = `-- name: GetNodeByNameIncludingDeleted :one
 SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at
 FROM nodes
-WHERE (id = ?1 OR name = ?1
+WHERE (name = ?1
    OR id = (
      SELECT node_id
      FROM node_name_aliases
@@ -333,7 +356,7 @@ SET
   api_base_url = ?3,
   status = ?4,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE name = ?5
+WHERE id = ?5
   AND deleted_at IS NULL
 `
 
@@ -342,7 +365,7 @@ type UpdateNodeParams struct {
 	HostsJson  string `json:"hosts_json"`
 	ApiBaseUrl string `json:"api_base_url"`
 	Status     string `json:"status"`
-	Name       string `json:"name"`
+	ID         string `json:"id"`
 }
 
 func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, error) {
@@ -351,7 +374,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, 
 		arg.HostsJson,
 		arg.ApiBaseUrl,
 		arg.Status,
-		arg.Name,
+		arg.ID,
 	)
 	if err != nil {
 		return 0, err

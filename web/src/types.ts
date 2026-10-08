@@ -361,6 +361,7 @@ export type TrafficRow = {
 };
 
 export type NetworkEvent = {
+  event_time?: string;
   id?: string;
   source?: "journal" | "stream";
   connection_id?: string | null;

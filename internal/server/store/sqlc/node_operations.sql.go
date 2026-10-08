@@ -181,9 +181,8 @@ WHERE id = ?3
   AND node_id = ?4
   AND cancel_requested = 0
   AND (not_before IS NULL OR not_before <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
   AND (
-    status = 'queued'
+    (status = 'queued' AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
     OR (
       status = 'running'
       AND lease_expires_at IS NOT NULL

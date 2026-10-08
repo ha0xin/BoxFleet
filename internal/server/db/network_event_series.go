@@ -151,10 +151,9 @@ func (db *DB) networkEventTotalSeries(
 	start, end time.Time,
 ) (NetworkEventSeries, error) {
 	searchJoin, where, args := buildLogEventPredicates(scope)
-	// Bucketing on window_start, never created_at: the aggregate upsert bumps
-	// created_at on every merge, so it is last-touched rather than first-seen.
+	// Table, counts and buckets all use the stable connection start time.
 	query := `
-SELECT ` + bucketExpr("e.window_start", bucket, offsetMinutes) + ` AS bucket_key, SUM(e.count) AS connections
+SELECT ` + bucketExpr("e.event_time", bucket, offsetMinutes) + ` AS bucket_key, SUM(e.count) AS connections
 FROM network_event_records e` + searchJoin + `
 WHERE ` + strings.Join(where, " AND ") + `
 GROUP BY bucket_key`
@@ -245,7 +244,7 @@ LIMIT ?`
 
 	seriesArgs := append(append([]any{}, args...), logEventKeyArgs(keys)...)
 	seriesQuery := `
-SELECT ` + keyExpr + ` AS series_key, ` + bucketExpr("e.window_start", bucket, offsetMinutes) + ` AS bucket_key, SUM(e.count) AS connections` + from + `
+SELECT ` + keyExpr + ` AS series_key, ` + bucketExpr("e.event_time", bucket, offsetMinutes) + ` AS bucket_key, SUM(e.count) AS connections` + from + `
 WHERE ` + whereSQL + ` AND ` + keyExpr + ` IN (` + logEventKeyPlaceholders(len(keys)) + `)
 GROUP BY series_key, bucket_key`
 	seriesRows, err := db.sql.QueryContext(ctx, seriesQuery, seriesArgs...)

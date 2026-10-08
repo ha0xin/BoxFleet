@@ -285,12 +285,12 @@ test("connection log chrome stays compact with pending publication at 849px", as
 test("log grids reach the right edge and migrate manually saved widths", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
-    const labels = ["Details", "Time", "User", "Node", "Source IP", "Destination", "Count", "Auth", "Message"];
+    const labels = ["Details", "Started", "User", "Node", "Source IP", "Destination", "Count", "Auth", "Status", "Network", "Upload (lifetime)", "Download (lifetime)", "Duration", "Outbound", "Message"];
     const declared = [36, 270, 160, 160, 200, 260, 100, 180, { min: 360 }];
-    localStorage.setItem(`boxfleet.table.v1.network-events-connect.${JSON.stringify({ labels, declared })}`, JSON.stringify({ sizing: { 2: 210 }, visibility: { 7: false } }));
+    localStorage.setItem(`boxfleet.table.v1.network-events-unified.${JSON.stringify({ labels, declared })}`, JSON.stringify({ sizing: { 2: 210 }, visibility: { 7: false } }));
   });
   await page.goto("network-events");
-  const card = page.locator('[data-table-id="network-events-connect"]');
+  const card = page.locator('[data-table-id="network-events-unified"]');
   await expect(card).toBeVisible();
   const user = card.getByRole("columnheader", { name: "User", exact: true });
   await expect.poll(async () => (await user.boundingBox())!.width).toBeCloseTo(210, 0);

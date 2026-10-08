@@ -217,6 +217,7 @@ type adminUserTraffic struct {
 }
 
 type adminNetworkEvent struct {
+	EventTime         string  `json:"event_time"`
 	ID                string  `json:"id"`
 	Source            string  `json:"source"`
 	ConnectionID      string  `json:"connection_id"`
@@ -1880,6 +1881,7 @@ func adminNetworkEvents(events []db.LogEvent) []adminNetworkEvent {
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
 			ID:          event.ID,
+			EventTime:   event.WindowStart,
 			Source:      "journal",
 			AuthName:    event.AuthName,
 			SourceIP:    event.SourceIp,
@@ -1900,6 +1902,7 @@ func adminNetworkEventDetails(events []db.LogEventDetail) []adminNetworkEvent {
 	out := make([]adminNetworkEvent, 0, len(events))
 	for _, event := range events {
 		out = append(out, adminNetworkEvent{
+			EventTime:         event.EventTime,
 			ID:                event.ID,
 			Source:            event.Source,
 			ConnectionID:      event.ConnectionID,

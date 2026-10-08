@@ -273,7 +273,7 @@ test("Paths pagination survives refresh and keeps cross-page dialers on narrow s
     visibility: "selectable", managed: true, sort_order: index, created_at: "", updated_at: ""
   }));
   await page.route("**/api/admin/paths", (route) => route.fulfill({ json: paths }));
-  await page.goto("paths");
+  await page.goto("paths?limit=10");
   await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Published 10", exact: true })).toHaveCount(0);
   await expect(page.getByText("Auto", { exact: true })).toHaveCount(10);

@@ -70,7 +70,7 @@ func TestRotateUserCredentialsPreservesAccessAndTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	user, _ := d.GetProxyUser(ctx, "alice")
-	bindings, err := d.q.ListUserNodeBindingsByUserName(ctx, "alice")
+	bindings, err := d.q.ListUserNodeBindingsByUserID(ctx, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestRotateUserCredentialsPreservesAccessAndTraffic(t *testing.T) {
 	if !reflect.DeepEqual(user, userAfter) {
 		t.Fatal("changed user quota/status")
 	}
-	bindingsAfter, _ := d.q.ListUserNodeBindingsByUserName(ctx, "alice")
+	bindingsAfter, _ := d.q.ListUserNodeBindingsByUserID(ctx, user.ID)
 	if !reflect.DeepEqual(bindings, bindingsAfter) {
 		t.Fatal("changed node binding")
 	}

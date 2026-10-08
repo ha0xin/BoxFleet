@@ -177,6 +177,7 @@ export function UserFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="Quota (GiB)"
+              className="min-w-0 w-full"
               type="number"
               // "any": a prefilled 2-decimal GiB value (e.g. 46.57) must not fail
               // native step validation and block submits that only edit other fields.
@@ -187,6 +188,7 @@ export function UserFormDialog({
             />
             <Input
               label="Expires"
+              className="min-w-0 w-full"
               type="datetime-local"
               labelTooltip="Local time. Leave empty for no expiry."
               {...form.register("expire_at")}
