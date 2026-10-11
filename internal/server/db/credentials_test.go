@@ -15,7 +15,7 @@ func TestIssueVLESSRealityCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.CreateNode(ctx, "azus", "203.0.113.10", "")
+	_, err = store.CreateNode(ctx, "azus", "203.0.113.10")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestReissueAfterSoftDeleteRotatesShadowsocksPassword(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -184,7 +184,7 @@ func TestAuthNameDelimitersRejected(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice>>>proxy"}); err == nil {
 		t.Fatal("user name containing stats delimiter was accepted")
 	}
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{

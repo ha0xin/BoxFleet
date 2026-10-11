@@ -117,7 +117,7 @@ function hasCapability(node: AdminNode, capability: string) {
 // The public-host cell truncates, so the tooltip has to carry the same text the
 // cell renders — including the "+N more hosts" suffix.
 function publicHostLabel(node: AdminNode): string {
-  const host = node.public_host || node.api_base_url || "n/a";
+  const host = node.public_host || "n/a";
   const extra = node.hosts && node.hosts.length > 1 ? ` +${node.hosts.length - 1}` : "";
   return `${host}${extra}`;
 }
@@ -373,7 +373,7 @@ export function NodesPage() {
                 </Table.Header>
                 <Table.Body>
                   {nodesQuery.error ? (
-                    <TableError colSpan={8}>{error}</TableError>
+                    <TableError colSpan={8} onRetry={() => { void nodesQuery.refetch(); }} retrying={nodesQuery.isFetching}>{error}</TableError>
                   ) : nodesQuery.isLoading ? (
                     <TableLoading colSpan={8} />
                   ) : nodes.length > 0 ? (
@@ -397,7 +397,7 @@ export function NodesPage() {
                               className="block truncate text-kumo-subtle"
                               title={publicHostLabel(node)}
                             >
-                              {node.public_host || node.api_base_url || "n/a"}
+                              {node.public_host || "n/a"}
                               {node.hosts && node.hosts.length > 1 ? (
                                 <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
                               ) : null}

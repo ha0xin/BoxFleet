@@ -15,14 +15,12 @@ INSERT INTO nodes (
   name,
   public_host,
   hosts_json,
-  api_base_url,
   status
 ) VALUES (
   ?1,
   ?2,
   ?3,
   ?4,
-  ?5,
   'active'
 )
 `
@@ -32,7 +30,6 @@ type CreateNodeParams struct {
 	Name       string `json:"name"`
 	PublicHost string `json:"public_host"`
 	HostsJson  string `json:"hosts_json"`
-	ApiBaseUrl string `json:"api_base_url"`
 }
 
 func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) error {
@@ -41,7 +38,6 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) error {
 		arg.Name,
 		arg.PublicHost,
 		arg.HostsJson,
-		arg.ApiBaseUrl,
 	)
 	return err
 }
@@ -86,7 +82,7 @@ func (q *Queries) DeleteNodeNameAlias(ctx context.Context, arg DeleteNodeNameAli
 }
 
 const getNodeByIDIncludingDeleted = `-- name: GetNodeByIDIncludingDeleted :one
-SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at FROM nodes WHERE id = ?1
+SELECT id, name, public_host, hosts_json, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at FROM nodes WHERE id = ?1
 `
 
 func (q *Queries) GetNodeByIDIncludingDeleted(ctx context.Context, id string) (Node, error) {
@@ -97,7 +93,6 @@ func (q *Queries) GetNodeByIDIncludingDeleted(ctx context.Context, id string) (N
 		&i.Name,
 		&i.PublicHost,
 		&i.HostsJson,
-		&i.ApiBaseUrl,
 		&i.Status,
 		&i.SingBoxVersion,
 		&i.LastSeenAt,
@@ -114,7 +109,6 @@ SELECT
   name,
   public_host,
   hosts_json,
-  api_base_url,
   status,
   sing_box_version,
   last_seen_at,
@@ -139,7 +133,6 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 		&i.Name,
 		&i.PublicHost,
 		&i.HostsJson,
-		&i.ApiBaseUrl,
 		&i.Status,
 		&i.SingBoxVersion,
 		&i.LastSeenAt,
@@ -151,7 +144,7 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 }
 
 const getNodeByNameIncludingDeleted = `-- name: GetNodeByNameIncludingDeleted :one
-SELECT id, name, public_host, hosts_json, api_base_url, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at
+SELECT id, name, public_host, hosts_json, status, sing_box_version, last_seen_at, deleted_at, created_at, updated_at
 FROM nodes
 WHERE (name = ?1
    OR id = (
@@ -170,7 +163,6 @@ func (q *Queries) GetNodeByNameIncludingDeleted(ctx context.Context, name string
 		&i.Name,
 		&i.PublicHost,
 		&i.HostsJson,
-		&i.ApiBaseUrl,
 		&i.Status,
 		&i.SingBoxVersion,
 		&i.LastSeenAt,
@@ -205,7 +197,6 @@ SELECT
   name,
   public_host,
   hosts_json,
-  api_base_url,
   status,
   sing_box_version,
   last_seen_at,
@@ -231,7 +222,6 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.Name,
 			&i.PublicHost,
 			&i.HostsJson,
-			&i.ApiBaseUrl,
 			&i.Status,
 			&i.SingBoxVersion,
 			&i.LastSeenAt,
@@ -353,17 +343,15 @@ UPDATE nodes
 SET
   public_host = ?1,
   hosts_json = ?2,
-  api_base_url = ?3,
-  status = ?4,
+  status = ?3,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id = ?5
+WHERE id = ?4
   AND deleted_at IS NULL
 `
 
 type UpdateNodeParams struct {
 	PublicHost string `json:"public_host"`
 	HostsJson  string `json:"hosts_json"`
-	ApiBaseUrl string `json:"api_base_url"`
 	Status     string `json:"status"`
 	ID         string `json:"id"`
 }
@@ -372,7 +360,6 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (int64, 
 	result, err := q.db.ExecContext(ctx, updateNode,
 		arg.PublicHost,
 		arg.HostsJson,
-		arg.ApiBaseUrl,
 		arg.Status,
 		arg.ID,
 	)

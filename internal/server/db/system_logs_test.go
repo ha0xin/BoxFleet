@@ -11,7 +11,7 @@ import (
 func TestRecordSystemLogsPersistsEntries(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	observedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
@@ -52,7 +52,7 @@ func TestRecordSystemLogsPersistsEntries(t *testing.T) {
 func TestRecordSystemLogsIgnoresDuplicateCursors(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	report := SystemLogReport{
@@ -78,7 +78,7 @@ func TestRecordSystemLogsIgnoresDuplicateCursors(t *testing.T) {
 func TestRecordSystemLogsPrunesExpiredEntries(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetNetworkEventRetentionDays(ctx, 1); err != nil {
@@ -133,7 +133,7 @@ func TestNormalizeObservedAt(t *testing.T) {
 func seedSystemLogPageFixture(t *testing.T, ctx context.Context, store *DB) {
 	t.Helper()
 	for _, node := range []string{"edge-a", "edge-b"} {
-		if _, err := store.CreateNode(ctx, node, "192.0.2.1", ""); err != nil {
+		if _, err := store.CreateNode(ctx, node, "192.0.2.1"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -363,7 +363,7 @@ OFFSET 0`, "node-1")
 func TestSystemLogTimeRange(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "time-test", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "time-test", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)

@@ -35,7 +35,7 @@ func TestDeletionCascadeAndPreviewPreserveSharedCredentials(t *testing.T) {
 			endpoints := []Endpoint{}
 			paths := []Path{}
 			for i, name := range []string{"entry", "middle", "exit"} {
-				n, err := d.CreateNode(ctx, name, "192.0.2.1", "")
+				n, err := d.CreateNode(ctx, name, "192.0.2.1")
 				if err != nil {
 					t.Fatal(err)
 				}

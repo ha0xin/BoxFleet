@@ -233,7 +233,6 @@ const editSchema = z.object({
         }
       });
     }),
-  api_base_url: z.string()
 });
 
 type EditValues = z.infer<typeof editSchema>;
@@ -243,7 +242,7 @@ function editDefaults(node: AdminNode): EditValues {
     node.hosts && node.hosts.length > 0
       ? node.hosts.map((h) => ({ id: h.id, host: h.host, tag: h.tag ?? "", selected: h.selected }))
       : [{ id: undefined, host: node.public_host, tag: "", selected: true }];
-  return { name: node.name, hosts, api_base_url: node.api_base_url };
+  return { name: node.name, hosts };
 }
 
 export function EditNodeDialog({
@@ -272,7 +271,7 @@ export function EditNodeDialog({
         .filter((h) => h.host !== "");
       return req(`/api/admin/nodes/${encodeURIComponent(node.id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ name: values.name.trim(), hosts, api_base_url: values.api_base_url.trim() })
+        body: JSON.stringify({ name: values.name.trim(), hosts })
       });
     },
     { onSuccess: onClose, toastError: false }
@@ -286,7 +285,7 @@ export function EditNodeDialog({
       <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
         <Dialog.Title className="text-xl font-semibold text-kumo-default">Edit {node.name}</Dialog.Title>
         <Dialog.Description className="mb-4 text-kumo-subtle">
-          Update the node's name, hosts, and API URL. Use Disable or Decommission to change its status.
+          Update the node's name and hosts. Use Disable or Decommission to change its status.
         </Dialog.Description>
 
         {mutation.isError ? <Banner variant="error" title={mutation.error.message} className="mb-4" /> : null}
@@ -347,7 +346,6 @@ export function EditNodeDialog({
             </div>
             {hostsError ? <span className="text-xs text-kumo-danger">{hostsError}</span> : null}
           </div>
-          <Input label="API base URL" placeholder="https://203.0.113.10:18080" {...form.register("api_base_url")} />
           <div className="mt-2 flex justify-end gap-2">
             <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
               Cancel

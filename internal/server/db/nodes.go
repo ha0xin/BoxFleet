@@ -30,7 +30,6 @@ type Node struct {
 	Name           string
 	PublicHost     string
 	Hosts          []NodeHost
-	APIBaseURL     string
 	Status         string
 	SingBoxVersion string
 	LastSeenAt     sql.NullString
@@ -44,9 +43,8 @@ type UpdateNodeParams struct {
 	PublicHost string
 	// Hosts, when non-empty, replaces the node's full host list. Callers that
 	// only deal with a single address may leave it nil and set PublicHost.
-	Hosts      []NodeHost
-	APIBaseURL string
-	Status     string
+	Hosts  []NodeHost
+	Status string
 }
 
 // normalizeNodeHosts trims, drops empty/duplicate hosts (keeping first), and
@@ -206,7 +204,7 @@ type NodePage struct {
 	Offset int64
 }
 
-func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL string) (Node, error) {
+func (db *DB) CreateNode(ctx context.Context, name, publicHost string) (Node, error) {
 	name = normalizeName(name)
 	publicHost = strings.TrimSpace(publicHost)
 	if name == "" {
@@ -242,7 +240,6 @@ func (db *DB) CreateNode(ctx context.Context, name, publicHost, apiBaseURL strin
 		Name:       name,
 		PublicHost: publicHost,
 		HostsJson:  hostsJSON,
-		ApiBaseUrl: strings.TrimSpace(apiBaseURL),
 	})
 	if err != nil {
 		return Node{}, err
@@ -347,7 +344,6 @@ func (db *DB) UpdateNodeByName(ctx context.Context, currentName string, params U
 		affected, err := qtx.UpdateNode(ctx, store.UpdateNodeParams{
 			PublicHost: normalized[0].Host,
 			HostsJson:  hostsJSON,
-			ApiBaseUrl: strings.TrimSpace(params.APIBaseURL),
 			Status:     status,
 			ID:         existing.ID,
 		})
@@ -479,7 +475,6 @@ SELECT
   n.name,
   n.public_host,
   n.hosts_json,
-  n.api_base_url,
   n.status,
   n.sing_box_version,
   n.last_seen_at,
@@ -505,7 +500,6 @@ OFFSET ?`
 			&node.Name,
 			&node.PublicHost,
 			&hostsJSON,
-			&node.APIBaseURL,
 			&node.Status,
 			&node.SingBoxVersion,
 			&node.LastSeenAt,
@@ -541,8 +535,8 @@ func nodePageWhere(filter NodeFilter) ([]string, []any) {
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		like := "%" + strings.ToLower(search) + "%"
-		where = append(where, `(LOWER(n.name) LIKE ? OR LOWER(n.public_host) LIKE ? OR LOWER(n.api_base_url) LIKE ? OR LOWER(n.status) LIKE ? OR LOWER(n.sing_box_version) LIKE ?)`)
-		args = append(args, like, like, like, like, like)
+		where = append(where, `(LOWER(n.name) LIKE ? OR LOWER(n.public_host) LIKE ? OR LOWER(n.status) LIKE ? OR LOWER(n.sing_box_version) LIKE ?)`)
+		args = append(args, like, like, like, like)
 	}
 	return where, args
 }
@@ -666,7 +660,6 @@ func mapNode(row store.Node) Node {
 		Name:           row.Name,
 		PublicHost:     row.PublicHost,
 		Hosts:          parseNodeHosts(row.HostsJson, row.PublicHost, row.ID),
-		APIBaseURL:     row.ApiBaseUrl,
 		Status:         row.Status,
 		SingBoxVersion: row.SingBoxVersion,
 		LastSeenAt:     row.LastSeenAt,

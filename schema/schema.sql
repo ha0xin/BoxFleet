@@ -85,7 +85,6 @@ CREATE TABLE IF NOT EXISTS nodes (
   name TEXT NOT NULL,
   public_host TEXT NOT NULL,
   hosts_json TEXT NOT NULL DEFAULT '[]',
-  api_base_url TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'active', 'disabled', 'degraded')),
   sing_box_version TEXT NOT NULL DEFAULT '',

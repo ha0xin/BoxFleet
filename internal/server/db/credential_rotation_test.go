@@ -19,7 +19,7 @@ func rotationFixture(t *testing.T) (*DB, []ProxyCredential) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.CreateNode(ctx, "edge", "203.0.113.1", ""); err != nil {
+	if _, err := d.CreateNode(ctx, "edge", "203.0.113.1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"alice", "bob"} {

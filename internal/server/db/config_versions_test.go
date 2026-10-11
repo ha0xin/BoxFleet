@@ -10,7 +10,7 @@ import (
 func TestPublishConfigAndApplyStatus(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	published, err := store.PublishConfig(ctx, "azus", []byte(`{"inbounds":[]}`))
@@ -265,7 +265,7 @@ func seedTrafficFixture(t *testing.T, ctx context.Context, store *DB) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -302,7 +302,7 @@ func seedTrafficFixture(t *testing.T, ctx context.Context, store *DB) {
 func TestRecordHeartbeatActivatesPendingNode(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	// Bootstrap-enrolled nodes are pending until their agent checks in.
@@ -342,7 +342,7 @@ func TestRecordHeartbeatRetainsOnlyLatestPerNode(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 	for _, name := range []string{"azus", "edge"} {
-		if _, err := store.CreateNode(ctx, name, "203.0.113.10", ""); err != nil {
+		if _, err := store.CreateNode(ctx, name, "203.0.113.10"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -400,7 +400,7 @@ func TestRecordHeartbeatRetainsOnlyLatestPerNode(t *testing.T) {
 func TestPromotePendingNodeToActiveOnlyAffectsPending(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	// CreateNode makes an active node: the conditional promote must be a no-op,

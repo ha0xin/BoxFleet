@@ -191,7 +191,7 @@ func TestRenderShadowsocks2022DialerPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, node := range []struct{ name, host string }{{"la-entry", "198.51.100.10"}, {"la-home", "203.0.113.20"}} {
-		if _, err := store.CreateNode(ctx, node.name, node.host, ""); err != nil {
+		if _, err := store.CreateNode(ctx, node.name, node.host); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -670,7 +670,7 @@ func openRenderTestDB(t *testing.T) *db.DB {
 // 2022 and grants every named user an access on it.
 func seedShadowsocks2022Fixture(t *testing.T, ctx context.Context, store *db.DB, userNames ...string) db.Proxy {
 	t.Helper()
-	if _, err := store.CreateNode(ctx, "ss-node", "198.51.100.7", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "ss-node", "198.51.100.7"); err != nil {
 		t.Fatal(err)
 	}
 	proxy, err := store.CreateProxy(ctx, db.CreateProxyParams{
@@ -722,7 +722,7 @@ func seedVLESSRealityFixture(t *testing.T, ctx context.Context, store *db.DB) {
 	if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{

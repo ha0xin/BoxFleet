@@ -19,7 +19,7 @@ func TestUserMutationsResolveIDBeforeConflictingName(t *testing.T) {
 	if b.ID == a.ID || b.Name != a.ID {
 		t.Fatalf("create returned wrong user: %+v", b)
 	}
-	node, err := d.CreateNode(ctx, "edge", "192.0.2.1", "")
+	node, err := d.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}

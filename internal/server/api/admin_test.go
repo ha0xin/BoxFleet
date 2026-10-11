@@ -30,7 +30,7 @@ func seedAdminUsersPageFixture(t *testing.T, ctx context.Context, store *db.DB) 
 
 func seedAdminSystemLogsFixture(t *testing.T, ctx context.Context, store *db.DB) {
 	t.Helper()
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
@@ -200,7 +200,7 @@ func TestAdminSystemLogsPageFiltersAndReportsTotal(t *testing.T) {
 func TestAdminNodeStatusReportsTheActiveTokenSignal(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.IssueNodeToken(ctx, "azus"); err != nil {
@@ -257,7 +257,7 @@ func TestAdminRotateUserCredentials(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: "rotate-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "rotate-node", "203.0.113.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "rotate-node", "203.0.113.1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{NodeName: "rotate-node", Name: "vless", Protocol: db.ProtocolVLESSReality, ListenPort: 443, Enabled: true, SettingsJSON: `{}`}); err != nil {

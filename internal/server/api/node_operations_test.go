@@ -122,7 +122,7 @@ func TestUpdateAllCanaryBatchesAndPausesOnFailure(t *testing.T) {
 	nodeNames := []string{"edge-a", "edge-b", "edge-c", "edge-d"}
 	capabilities := allUpdateCapabilities()
 	for i, name := range nodeNames {
-		if _, err := store.CreateNode(ctx, name, fmt.Sprintf("192.0.2.%d", i+1), ""); err != nil {
+		if _, err := store.CreateNode(ctx, name, fmt.Sprintf("192.0.2.%d", i+1)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.IssueNodeToken(ctx, name); err != nil {

@@ -13,11 +13,11 @@ import (
 func TestDeletedResourceNamesDoNotReuseIdentity(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	old, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	old, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CreateNode(ctx, old.Name, "192.0.2.2", ""); err == nil {
+	if _, err = store.CreateNode(ctx, old.Name, "192.0.2.2"); err == nil {
 		t.Fatal("active duplicate accepted")
 	}
 	if _, err = store.RenameNode(ctx, old.ID, "renamed"); err != nil {
@@ -27,7 +27,7 @@ func TestDeletedResourceNamesDoNotReuseIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"edge", "renamed"} {
-		fresh, err := store.CreateNode(ctx, name, "192.0.2.3", "")
+		fresh, err := store.CreateNode(ctx, name, "192.0.2.3")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestDeletedResourceNamesDoNotReuseIdentity(t *testing.T) {
 func TestDeletedNodeArchivesProxyAndReleasesItsName(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	old, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	old, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestDeletedNodeArchivesProxyAndReleasesItsName(t *testing.T) {
 	if _, err = store.SoftDeleteNode(ctx, old.ID); err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := store.CreateNode(ctx, old.Name, "192.0.2.2", "")
+	fresh, err := store.CreateNode(ctx, old.Name, "192.0.2.2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestIdentityMigrationKeepsPopulatedForeignKeys(t *testing.T) {
 	if err = goose.UpToContext(ctx, store.sql, ".", 27); err != nil {
 		t.Fatal(err)
 	}
-	node, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	node, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestIdentityMigrationKeepsPopulatedForeignKeys(t *testing.T) {
 func TestSameNameReplacementUserGetsIndependentConnectionCounter(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	node, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	node, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
