@@ -107,12 +107,9 @@ type singBoxConfig struct {
 	Inbounds  []any        `json:"inbounds,omitempty"`
 	Outbounds []any        `json:"outbounds,omitempty"`
 	Route     *routeConfig `json:"route,omitempty"`
-	// Services is the sing-box 1.14 `services` block. It MUST stay omitempty:
-	// mixed-version rollout and rollback leave 1.13 nodes in the fleet, and they
-	// reject this key outright. A node that has not opted in has to render
-	// byte-identically to the pre-1.14 output. Positioned between route and experimental to match
-	// option.Options upstream. TestRenderNodeConfigDefaultShapeIsUnchanged and
-	// TestRenderNodeConfigOptOutRestoresDefaultBytes pin the invariant.
+	// Services contains the optional daemon API service. Omit it unless the
+	// node opts in; disabling telemetry restores the default config shape.
+	// Its position matches the upstream option.Options field order.
 	Services     []any               `json:"services,omitempty"`
 	Experimental *experimentalConfig `json:"experimental,omitempty"`
 }
@@ -239,7 +236,7 @@ type v2rayAPIStats struct {
 	Users   []string `json:"users"`
 }
 
-// apiService is sing-box 1.14's option.APIServiceOptions, reduced to the four
+// apiService is sing-box's option.APIServiceOptions, reduced to the four
 // keys BoxFleet sets. The embedded ListenOptions contribute `listen` (a
 // netip.Addr, so a hostname is not accepted) and `listen_port`; `secret` is the
 // Bearer token the daemon's authenticate() compares against.
@@ -261,8 +258,7 @@ type apiService struct {
 const connectionTelemetryServiceTag = "boxfleet-telemetry"
 
 // connectionTelemetryService returns the `services` entry for a node, or nil
-// when the node has not opted in. This remains the default during a mixed 1.13
-// / 1.14 rollout because the block does not parse on 1.13.
+// when the node has not opted in. Activation is per node and off by default.
 //
 // It fails closed. The endpoint carries a control plane (StopService,
 // ReloadService, CloseAllConnections, TriggerDebugCrash) alongside the

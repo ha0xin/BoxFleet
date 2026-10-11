@@ -26,8 +26,8 @@ sing-box actually performs.
 | Commit | `af6e64c3b69e6132ebaee0e1a3d24e93903f6709` |
 | Source file | `daemon/started_service.proto` |
 
-The same tag appears in the proto header, in both generated files, and in the
-table above; `TestProvenanceIsRecorded` fails if any of them drifts.
+Keep the source tag and commit with the vendored proto and descriptor fixture
+so protocol changes can be reviewed against their source.
 
 `refs/sing-box`, when present, is an optional local reference checkout. Verify
 its revision before using it. Per
@@ -91,7 +91,7 @@ This is the substitute for `buf breaking`, which cannot be used here: every
 deliberate omission would register as a breaking change and drown the signal.
 `daemonpb/contract_test.go` covers what a conformance diff cannot express,
 because they are the deviations: one RPC only, fields 14/15 reserved, the method
-path constant, and the provenance record.
+path constant.
 
 Keeping the proto package as `daemon` (requirement 1) means the vendored
 messages register under the same full names as upstream's — `daemon.Connection`
@@ -175,9 +175,6 @@ be diffed:
   fields 14 and 15).
 - `daemon/started_service.go` — `SubscribeConnections`. Confirm `request.Interval`
   is still read as `time.Duration`, i.e. nanoseconds.
-
-`TestProvenanceIsRecorded` fails if the pin is bumped in some of those places
-and not the others, so a half-done move does not sit quietly in the tree.
 
 ## Using the client
 

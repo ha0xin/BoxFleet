@@ -57,10 +57,8 @@ func agentCapabilities() []string {
 		model.CapabilityVersionedInstallV1,
 		model.CapabilityAgentRestartResumeV1,
 		model.CapabilitySingBoxRollbackV1,
-		// Says only "this agent knows how to collect the 1.14 daemon stream",
-		// never "this node's sing-box can serve it". The server must also weigh
-		// the sing_box_version it already receives on the heartbeat before it
-		// renders an api service, because the block does not parse on 1.13.
+		// Advertises collector support, not installed daemon API support.
+		// Activation is controlled separately by the rendered node config.
 		model.CapabilityConnectionTelemetryV1,
 	}
 }

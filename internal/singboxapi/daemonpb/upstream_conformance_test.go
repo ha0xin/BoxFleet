@@ -23,6 +23,9 @@ import (
 // Regenerate the fixture only when the pin moves — see README.md,
 // "Re-verifying against a new sing-box tag".
 
+// upstreamTag identifies the source captured in the committed descriptor fixture.
+const upstreamTag = "v1.14.2"
+
 const upstreamDescriptorSet = "testdata/upstream-" + upstreamTag + ".descriptorset.binpb"
 
 // omittedFields are the only fields the vendored proto may drop. They are

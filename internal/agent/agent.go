@@ -88,7 +88,7 @@ type Agent struct {
 	// configMu guards the mutable parts of Config. Only the canonical node name
 	// changes at runtime, and it is read by every request goroutine.
 	configMu sync.RWMutex
-	// connectionMu guards the opt-in sing-box 1.14 connection telemetry
+	// connectionMu guards the opt-in daemon connection telemetry
 	// collector, which the poll loop starts and stops as the applied config
 	// gains or loses an api service. See connections.go.
 	connectionMu sync.Mutex

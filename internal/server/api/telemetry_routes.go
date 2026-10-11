@@ -10,11 +10,9 @@ import (
 // classification views, and the operator override endpoints. It is called from
 // inside the admin route group, so every route here inherits adminAuthMiddleware.
 //
-// The /network-events/* family reads the journalctl-scraped log_events that
-// every node produces; the /connection-events/* family reads the sing-box 1.14
-// daemon stream that only opted-in nodes produce. They are mounted side by side
-// and never merged: which source a row came from is a fact the admin UI has to
-// be able to state.
+// The /network-events/* family reads unified journal and stream records.
+// The /connection-events list exposes source rows for diagnostics; its former
+// interval-byte series and host analytics routes return HTTP 410.
 func registerTelemetryRoutes(r chi.Router, store *db.DB) {
 	r.Get("/traffic/series", adminTrafficSeriesHandler(store))
 	r.Get("/network-events/series", adminNetworkEventSeriesHandler(store))

@@ -12,12 +12,8 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/db"
 )
 
-// These tests guard the one change on this branch that could take down the
-// production fleet. Nodes run sing-box 1.13, which does not parse the 1.14
-// `services` block at all, so a node that has not opted in must render exactly
-// the bytes it rendered before the block existed — not "equivalent JSON", the
-// same bytes, because the node hashes the config and `sing-box check` either
-// accepts the file or the node refuses the update.
+// These tests cover per-node activation, the optional service shape and
+// disabling telemetry without leaving a daemon endpoint in the config.
 
 const (
 	// Placeholders substituted into the golden comparison. The credential UUID
@@ -27,9 +23,8 @@ const (
 	goldenSecretPlaceholder = "0000000000000000000000000000000000000000000000000000000000000000"
 )
 
-// TestRenderNodeConfigDefaultShapeIsUnchanged pins the bytes a node with no
-// opt-in receives. A diff here is the fleet-breaking regression: investigate
-// it, do not regenerate the golden.
+// TestRenderNodeConfigDefaultShapeIsUnchanged checks that the default config
+// omits telemetry and matches the rendered fixture.
 func TestRenderNodeConfigDefaultShapeIsUnchanged(t *testing.T) {
 	ctx := context.Background()
 	store := openRenderTestDB(t)
@@ -46,7 +41,7 @@ func TestRenderNodeConfigDefaultShapeIsUnchanged(t *testing.T) {
 }
 
 // TestRenderNodeConfigOptedInEmitsAPIService pins the opted-in shape against
-// sing-box 1.14's option.APIServiceOptions: `services[0]` is a `type: api`
+// sing-box's option.APIServiceOptions: `services[0]` is a `type: api`
 // entry carrying only listen, listen_port and secret.
 func TestRenderNodeConfigOptedInEmitsAPIService(t *testing.T) {
 	ctx := context.Background()
@@ -101,7 +96,7 @@ func TestRenderNodeConfigOptedInEmitsAPIService(t *testing.T) {
 }
 
 // TestRenderNodeConfigOptOutRestoresDefaultBytes is the rollback path: an
-// operator who turns telemetry off gets the 1.13-compatible config back
+// operator who turns telemetry off gets the default config back
 // verbatim, with no residue from the opt-in.
 func TestRenderNodeConfigOptOutRestoresDefaultBytes(t *testing.T) {
 	ctx := context.Background()
@@ -136,8 +131,7 @@ func TestRenderNodeConfigOptOutRestoresDefaultBytes(t *testing.T) {
 
 // A second node in the same database must be unaffected by the first node's
 // opt-in. This is the blast-radius check for a per-node flag: getting the
-// lookup wrong (fleet-wide instead of per-node) would push an unparseable
-// config to every 1.13 node at once.
+// lookup wrong would expose the daemon service on nodes that did not opt in.
 func TestRenderNodeConfigOptInIsPerNode(t *testing.T) {
 	ctx := context.Background()
 	store := openRenderTestDB(t)
@@ -157,8 +151,7 @@ func TestRenderNodeConfigOptInIsPerNode(t *testing.T) {
 }
 
 // A paused node is told to stop serving. It must never carry the telemetry
-// block, whatever its opt-in says: the config it receives has to parse on 1.13
-// as well, and a stopped sing-box has nothing to report.
+// block, whatever its opt-in says: a stopped sing-box has nothing to report.
 func TestRenderDisabledConfigNeverCarriesTelemetry(t *testing.T) {
 	config, err := RenderDisabledConfig()
 	if err != nil {
@@ -171,8 +164,8 @@ func TestRenderDisabledConfigNeverCarriesTelemetry(t *testing.T) {
 
 // The renderer fails closed rather than emitting an endpoint that upstream's
 // authenticate() would leave unauthenticated, or one bound off-loopback. The
-// facade and the schema both refuse these values on write; this is the layer
-// that still holds if a row is edited by hand.
+// facade validates endpoint settings, and schema constraints reject short
+// secrets and invalid ports. Rendering also validates hand-edited rows.
 func TestConnectionTelemetryRenderFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	store, raw := openRenderTelemetryTestDB(t)

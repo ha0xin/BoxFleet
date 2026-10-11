@@ -117,7 +117,7 @@ func TestAdminConnectionEventsEndpoint(t *testing.T) {
 	if oldest.UserName != "alice" || oldest.AuthName != "vless-39090@alice" {
 		t.Fatalf("attributed row = %+v", oldest)
 	}
-	// The enriched dimensions are the whole point of the 1.14 stream: the
+	// The enriched dimensions are provided by the daemon stream: the
 	// journal scraper can produce none of these.
 	if oldest.Network != "tcp" || oldest.Protocol != "tls" || oldest.InboundType != "vless" ||
 		oldest.Rule != "final" || oldest.OutboundType != "direct" || oldest.Chain != "vless-39090>direct" {
@@ -182,9 +182,8 @@ func TestIntervalConnectionAnalyticsRetired(t *testing.T) {
 	}
 }
 
-// The fleet-wide default is that nothing streams: 1.13 cannot parse the
-// service.api block at all. An empty list is a normal answer the UI explains,
-// not an error.
+// The endpoint lists only nodes with telemetry enabled. An empty list before
+// activation is a normal response.
 func TestAdminConnectionTelemetryNodesEndpoint(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)

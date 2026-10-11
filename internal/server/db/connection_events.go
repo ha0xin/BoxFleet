@@ -83,10 +83,8 @@ const (
 	maxConnectionBootIDLen   = 128
 )
 
-// NodeConnectionTelemetry is one node's opt-in to the sing-box 1.14 daemon
-// gRPC stream. A missing row is the disabled state, which is why the fleet
-// default is off structurally so mixed-version rollout and rollback remain
-// safe: the `service.api` config block does not parse on 1.13.
+// NodeConnectionTelemetry stores per-node daemon stream activation. A missing
+// row disables telemetry; enabling it requires a compatible installed daemon.
 type NodeConnectionTelemetry struct {
 	NodeName      string
 	Enabled       bool
@@ -94,11 +92,11 @@ type NodeConnectionTelemetry struct {
 	ListenPort    int64
 	// Secret is stored and returned in the clear. It has to be: the renderer
 	// emits it into the node config, so unlike a node token — which the server
-	// only ever verifies, and therefore stores as a bcrypt hash — this value
+	// only ever verifies, and therefore stores as a nonreversible verifier — this value
 	// must be recoverable. That is the same treatment the Reality private key
 	// and the Shadowsocks server password already get in proxies.settings_json,
 	// and the rendered config in config_versions.config_json contains all
-	// three. Never put it in an admin API response.
+	// three. Omit it from telemetry inventory responses.
 	Secret    string
 	RotatedAt string
 	CreatedAt string

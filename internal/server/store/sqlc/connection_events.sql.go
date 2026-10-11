@@ -229,9 +229,8 @@ FROM node_connection_telemetry
 WHERE node_id = ?1
 `
 
-// Connection telemetry from sing-box 1.14's daemon gRPC stream. Opt-in per node
-// and off by default: mixed-version rollout includes 1.13, where the
-// service.api config block does not parse.
+// Connection telemetry from the daemon gRPC stream. Activation is per node
+// and off by default.
 //
 // Keep every comment in this file ASCII. sqlc's SQLite parser reports rune
 // offsets but slices the source by byte, so a single multi-byte character

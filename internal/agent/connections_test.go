@@ -60,8 +60,7 @@ func TestConnectionTelemetryOptionsRejectsUnsafeOrAbsentService(t *testing.T) {
 		config     string
 		wantAbsent bool
 	}{
-		// The shape every node in the fleet runs today: a 1.13 config has no
-		// services block at all, and the collector must read that as "off",
+		// A config without a services block must be read as "off",
 		// not as an error worth logging every poll.
 		"no services block": {config: `{"inbounds": [], "outbounds": []}`, wantAbsent: true},
 		"no api service":    {config: `{"services": [{"type": "resolved"}]}`, wantAbsent: true},
@@ -584,9 +583,8 @@ func TestConnectionCollectorRunConsumesTheStreamAndReconnects(t *testing.T) {
 
 func TestConnectionCollectorRunIsAQuietNoOpWithoutADaemon(t *testing.T) {
 	t.Parallel()
-	// The 1.13 case: the node is opted in but its sing-box serves nothing on the
-	// endpoint. Run must keep retrying without ever returning an error into the
-	// agent's supervision path.
+	// An unavailable daemon endpoint must keep retrying without returning an
+	// error into the agent's supervision path.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -790,8 +788,7 @@ func TestReconcileConnectionCollectorFollowsTheAppliedConfig(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// A 1.13 config carries no services block, so nothing starts. This is the
-	// state of every node in the fleet.
+	// A config without the daemon API service must not start collection.
 	writeFile(t, agent.Config.SingBoxConfig, `{"inbounds": [], "outbounds": []}`)
 	agent.reconcileConnectionCollector(ctx)
 	if agent.connectionCollector() != nil {

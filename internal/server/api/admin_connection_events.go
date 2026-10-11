@@ -92,10 +92,8 @@ func adminConnectionAggregatesRetiredHandler(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, map[string]string{"error": "Interval byte analytics are retired: connection snapshots contain lifetime totals. Use /api/admin/network-events/series and /api/admin/network-events/hosts for connection counts; use /api/admin/traffic/series for user traffic."})
 }
 
-// adminConnectionTelemetryNodesHandler is what makes the mixed-version fleet
-// legible: it lists the nodes that actually stream. An empty list is the normal
-// fleet-wide answer today and the admin UI renders it as an explanation rather
-// than as an error or an empty table.
+// adminConnectionTelemetryNodesHandler lists nodes with telemetry enabled.
+// Activation alone does not prove successful collection.
 func adminConnectionTelemetryNodesHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodes, err := store.ListEnabledConnectionTelemetryNodes(r.Context())

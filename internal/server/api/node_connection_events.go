@@ -7,17 +7,13 @@ import (
 	"github.com/haoxin/boxfleet/internal/server/db"
 )
 
-// nodeConnectionEventsHandler ingests one window of aggregated connection
-// telemetry from sing-box 1.14's daemon gRPC stream. It is the second network
-// event producer: the journalctl scraper behind /api/node/logs stays the fleet
-// default and neither path knows about the other.
+// nodeConnectionEventsHandler ingests bounded session snapshots and legacy
+// aggregates from the daemon connection stream. Journal collection remains
+// available; the server selects sources for unified reads.
 //
-// The opt-in is checked here rather than swallowed in the facade so the agent
-// can tell "stop collecting" from a transient failure. 403 means the operator
-// turned telemetry off (or never turned it on) and the collector should shut
-// down until the next config apply says otherwise; every other failure keeps
-// the existing node-report semantics — 401 for auth, 413 for an oversized
-// body, 422 for a payload the store rejects.
+// Check activation before decoding. Disabled telemetry returns 403; invalid
+// reports return 422. The agent currently retries failed reports until an
+// applied config without the service stops collection.
 func nodeConnectionEventsHandler(store *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodeName, ok := authenticateNode(w, r, store)

@@ -43,9 +43,8 @@ func TestNodeConnectionTelemetryRejectsWeakSecrets(t *testing.T) {
 	}
 }
 
-// Absence of a row is the disabled state, so a fresh node must never render the
-// 1.14 service.api block. Mixed-version rollout includes 1.13, where that block
-// does not parse at all.
+// Absence of a row disables telemetry. An explicitly disabled row must also
+// stay out of the enabled-node inventory.
 func TestConnectionTelemetryDefaultsOffPerNode(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

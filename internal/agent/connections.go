@@ -19,7 +19,7 @@ import (
 	"github.com/haoxin/boxfleet/internal/singboxapi/daemonpb"
 )
 
-// The connection collector is the node side of the sing-box 1.14 daemon gRPC
+// The connection collector is the node side of the sing-box daemon gRPC
 // telemetry path. It coexists with the journalctl scraper during migration;
 // the server selects the primary source for Logs. Collection remains opt-in
 // and starts only when the rendered config includes the loopback API service.
@@ -109,7 +109,7 @@ type singBoxServicesConfig struct {
 
 // connectionTelemetryOptions extracts the daemon endpoint from a rendered
 // sing-box config. It returns errNoConnectionTelemetry when the node is not
-// opted in, which is the expected outcome on every 1.13 node.
+// opted in or the config has no daemon API service.
 func connectionTelemetryOptions(raw []byte) (ConnectionTelemetryOptions, error) {
 	var parsed singBoxServicesConfig
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -193,8 +193,8 @@ type ConnectionCollector struct {
 	minBackoff time.Duration
 	maxBackoff time.Duration
 
-	// quiet suppresses repeated stream-error logging. On sing-box 1.13 the
-	// endpoint does not exist, so a misconfigured node would otherwise print a
+	// quiet suppresses repeated stream-error logging. An unavailable daemon
+	// endpoint would otherwise make a misconfigured node print a
 	// connection error every backoff interval forever.
 	quiet atomic.Bool
 
@@ -254,7 +254,7 @@ func (c *ConnectionCollector) CloseHighWaterMs() int64 {
 
 // Run consumes the stream until ctx is cancelled. It never returns an error:
 // collector failure must never disturb sing-box supervision or the config-apply
-// loop, and on a 1.13 node every subscription attempt fails by design.
+// loop, including when the configured daemon endpoint is unavailable.
 func (c *ConnectionCollector) Run(ctx context.Context) {
 	client, err := singboxapi.Dial(singboxapi.Options{
 		Address:  c.options.Address,
@@ -318,7 +318,7 @@ func (c *ConnectionCollector) consume(ctx context.Context, client *singboxapi.Cl
 
 // noteStreamError logs the first failure after a working subscription and stays
 // silent until the next one succeeds. An opted-in node whose sing-box does not
-// speak the API — the 1.13 case — prints exactly one line, not one per backoff.
+// serve the API logs once per outage rather than once per backoff.
 func (c *ConnectionCollector) noteStreamError(err error) {
 	if c.quiet.Swap(true) {
 		return

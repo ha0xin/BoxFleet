@@ -1,4 +1,4 @@
-// Package singboxapi is BoxFleet's client for sing-box 1.14's daemon gRPC
+// Package singboxapi is BoxFleet's client for sing-box's daemon gRPC
 // connection stream, exposed on a node by the `service.api` config block.
 //
 // The package is deliberately narrow. daemonpb vendors only the

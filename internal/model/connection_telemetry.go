@@ -32,9 +32,9 @@ const (
 	ConnectionInstantLayout = "2006-01-02T15:04:05.000Z"
 )
 
-// CapabilityConnectionTelemetryV1 is advertised on the heartbeat by agents that
-// can collect the 1.14 stream. The server must not render a `service.api` block
-// for a node that has not advertised it, and must not expect reports from one.
+// CapabilityConnectionTelemetryV1 advertises agent support for the daemon
+// connection stream, not support in the installed sing-box binary. Activation
+// is controlled separately by the node_connection_telemetry row.
 const CapabilityConnectionTelemetryV1 = "telemetry.connections.v1"
 
 // ConnectionReport ships one collection window of connection
