@@ -32,7 +32,7 @@ func TestWithTxSurvivesConcurrentCommitBetweenReadAndWrite(t *testing.T) {
 	store := openTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 

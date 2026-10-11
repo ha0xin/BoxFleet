@@ -8,7 +8,6 @@ function node(overrides: Partial<AdminNode> = {}): AdminNode {
     id: "node-1",
     name: "edge-1",
     public_host: "edge-1.example.com",
-    api_base_url: "",
     status: "pending",
     sing_box_version: "sing-box version 1.13.13",
     last_seen_at: "",

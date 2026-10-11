@@ -10,7 +10,7 @@ import (
 func TestRunningUpdateCanRecoverAfterQueueDeadline(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
-	if _, err := d.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := d.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	op, _, err := d.CreateNodeOperation(ctx, CreateNodeOperationParams{NodeName: "edge", Kind: "update.agent", Payload: json.RawMessage(`{"version":"v0.2.0"}`), IdempotencyKey: "recovery", ExpiresAt: time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339Nano)})
@@ -37,7 +37,7 @@ func TestRunningUpdateCanRecoverAfterQueueDeadline(t *testing.T) {
 func TestUnclaimedUpdateExpiresAtQueueDeadline(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
-	if _, err := d.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := d.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	op, _, err := d.CreateNodeOperation(ctx, CreateNodeOperationParams{NodeName: "edge", Kind: "update.agent", Payload: json.RawMessage(`{"version":"v0.2.0"}`), IdempotencyKey: "expired", ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)})

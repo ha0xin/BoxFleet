@@ -821,9 +821,8 @@ func TestAdminNodeAndProxyManagement(t *testing.T) {
 	}
 
 	req = adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
-		"public_host":  "203.0.113.11",
-		"api_base_url": "http://node-a.local",
-		"status":       "degraded",
+		"public_host": "203.0.113.11",
+		"status":      "degraded",
 	})
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -941,62 +940,29 @@ func TestAdminRenamesNodeAndProxyWithoutBreakingAgentIdentity(t *testing.T) {
 	}
 }
 
-func TestAdminNodeStatusTogglePreservesAPIURL(t *testing.T) {
+func TestAdminNodeStatusTogglePreservesHosts(t *testing.T) {
 	store := openAPITestDB(t)
 	router := NewRouter(Options{DB: store, AdminToken: "secret"})
-
-	serve := func(method, path string, body map[string]any) *httptest.ResponseRecorder {
-		req := adminJSONRequest(t, method, path, body)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		return rec
+	create := httptest.NewRecorder()
+	router.ServeHTTP(create, adminJSONRequest(t, http.MethodPost, "/api/admin/nodes", map[string]any{
+		"name": "node-a", "public_host": "203.0.113.10", "status": "active",
+	}))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create node: %d %s", create.Code, create.Body.String())
 	}
-
-	if rec := serve(http.MethodPost, "/api/admin/nodes", map[string]any{
-		"name":        "node-a",
-		"public_host": "203.0.113.10",
-		"status":      "active",
-	}); rec.Code != http.StatusOK {
-		t.Fatalf("create node status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
-		"name":         "node-a",
-		"api_base_url": "http://node-a.local",
-		"status":       "active",
-	}); rec.Code != http.StatusOK {
-		t.Fatalf("set api url status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-
-	// Status-only PATCH (no api_base_url) must not wipe the configured URL.
-	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
-		"name":   "node-a",
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, adminJSONRequest(t, http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
 		"status": "disabled",
-	}); rec.Code != http.StatusOK {
-		t.Fatalf("toggle status = %d, body = %s", rec.Code, rec.Body.String())
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle status: %d %s", rec.Code, rec.Body.String())
 	}
 	node, err := store.GetNode(context.Background(), "node-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.APIBaseURL != "http://node-a.local" || node.Status != "disabled" {
+	if node.PublicHost != "203.0.113.10" || node.Status != "disabled" || len(node.Hosts) != 1 {
 		t.Fatalf("node = %#v", node)
-	}
-
-	// An explicit empty api_base_url (edit dialog clearing the field) clears it,
-	// unlike an omitted field which is preserved above.
-	if rec := serve(http.MethodPatch, "/api/admin/nodes/node-a", map[string]any{
-		"name":         "node-a",
-		"api_base_url": "",
-		"status":       "active",
-	}); rec.Code != http.StatusOK {
-		t.Fatalf("clear api url status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	node, err = store.GetNode(context.Background(), "node-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node.APIBaseURL != "" {
-		t.Fatalf("api_base_url = %q, want cleared", node.APIBaseURL)
 	}
 }
 
@@ -1173,7 +1139,7 @@ func TestAdminNodeAndProxyPagination(t *testing.T) {
 	ctx := context.Background()
 	store := openAPITestDB(t)
 	seedAPITestNode(t, ctx, store)
-	if _, err := store.CreateNode(ctx, "beta", "198.51.100.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "beta", "198.51.100.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{
@@ -1557,7 +1523,7 @@ func seedAPITestNode(t *testing.T, ctx context.Context, store *db.DB) {
 	if _, err := store.CreateProxyUser(ctx, db.CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{

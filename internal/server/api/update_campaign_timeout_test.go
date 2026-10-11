@@ -14,7 +14,7 @@ func TestUpdateCampaignSkipsUnclaimedAndDeletedIdentities(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			store := openAPITestDB(t)
-			old, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+			old, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +45,7 @@ func TestUpdateCampaignSkipsUnclaimedAndDeletedIdentities(t *testing.T) {
 				if _, err := store.SoftDeleteNode(ctx, old.ID); err != nil {
 					t.Fatal(err)
 				}
-				fresh, err := store.CreateNode(ctx, old.Name, "192.0.2.2", "")
+				fresh, err := store.CreateNode(ctx, old.Name, "192.0.2.2")
 				if err != nil {
 					t.Fatal(err)
 				}

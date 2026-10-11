@@ -53,7 +53,7 @@ func TestNodeConnectionEventsOverridesNodeName(t *testing.T) {
 	ctx := context.Background()
 	store, raw := openConnectionAPITestDB(t)
 	seedAPITestNode(t, ctx, store)
-	if _, err := store.CreateNode(ctx, "victim", "203.0.113.99", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "victim", "203.0.113.99"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SetNodeConnectionTelemetry(ctx, db.SetNodeConnectionTelemetryParams{NodeName: "azus", Enabled: true}); err != nil {

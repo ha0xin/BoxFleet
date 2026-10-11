@@ -9,7 +9,7 @@ func TestCreateNodeStartsSingleSelectedHost(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 
-	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
 	node, err := store.GetNode(ctx, "edge")
@@ -28,7 +28,7 @@ func TestUpdateNodeMultiHostMirrorsPrimaryAndDedupes(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 
-	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
 	// Blanks dropped, duplicates collapsed (first wins), order preserved, and
@@ -73,7 +73,7 @@ func TestUpdateNodeAutoSelectsFirstWhenNoneSelected(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 
-	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "1.2.3.4"); err != nil {
 		t.Fatal(err)
 	}
 	node, err := store.UpdateNode(ctx, UpdateNodeParams{
@@ -96,11 +96,11 @@ func TestRenameNodeAliasesAndConflicts(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 
-	first, err := store.CreateNode(ctx, "edge-a", "192.0.2.1", "")
+	first, err := store.CreateNode(ctx, "edge-a", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "edge-b", "192.0.2.2", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge-b", "192.0.2.2"); err != nil {
 		t.Fatal(err)
 	}
 	issued, err := store.IssueNodeToken(ctx, first.Name)
@@ -133,7 +133,7 @@ func TestRenameNodeAliasesAndConflicts(t *testing.T) {
 	if _, err := store.RenameNode(ctx, "edge-primary", "edge-b"); err == nil {
 		t.Fatal("rename accepted another node's canonical name")
 	}
-	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.3", ""); err == nil {
+	if _, err := store.CreateNode(ctx, "edge-a", "192.0.2.3"); err == nil {
 		t.Fatal("create accepted a reserved node alias")
 	}
 
@@ -152,7 +152,7 @@ func TestRenameNodeAliasesAndConflicts(t *testing.T) {
 func TestUpdateNodeHostTagValidationAndLegacyRead(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	node, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	node, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,15 +196,14 @@ func TestUpdateNodeHostTagValidationAndLegacyRead(t *testing.T) {
 func TestUpdateNodeByNameRenamesAndUpdatesAtomically(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	original, err := store.CreateNode(ctx, "edge", "192.0.2.1", "")
+	original, err := store.CreateNode(ctx, "edge", "192.0.2.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	updated, err := store.UpdateNodeByName(ctx, original.Name, UpdateNodeParams{
-		Name:       "edge-renamed",
-		Hosts:      []NodeHost{{Host: "edge.example", Selected: true}},
-		APIBaseURL: "https://edge.example/api",
-		Status:     "degraded",
+		Name:   "edge-renamed",
+		Hosts:  []NodeHost{{Host: "edge.example", Selected: true}},
+		Status: "degraded",
 	})
 	if err != nil {
 		t.Fatal(err)

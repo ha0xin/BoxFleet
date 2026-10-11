@@ -78,7 +78,6 @@ function node(overrides: Partial<AdminNode> = {}): AdminNode {
     id: "node-1",
     name: "edge-1",
     public_host: "edge-1.example.com",
-    api_base_url: "",
     status: "active",
     sing_box_version: "v1.13.14",
     last_seen_at: new Date().toISOString(),

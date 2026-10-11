@@ -14,10 +14,10 @@ func TestGrantPathToUserIssuesCredentialsForWholeChain(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "entry", "198.51.100.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "entry", "198.51.100.10"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "exit", "203.0.113.20", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "exit", "203.0.113.20"); err != nil {
 		t.Fatal(err)
 	}
 	entryProxy, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -140,7 +140,7 @@ func TestGrantPathToUserIgnoresAccessesForDeletedNodes(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "retired", "192.0.2.40", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "retired", "192.0.2.40"); err != nil {
 		t.Fatal(err)
 	}
 	retiredProxy, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -169,7 +169,7 @@ func TestGrantPathToUserIgnoresAccessesForDeletedNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := store.CreateNode(ctx, "live", "192.0.2.41", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "live", "192.0.2.41"); err != nil {
 		t.Fatal(err)
 	}
 	liveProxy, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -209,7 +209,7 @@ func TestDeletePathDisablesCredentialsItWasTheLastConsumerOf(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "exit", "203.0.113.30", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "exit", "203.0.113.30"); err != nil {
 		t.Fatal(err)
 	}
 	proxy, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -252,7 +252,7 @@ func TestDeletePathDisablesCredentialsItWasTheLastConsumerOf(t *testing.T) {
 func TestPathGraphRejectsCycleAndExcessiveDepth(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "node", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "node", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	proxy, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -323,7 +323,7 @@ func TestPathGraphRejectsCycleAndExcessiveDepth(t *testing.T) {
 func TestProxyDirectPublicationSwitchManagesDirectPaths(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "node", "192.0.2.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "node", "192.0.2.10"); err != nil {
 		t.Fatal(err)
 	}
 	direct := false

@@ -251,9 +251,9 @@ export function connectionStatus(event: Pick<NetworkEvent, "source" | "connectio
     return { label: "Unknown", description: "Connection lifecycle state is unavailable.", variant: "secondary" };
   }
   if (event.connections_closed > 0) {
-    return { label: "已关闭", description: "A connection close event was observed.", variant: "secondary" };
+    return { label: "Closed", description: "A connection close event was observed.", variant: "secondary" };
   }
-  return { label: "最近观测为活动", description: "No close event has been observed. This is the last reported state, not confirmation that the connection is still active; reports can be delayed or close events missed.", variant: "info" };
+  return { label: "Last seen active", description: "No close event has been observed. This is the last reported state, not confirmation that the connection is still active; reports can be delayed or close events missed.", variant: "info" };
 }
 
 /** Render the two largest non-zero units using compact table labels. */

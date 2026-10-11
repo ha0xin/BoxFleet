@@ -665,7 +665,7 @@ func seedConnectionIngestFixture(t *testing.T, ctx context.Context, db *DB) {
 	if _, err := db.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := db.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.CreateProxy(ctx, CreateProxyParams{

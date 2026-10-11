@@ -155,7 +155,6 @@ const nodes: AdminNode[] = [
       { id: "host_tokyo_2", host: "203.0.113.10", tag: "ipv4", selected: true },
       { id: "host_tokyo_3", host: "2606:4700::6810:84e5", tag: "ipv6", selected: false }
     ],
-    api_base_url: "https://203.0.113.10:18080",
     status: "active",
     sing_box_version: "1.9.3",
     last_seen_at: iso(20_000),
@@ -173,7 +172,6 @@ const nodes: AdminNode[] = [
     name: "frankfurt",
     public_host: "198.51.100.22",
     hosts: [{ id: "host_frankfurt_1", host: "198.51.100.22", tag: "", selected: true }],
-    api_base_url: "https://198.51.100.22:18080",
     status: "active",
     sing_box_version: "1.9.3",
     last_seen_at: iso(45_000),
@@ -191,7 +189,6 @@ const nodes: AdminNode[] = [
     name: "singapore",
     public_host: "192.0.2.31",
     hosts: [{ id: "host_singapore_1", host: "192.0.2.31", tag: "", selected: true }],
-    api_base_url: "https://192.0.2.31:18080",
     status: "degraded",
     sing_box_version: "1.9.1",
     last_seen_at: iso(3 * HOUR),
@@ -211,7 +208,6 @@ const nodes: AdminNode[] = [
     name: "osaka",
     public_host: "203.0.113.55",
     hosts: [{ id: "host_osaka_1", host: "203.0.113.55", tag: "", selected: true }],
-    api_base_url: "https://203.0.113.55:18080",
     status: "disabled",
     sing_box_version: "1.9.3",
     last_seen_at: iso(2 * HOUR),
@@ -229,7 +225,6 @@ const nodes: AdminNode[] = [
     name: "berlin",
     public_host: "198.51.100.77",
     hosts: [{ id: "host_berlin_1", host: "198.51.100.77", tag: "", selected: true }],
-    api_base_url: "",
     status: "disabled",
     sing_box_version: "1.9.0",
     last_seen_at: iso(5 * DAY),
@@ -1190,7 +1185,7 @@ function nodesPage(query: URLSearchParams): AdminNodesResponse {
     .filter((node) => !status || node.status === status)
     .filter((node) => {
       if (!search) return true;
-      return [node.name, node.public_host, node.api_base_url, node.status, node.sing_box_version, node.agent_version]
+      return [node.name, node.public_host, node.status, node.sing_box_version, node.agent_version]
         .some((value) => value?.toLowerCase().includes(search));
     })
     .sort((a, b) => {
@@ -1782,7 +1777,6 @@ const routes: Route[] = [
         hosts: publicHost
           ? [{ id: mockHostID(`node_${name}`, publicHost), host: publicHost, tag: "", selected: true }]
           : [],
-        api_base_url: "",
         status: "pending",
         sing_box_version: "",
         last_seen_at: "",
@@ -1837,7 +1831,6 @@ const routes: Route[] = [
             { id: mockHostID(node.id, body.public_host), host: body.public_host, tag: "", selected: true }
           ];
         }
-        if (typeof body.api_base_url === "string") node.api_base_url = body.api_base_url;
         if (body.status === "active" || body.status === "disabled") node.status = body.status;
         if (typeof body.name === "string" && body.name.trim() && body.name.trim() !== oldName) {
           node.name = body.name.trim();

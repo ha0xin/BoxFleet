@@ -25,7 +25,7 @@ func seedNetworkEventSeriesFixture(t *testing.T, ctx context.Context, store *DB)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "edge", "203.0.113.11", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "203.0.113.11"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{

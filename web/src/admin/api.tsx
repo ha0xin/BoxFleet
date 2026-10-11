@@ -25,15 +25,25 @@ function adminRequestPath(path: string): string {
 
 async function responseError(response: Response): Promise<AdminApiError> {
   const body = await response.text();
-  if ((response.headers.get("Content-Type") ?? "").includes("application/json")) {
+  const contentType = (response.headers.get("Content-Type") ?? "").toLowerCase();
+  const fallback = response.status >= 500
+    ? `The server is temporarily unavailable (HTTP ${response.status}). Please try again shortly.`
+    : `Request failed (HTTP ${response.status}).`;
+  const readableDetail = (value: unknown): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    const detail = value.trim();
+    if (!detail || detail.length > 500 || /<\/?[a-z][^>]*>|<!doctype/i.test(detail)) return undefined;
+    return detail;
+  };
+  if (contentType.includes("application/json")) {
     try {
       const value = JSON.parse(body) as { error?: unknown };
-      if (typeof value.error === "string") return new AdminApiError(response.status, value.error);
+      return new AdminApiError(response.status, readableDetail(value?.error) ?? fallback);
     } catch {
-      // Fall through to the raw response body for malformed error responses.
+      return new AdminApiError(response.status, fallback);
     }
   }
-  return new AdminApiError(response.status, body.trim());
+  return new AdminApiError(response.status, contentType.includes("text/html") ? fallback : readableDetail(body) ?? fallback);
 }
 
 export async function readAdminResponse<T>(response: Response): Promise<T> {
@@ -59,7 +69,16 @@ export function AdminApiProvider({
     const headers = new Headers(init.headers);
     if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
     if (token.trim()) headers.set("Authorization", `Bearer ${token.trim()}`);
-    const response = await fetch(adminRequestPath(path), { ...init, headers });
+    let response: Response;
+    try {
+      response = await fetch(adminRequestPath(path), { ...init, headers });
+    } catch (error) {
+      // Preserve AbortError so navigation can cancel queries normally.
+      if (error instanceof TypeError) {
+        throw new AdminApiError(0, "Unable to reach the server. Check your connection and try again.");
+      }
+      throw error;
+    }
     try {
       return await readAdminResponse<T>(response);
     } catch (error) {

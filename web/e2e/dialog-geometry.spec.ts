@@ -55,6 +55,8 @@ test("dialogs honour their size and never overflow their content", async ({ page
   const edit = await dialogGeometry(page);
   expect(edit.width).toBe(SIZE_WIDTH.lg);
   expect(edit.overflowing).toEqual([]);
+  await expect(page.getByLabel("API base URL", { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/edit-node-without-api-url.png" });
   // The host field must stay wide enough for a real hostname (measured 185px).
   const hostWidth = await page.locator('input[name="hosts.0.host"]').evaluate((el) => el.getBoundingClientRect().width);
   expect(hostWidth).toBeGreaterThan(190);

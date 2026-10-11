@@ -13,7 +13,6 @@ export type AdminNode = {
   name: string;
   public_host: string;
   hosts?: AdminNodeHost[];
-  api_base_url: string;
   status: AdminNodeStatus;
   sing_box_version: string;
   last_seen_at: string;

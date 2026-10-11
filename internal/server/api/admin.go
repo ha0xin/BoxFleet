@@ -75,7 +75,6 @@ type adminNode struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
 	PublicHost      string            `json:"public_host"`
-	APIBaseURL      string            `json:"api_base_url"`
 	Status          string            `json:"status"`
 	SingBoxVersion  string            `json:"sing_box_version"`
 	LastSeenAt      string            `json:"last_seen_at"`
@@ -298,23 +297,19 @@ type adminSystemLogsResponse struct {
 type adminNodePayload struct {
 	Name       string `json:"name"`
 	PublicHost string `json:"public_host"`
-	APIBaseURL string `json:"api_base_url"`
 	Status     string `json:"status"`
 }
 
 type adminNodePatchPayload struct {
-	// Omitted (null) fields are preserved; an explicit value is written. So a
-	// status-only toggle keeps the API URL, and the edit dialog can clear
-	// api_base_url with "". public_host is required (UpdateNode rejects "")
-	// and the edit form enforces a non-empty value before sending it.
+	// Omitted (null) fields are preserved; an explicit value is written.
+	// Status-only updates preserve the node name and hosts.
 	Name       *string `json:"name"`
 	PublicHost *string `json:"public_host"`
 	// Hosts, when present, replaces the full host list (the edit dialog sends it
 	// and public_host is then derived from the first entry). Single-host clients
 	// may still send public_host instead.
-	Hosts      *[]adminNodeHost `json:"hosts"`
-	APIBaseURL *string          `json:"api_base_url"`
-	Status     *string          `json:"status"`
+	Hosts  *[]adminNodeHost `json:"hosts"`
+	Status *string          `json:"status"`
 }
 
 type adminNodeBootstrapPayload struct {
@@ -490,7 +485,7 @@ func adminCreateNodeHandler(store *db.DB) http.HandlerFunc {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		node, err := store.CreateNode(r.Context(), payload.Name, payload.PublicHost, payload.APIBaseURL)
+		node, err := store.CreateNode(r.Context(), payload.Name, payload.PublicHost)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -515,7 +510,7 @@ func adminCreateNodeBootstrapHandler(store *db.DB) http.HandlerFunc {
 		if publicHost == "" {
 			publicHost = strings.TrimSpace(payload.Name)
 		}
-		node, err := store.CreateNode(r.Context(), payload.Name, publicHost, "")
+		node, err := store.CreateNode(r.Context(), payload.Name, publicHost)
 		if err != nil {
 			writeAdminError(w, err)
 			return
@@ -708,7 +703,6 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 			Name:       existing.Name,
 			PublicHost: existing.PublicHost,
 			Hosts:      existing.Hosts,
-			APIBaseURL: existing.APIBaseURL,
 			Status:     existing.Status,
 		}
 		if payload.Name != nil {
@@ -724,9 +718,6 @@ func adminUpdateNodeHandler(store *db.DB) http.HandlerFunc {
 			// Single-host edit: replace the whole list with just this address.
 			params.Hosts = nil
 			params.PublicHost = *payload.PublicHost
-		}
-		if payload.APIBaseURL != nil {
-			params.APIBaseURL = *payload.APIBaseURL
 		}
 		if payload.Status != nil {
 			params.Status = *payload.Status
@@ -1771,7 +1762,6 @@ func adminNodeFromNode(node db.Node) adminNode {
 		ID:             node.ID,
 		Name:           node.Name,
 		PublicHost:     node.PublicHost,
-		APIBaseURL:     node.APIBaseURL,
 		Status:         node.Status,
 		SingBoxVersion: node.SingBoxVersion,
 		LastSeenAt:     nullString(node.LastSeenAt),

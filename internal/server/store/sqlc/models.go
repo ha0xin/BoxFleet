@@ -211,7 +211,6 @@ type Node struct {
 	Name           string         `json:"name"`
 	PublicHost     string         `json:"public_host"`
 	HostsJson      string         `json:"hosts_json"`
-	ApiBaseUrl     string         `json:"api_base_url"`
 	Status         string         `json:"status"`
 	SingBoxVersion string         `json:"sing_box_version"`
 	LastSeenAt     sql.NullString `json:"last_seen_at"`

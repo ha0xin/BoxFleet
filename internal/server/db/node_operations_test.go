@@ -11,7 +11,7 @@ import (
 func TestNodeOperationCreateIsIdempotentAndSerialPerNode(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	params := CreateNodeOperationParams{
@@ -49,7 +49,7 @@ func TestNodeOperationCreateIsIdempotentAndSerialPerNode(t *testing.T) {
 func TestNodeOperationClaimCapabilityLeaseAndResume(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	created, _, err := store.CreateNodeOperation(ctx, CreateNodeOperationParams{
@@ -96,7 +96,7 @@ func TestNodeOperationClaimCapabilityLeaseAndResume(t *testing.T) {
 func TestNodeOperationEventsAreOrderedAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := store.CreateNodeOperation(ctx, CreateNodeOperationParams{
@@ -162,7 +162,7 @@ func TestNodeOperationEventsAreOrderedAndIdempotent(t *testing.T) {
 func TestNodeOperationCancelAndExpiredLeaseReclaim(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	queued, _, err := store.CreateNodeOperation(ctx, CreateNodeOperationParams{
@@ -216,7 +216,7 @@ func TestNodeOperationCancelAndExpiredLeaseReclaim(t *testing.T) {
 func TestQueueCancellationDoesNotCancelClaimedOperation(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	queued, _, err := store.CreateNodeOperation(ctx, CreateNodeOperationParams{NodeName: "edge", Kind: "config.reconcile", Payload: json.RawMessage(`{}`), IdempotencyKey: "queue-race"})

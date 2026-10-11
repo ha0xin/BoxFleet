@@ -9,7 +9,7 @@ import (
 func TestProxyListenerConflictValidation(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	settings := `{"server_name":"www.amazon.com","reality_private_key":"private","reality_public_key":"public","short_id":"","handshake_server":"www.amazon.com","handshake_port":443}`
@@ -56,7 +56,7 @@ func TestRenameProxyAliasesGloballyAndPreservesAccessIdentity(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
 	for _, node := range []string{"edge-a", "edge-b"} {
-		if _, err := store.CreateNode(ctx, node, "192.0.2.1", ""); err != nil {
+		if _, err := store.CreateNode(ctx, node, "192.0.2.1"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +157,7 @@ func TestRenameProxyAliasesGloballyAndPreservesAccessIdentity(t *testing.T) {
 func TestUpdateProxyByNameRenamesAndUpdatesAtomically(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	original, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -202,7 +202,7 @@ func TestUpdateProxyByNameRenamesAndUpdatesAtomically(t *testing.T) {
 func TestRestoreProxyRejectsListenerConflict(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{
@@ -247,7 +247,7 @@ func TestRestoreProxyRejectsListenerConflict(t *testing.T) {
 func TestRestoreProxySucceedsWhenListenerIsFree(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.CreateProxy(ctx, CreateProxyParams{

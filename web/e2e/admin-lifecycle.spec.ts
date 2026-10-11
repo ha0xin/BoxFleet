@@ -264,12 +264,12 @@ test("deletion previews dependencies, handles narrow screens, and rechecks chang
   expect((await page.request.get(`/api/admin/nodes/${node.id}`)).status()).toBe(422);
 });
 
-test("Paths pagination survives refresh and keeps cross-page dialers on narrow screens", async ({ page }) => {
+test("Paths sorting and pagination survive refresh and keep cross-page dialers on narrow screens", async ({ page }) => {
   const paths = Array.from({ length: 11 }, (_, index) => ({
-    id: `path-${index}`, name: `route-${index}`, display_name: `Published ${index}`,
-    endpoint_id: `endpoint-${index}`, proxy_id: `proxy-${index}`, proxy_name: `Proxy ${index}`,
+    id: `path-${index}`, name: `route-${10 - index}`, display_name: `Published ${index}`,
+    endpoint_id: `endpoint-${index}`, proxy_id: `proxy-${index}`, proxy_name: `Proxy ${10 - index}`,
     node_name: "edge", host_id: "host", host: "192.0.2.1", host_tag: "",
-    dialer_path_id: index === 10 ? "path-0" : "", enabled: true,
+    dialer_path_id: index === 10 ? "path-0" : "", enabled: index !== 0,
     visibility: "selectable", managed: true, sort_order: index, created_at: "", updated_at: ""
   }));
   await page.route("**/api/admin/paths", (route) => route.fulfill({ json: paths }));
@@ -292,4 +292,37 @@ test("Paths pagination survives refresh and keeps cross-page dialers on narrow s
   await page.screenshot({ path: "/tmp/boxfleet-paths-pagination-390.png" });
   await page.getByRole("button", { name: "Previous page", exact: true }).click();
   await expect(page.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+
+  // Sort the complete inventory before taking a page, and reset to page one.
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  const publishedHead = page.getByRole("columnheader", { name: "Published name", exact: true });
+  await publishedHead.getByRole("button", { name: "Published name", exact: true }).click();
+  await expect(publishedHead).toHaveAttribute("aria-sort", "ascending");
+  await expect(page).toHaveURL(/sort=display_name/);
+  expect(new URL(page.url()).searchParams.get("page")).toBeNull();
+  const firstRow = page.getByRole("table").getByRole("row").nth(1);
+  await expect(firstRow.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+  await publishedHead.getByRole("button", { name: "Published name", exact: true }).click();
+  await expect(publishedHead).toHaveAttribute("aria-sort", "descending");
+  await expect(firstRow.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+  await expect(firstRow.getByRole("cell", { name: "Published 0", exact: true })).toBeVisible();
+  await page.reload();
+  await expect(publishedHead).toHaveAttribute("aria-sort", "descending");
+  await expect(firstRow.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+
+  await page.getByRole("columnheader", { name: "Endpoint", exact: true }).getByRole("button").click();
+  await expect(firstRow.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+  const dialerHead = page.getByRole("columnheader", { name: "Dialer Path", exact: true });
+  await dialerHead.getByRole("button").click();
+  await expect(firstRow.getByRole("cell", { name: "Direct", exact: true })).toBeVisible();
+  await dialerHead.getByRole("button").click();
+  await expect(firstRow.getByRole("button", { name: "Published 10", exact: true })).toBeVisible();
+  const statusHead = page.getByRole("columnheader", { name: "Status", exact: true });
+  await statusHead.getByRole("button").click();
+  await expect(firstRow.getByRole("cell", { name: "Enabled", exact: true })).toBeVisible();
+  await statusHead.getByRole("button").click();
+  await expect(firstRow.getByRole("button", { name: "Published 0", exact: true })).toBeVisible();
+  await publishedHead.getByRole("button", { name: "Published name", exact: true }).click();
+  await expect(publishedHead).toHaveAttribute("aria-sort", "ascending");
+  await page.screenshot({ path: "test-results/paths-sorted-mobile.png" });
 });

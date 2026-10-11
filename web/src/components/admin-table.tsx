@@ -392,13 +392,16 @@ export function TableEmpty({
 }
 
 /** Error row for failed table queries — visually distinct from the empty state. */
-export function TableError({ children, colSpan }: { children: string; colSpan: number }) {
+export function TableError({ children, colSpan, onRetry, retrying = false }: { children: string; colSpan: number; onRetry?: () => void; retrying?: boolean }) {
   return (
     <Table.Row>
       <Table.Cell colSpan={colSpan}>
-        <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-kumo-danger">
-          <WarningCircleIcon className="size-4 shrink-0" aria-hidden="true" />
-          {children}
+        <div className="flex min-h-32 flex-col items-center justify-center gap-3 px-4 py-6 text-sm">
+          <div className="flex max-w-full items-center gap-2 text-kumo-danger" role="alert">
+            <WarningCircleIcon className="size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 break-words">{children}</span>
+          </div>
+          {onRetry ? <Button size="sm" variant="secondary" loading={retrying} onClick={onRetry}>Try again</Button> : null}
         </div>
       </Table.Cell>
     </Table.Row>

@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
+import { getCoreRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Select, Switch, Table } from "@cloudflare/kumo";
 import { CheckCircleIcon, PencilSimpleIcon, PlusIcon, ProhibitIcon, TrashIcon } from "@phosphor-icons/react";
 
@@ -13,7 +14,7 @@ import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { AppPageHeader } from "@/components/app-page-header";
 import { RowActionsMenu } from "@/components/row-actions-menu";
 import { StatusBadge } from "@/components/status-badge";
-import { AdminPagination, TableCard, TableColgroup, TableEmpty, TableError, TableLoading, tableMinWidth } from "@/components/admin-table";
+import { AdminPagination, SortHead, TableCard, TableColgroup, TableEmpty, TableError, TableLoading, tableMinWidth } from "@/components/admin-table";
 import type { TableColumnWidth } from "@/components/admin-table";
 import type { AdminNode, AdminPath, AdminProxiesResponse } from "../types";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
@@ -25,7 +26,16 @@ const VISIBILITY_LABELS: Record<AdminPath["visibility"], string> = {
   dependency: "Dependency only"
 };
 
-const pathUrlFilters = { schema: z.object({}), defaults: {} };
+const pathFilterSchema = z.object({
+  sort: z.enum(["sort_order", "display_name", "endpoint", "dialer_path", "enabled"]),
+  direction: z.enum(["asc", "desc"])
+});
+type PathSort = z.infer<typeof pathFilterSchema>["sort"];
+const defaultPathFilters: z.infer<typeof pathFilterSchema> = { sort: "sort_order", direction: "asc" };
+const pathUrlFilters = {
+  schema: pathFilterSchema,
+  defaults: defaultPathFilters
+};
 
 /**
  * Column widths, in table order. Published name, endpoint and dialer are all
@@ -64,11 +74,46 @@ export function PathsPage() {
       body: JSON.stringify({ enabled: !path.enabled })
     })
   );
-  const paths = pathsQuery.data ?? [];
-  const { page, perPage, setPage, setPerPage } = useUrlFilters(pathUrlFilters);
+  const paths = useMemo(() => pathsQuery.data ?? [], [pathsQuery.data]);
+  const pathsByID = useMemo(() => new Map(paths.map((path) => [path.id, path])), [paths]);
+  const { filters, page, perPage, setFilters, setPage, setPerPage } = useUrlFilters(pathUrlFilters);
   const lastPage = Math.max(1, Math.ceil(paths.length / perPage));
   const currentPage = Math.min(page, lastPage);
-  const visiblePaths = paths.slice((currentPage - 1) * perPage, currentPage * perPage);
+  const columns = useMemo<ColumnDef<AdminPath>[]>(() => [
+    { id: "sort_order", accessorKey: "sort_order", sortingFn: "basic" },
+    { id: "display_name", accessorFn: pathLabel, sortingFn: "alphanumeric" },
+    { id: "endpoint", accessorFn: pathEndpoint, sortingFn: "alphanumeric" },
+    {
+      id: "dialer_path",
+      accessorFn: (path) => {
+        const dialer = pathsByID.get(path.dialer_path_id);
+        return dialer ? pathLabel(dialer) : "Direct";
+      },
+      sortingFn: "alphanumeric"
+    },
+    { id: "enabled", accessorKey: "enabled", sortingFn: "basic" }
+  ], [pathsByID]);
+  const table = useReactTable({
+    data: paths,
+    columns,
+    getRowId: (path) => path.id,
+    state: {
+      sorting: [{ id: filters.sort, desc: filters.direction === "desc" }],
+      pagination: { pageIndex: currentPage - 1, pageSize: perPage }
+    },
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    autoResetPageIndex: false
+  });
+  const visiblePaths = table.getRowModel().rows.map((row) => row.original);
+  function setSort(column: PathSort) {
+    setFilters((current) =>
+      current.sort === column
+        ? { direction: current.direction === "asc" ? "desc" : "asc" }
+        : { sort: column, direction: column === "enabled" ? "desc" : "asc" }
+    );
+  }
   useEffect(() => {
     if (pathsQuery.isSuccess && page > lastPage) setPage(lastPage, "replace");
   }, [pathsQuery.isSuccess, page, lastPage, setPage]);
@@ -95,10 +140,10 @@ export function PathsPage() {
                 <TableColgroup widths={pathColumns} />
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <Table.Head>Published name</Table.Head>
-                    <Table.Head>Endpoint</Table.Head>
-                    <Table.Head>Dialer Path</Table.Head>
-                    <Table.Head>Status</Table.Head>
+                    <SortHead label="Published name" column="display_name" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Endpoint" column="endpoint" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Dialer Path" column="dialer_path" sort={filters.sort} direction={filters.direction} setSort={setSort} />
+                    <SortHead label="Status" column="enabled" sort={filters.sort} direction={filters.direction} setSort={setSort} />
                     <Table.Head className="text-right">
                       <span className="sr-only">Actions</span>
                     </Table.Head>
@@ -117,7 +162,7 @@ export function PathsPage() {
                     </TableEmpty>
                   ) : (
                     visiblePaths.map((path) => {
-                      const dialer = paths.find((candidate) => candidate.id === path.dialer_path_id);
+                      const dialer = pathsByID.get(path.dialer_path_id);
                       return (
                         <Table.Row key={path.id}>
                           <Table.Cell>

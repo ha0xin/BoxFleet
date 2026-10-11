@@ -266,7 +266,7 @@ func seedPreflightFixture(ctx context.Context, store *db.DB, host string) error 
 			return err
 		}
 	}
-	if _, err := store.CreateNode(ctx, preflightVLESSNode, host, ""); err != nil {
+	if _, err := store.CreateNode(ctx, preflightVLESSNode, host); err != nil {
 		return err
 	}
 	settings, err := json.Marshal(map[string]any{
@@ -292,7 +292,7 @@ func seedPreflightFixture(ctx context.Context, store *db.DB, host string) error 
 	}); err != nil {
 		return err
 	}
-	if _, err := store.CreateNode(ctx, preflightSSNode, host, ""); err != nil {
+	if _, err := store.CreateNode(ctx, preflightSSNode, host); err != nil {
 		return err
 	}
 	if _, err := store.CreateProxy(ctx, db.CreateProxyParams{

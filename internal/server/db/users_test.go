@@ -269,7 +269,7 @@ func TestListUsersPageCountsLivePathAccessesOnly(t *testing.T) {
 	if _, err := store.CreateProxyUser(ctx, CreateProxyUserParams{Name: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateNode(ctx, "edge", "198.51.100.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "edge", "198.51.100.10"); err != nil {
 		t.Fatal(err)
 	}
 	proxy, err := store.CreateProxy(ctx, CreateProxyParams{

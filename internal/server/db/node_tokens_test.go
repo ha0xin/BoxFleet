@@ -9,7 +9,7 @@ import (
 func TestIssueAndVerifyNodeToken(t *testing.T) {
 	ctx := context.Background()
 	store := openTestDB(t)
-	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10", ""); err != nil {
+	if _, err := store.CreateNode(ctx, "azus", "203.0.113.10"); err != nil {
 		t.Fatal(err)
 	}
 	issued, err := store.IssueNodeToken(ctx, "azus")
