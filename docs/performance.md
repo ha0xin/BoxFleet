@@ -1,9 +1,9 @@
 # Performance SLO
 
 BoxFleet's production admin experience has a measurable performance target.
-The target workload is three times the production telemetry volume observed on
-2026-07-22, while agents continue reporting and two administrators use the Web
-UI concurrently.
+Benchmark with representative telemetry volume, ongoing agent reports and two
+concurrent administrators. The dated workload below is a historical reference;
+record the actual source mix, session update rate and cardinalities for each run.
 
 ## Release target
 
@@ -17,7 +17,7 @@ UI concurrently.
 No database operation may cause more than two seconds of head-of-line blocking
 for an otherwise independent admin read.
 
-The reference three-times workload is approximately 1.9 million traffic
+The historical three-times workload, derived from a 2026-07-22 sample, was approximately 1.9 million traffic
 deltas, 610 thousand traffic reports, 2.6 million structured network events,
 and 1.4 million heartbeats. Cardinalities such as nodes, users, proxies, and
 access grants are also multiplied by three. Normal agent writes remain enabled
@@ -46,13 +46,13 @@ requested time window, rather than total telemetry history:
 - Node and publish status read `node_latest_heartbeats`; each heartbeat replaces
   the prior row and advances the per-node pointer transactionally, so steady
   state retains only one heartbeat row per node.
-- The first Network Events page filters by its visible time window and uses the
-  partial visible-event index.
+- The first Network Events page uses bounded event-time reads of the unified
+  source view.
 - Network Events action, node, user, and combined node/user filters use partial
   composite indexes whose time-window columns follow the selected dimension.
-- Network Events free-text search uses an FTS3 document index maintained by
-  database triggers; it never evaluates `LOWER(...) LIKE '%term%'` across the
-  full event table.
+- Journal free-text search uses an FTS3 document index maintained by triggers.
+  Stream search uses text predicates within bounded source/time reads. Measure
+  both paths; a journal benchmark does not establish stream-search performance.
 - SQLite uses WAL and a small connection pool so one report or slow read does
   not serialize unrelated reads.
 - The application shell does not wait for Overview data, route pages are split
@@ -62,10 +62,10 @@ requested time window, rather than total telemetry history:
 Absolute latency still has to be measured on the release host because CPU,
 storage, database size, and network conditions materially affect it.
 
-## Deferred bottleneck: Network Events prefix search
+## Historical diagnostic: journal prefix search
 
-The production FTS3 index removes the former full-table `LIKE` scan, but prefix
-queries are not yet within the heavy-read SLO on the current two-core host. A
+The journal FTS3 index removed a former full-table `LIKE` scan. Prefix queries
+missed the heavy-read SLO on the two-core host used for this measurement. A
 2026-07-22 diagnostic run against roughly 881 thousand visible events measured
 the following for a real destination search:
 
@@ -73,15 +73,16 @@ the following for a real destination search:
 - all history: P50 518 ms, P95 2.21 s, maximum 2.53 s (20 requests)
 
 Query decomposition showed that FTS3 `MATCH` itself took about 1.5 seconds even
-when only seven rows matched. The cause is that every search token is currently
+when only seven rows matched. At the time, every search token was
 compiled as a prefix token and the virtual table has no dedicated prefix index;
 the normal time-window and ordering indexes are not the limiting path.
 
-Further index expansion is intentionally deferred. The proposed follow-up is an
-FTS4 prefix index (a three-character prefix index is the first candidate), plus
-a minimum useful prefix length for one- and two-character searches. Treat the
-free-text Search field as a known exception to the 500 ms heavy-read target
-until that work is approved and measured with the full 100-request protocol.
+The diagnostic proposed an
+FTS4 prefix index (starting with three-character prefixes), plus
+a minimum useful prefix length for one- and two-character searches.
+These historical results do not describe current deployment latency or exempt
+new releases from the target. Re-measure the current unified search with the full
+100-request protocol before selecting an indexing change.
 
 ## Baseline that triggered this target
 

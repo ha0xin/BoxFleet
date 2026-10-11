@@ -8,9 +8,9 @@ Two build tags are required and CI verifies both:
 
 - `with_v2ray_api` — without it the agent cannot read per-user traffic counters.
 - `with_clash_api` — connection tracking lives in the Clash API server, so this
-  tag is the prerequisite for any future connection-telemetry migration. It is
-  compiled in but **inert**: rendered configs carry only an `experimental.v2ray_api`
-  block, never `experimental.clash_api`, so no Clash listener runs on a node.
+  tag also supports tracking used by the optional daemon connection stream.
+  Rendered configs never enable `experimental.clash_api`, so no Clash HTTP
+  listener runs on a node. The optional daemon API has its own loopback service.
   Do not enable it in the renderer without reading
   [ADR 0001](../../docs/adr/0001-network-event-telemetry-source.md) — it costs a
   stop-the-world `runtime.ReadMemStats()` per request and up to 1000 retained
@@ -27,7 +27,7 @@ Verify a candidate with:
 ```bash
 sing-box version | grep with_v2ray_api
 sing-box version | grep with_clash_api
-sing-box check -c <generated-config.json>
+sing-box check -c generated-config.json
 ```
 
 Network events are scraped from sing-box's journal text, so a revision bump can

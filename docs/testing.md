@@ -45,7 +45,7 @@ projection helpers, not by jsdom renders.
 
 ## Pinned invariants
 
-Three families of test exist to catch silent regressions rather than to describe
+The following test families exist to catch silent regressions rather than to describe
 behavior. Treat a failure as a real signal before adjusting the assertion.
 
 - **Log-parser golden fixtures.** `internal/server/db/log_events_parse_test.go`
@@ -83,22 +83,20 @@ behavior. Treat a failure as a real signal before adjusting the assertion.
 
 - **Upstream proto conformance.** `internal/singboxapi/daemonpb` diffs the
   vendored descriptor against
-  `testdata/upstream-v1.14.2.descriptorset.binpb`, a committed copy of the
+  the upstream descriptor fixture in `daemonpb/testdata/`, a committed copy of the
   real compiled upstream descriptor. See
   [connection telemetry](#connection-telemetry).
 
 - **Default node config shape.** `TestRenderNodeConfigDefaultShapeIsUnchanged`
   and `TestRenderNodeConfigOptOutRestoresDefaultBytes` assert that a node without
-  connection telemetry renders byte-identically to the pre-1.14 output, and that
-  opting out restores those exact bytes. The 1.14 `services` block does not parse
-  on the 1.13 the fleet runs, so a leak into the default path would break every
-  node.
+  connection telemetry omits the optional service, and opting out restores the
+  default bytes. Unsupported installed binaries must remain safe on this path.
 
 ## Connection telemetry
 
-Every test in this feature runs in-process. **No test starts a real `sing-box`,
-and none needs a 1.14 binary** — which is the point, since the pinned build is
-1.13 and cannot serve the stream at all.
+Unit tests in this feature run in-process against fake daemons and committed
+protocol fixtures. They need no real sing-box binary. Real-binary compatibility
+and service checks belong to deployment validation.
 
 - **Fake gRPC daemon.** `internal/singboxapi/client_test.go` and
   `internal/agent/connections_test.go` each stand up a real gRPC server on
@@ -135,7 +133,7 @@ and none needs a 1.14 binary** — which is the point, since the pinned build is
   compromised node token could send — negative and near-`int64`-max measures,
   over-length hosts, out-of-range ports, unparseable bucket times, replayed
   sequences. Buckets are clamped or dropped, never stored half-formed, and a
-  replay is skipped whole. Bytes are summed on ingest, so a partially applied
+  replay is skipped whole. Legacy bucket bytes are summed on ingest, so a partially applied
   replay is unrecoverable; that is what the report-level idempotency guard is
   for.
 

@@ -73,7 +73,7 @@ The agent maps these names back to ProxyCredentials.
 
 ## Connection telemetry service (optional)
 
-A node with an enabled `node_connection_telemetry` row also gets sing-box 1.14's
+A node with an enabled `node_connection_telemetry` row also gets sing-box's
 `services` block:
 
 ```json
@@ -88,12 +88,10 @@ A node with an enabled `node_connection_telemetry` row also gets sing-box 1.14's
 ]
 ```
 
-**No node has this by default, and it must stay that way.** The fleet runs
-sing-box 1.13, whose parser rejects the key outright
-(`services[0]: unknown inbound type: api`), so a node that has not opted in must
-render byte-identically to the pre-1.14 output. The field is `omitempty` and two
-renderer tests pin the invariant in both directions — the default shape, and the
-bytes after an opt-out.
+**This service is off by default.** Only an enabled telemetry row adds the
+block. Unsupported sing-box builds may reject it, so qualify the installed
+binary before enabling a node. The field is `omitempty`; renderer tests ensure
+that the default config omits it and opting out restores the default bytes.
 
 `RenderDisabledConfig` and the no-accesses config never carry the block: a node
 serving nothing has no connections to report.

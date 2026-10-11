@@ -3,7 +3,7 @@
 BoxFleet is a lightweight control plane for multiple `sing-box` nodes. The
 central server owns SQLite state, renders configuration, serves the admin UI,
 and receives telemetry. Edge nodes run only `boxfleet-agent`, `sing-box`, and
-systemd.
+systemd or OpenRC.
 
 The supported proxy paths are VLESS-Reality over TCP with `xtls-rprx-vision` and
 Shadowsocks 2022. Nodes pull versioned configuration and report heartbeats,
@@ -71,11 +71,9 @@ development and production operations.
 - [Configuration rendering](docs/config-generation.md)
 - [Node operations](docs/node-operations.md)
 - [Component compatibility](docs/component-compatibility.md) — server, agent,
-  and sing-box release/upgrade rules and the current compatibility matrix
-- [Connection telemetry](docs/connection-telemetry.md) — the opt-in sing-box 1.14
+  and sing-box release/upgrade rules and validation requirements
+- [Connection telemetry](docs/connection-telemetry.md) — the opt-in sing-box
   stream, off by default
-- [sing-box preflight](docs/singbox-preflight.md) — the gate `SING_BOX_REVISION`
-  passes before it moves
 - [Mihomo subscriptions](docs/mihomo-subscriptions.md)
 - [Web UI](docs/web-ui.md)
 - [Testing](docs/testing.md)

@@ -45,7 +45,7 @@ Use Kumo's component documentation instead of guessing APIs:
 ```bash
 cd web
 npx kumo ai
-npx kumo docs <Component>
+npx kumo docs Button # Replace Button with the component being inspected.
 npx kumo ls
 ```
 
@@ -86,12 +86,9 @@ width control a dialog gets. The border-box totals are `sm` 288px, `base` 384px,
 640px the size variant drops out entirely and every dialog is `width: 100%`
 clamped to `calc(100vw - 2rem)`, so a phone renders all four sizes identically.
 
-Kumo 2.5.x behaved differently — the popup was `sm:w-auto` with the size prop
-supplying only a `min-width` floor, so a dialog was actually sized by its widest
-unwrappable content and the prop was close to decorative. Do not carry over
-layout intuitions from that era, and never restore the old behaviour with a
-`min-w-*` on the popup: that is the page-widening pattern documented below,
-moved inside a dialog.
+Do not add minimum widths that force the popup beyond its viewport bounds.
+Inspect the installed component's styles after dependency upgrades and measure
+both desktop and mobile dialogs.
 
 Pick the size from the widest row the form actually contains, and verify by
 measuring rather than by eye — no descendant may have `scrollWidth >
@@ -203,21 +200,11 @@ they omit the resizing example; verify the actual component source/API.
 
 ## Charts
 
-**The CLI catalog is incomplete, and how incomplete changes between releases.**
-Through 2.5.x it covered 42 components and omitted charts entirely; `npx kumo
-docs Chart` reported "Component not found". As of 2.8.0 it lists 48 and the
-catalog has caught up on the chart *components* — `Chart`, `TimeseriesChart`,
-`SankeyChart`, `BubbleMap`, and `ChoroplethMap` are all listed, and `npx kumo
-docs TimeseriesChart` returns full props and examples. It has **not** caught up
-on `ChartLegend` or `ChartPalette`, both of which this app uses and both of
-which still report "Component not found".
-
-So the rule stands, just for a smaller surface: never conclude from the CLI that
-an export does not exist. `node_modules/@cloudflare/kumo/dist/src/components/chart/*.d.ts`
-is the authority for the installed version. `refs/kumo/` is a checkout pinned to
-an older release and goes stale the moment Kumo is upgraded — cross-read it for
-behaviour only after confirming the version matches, never for API shape. Re-run
-`npx kumo ls` after each upgrade and correct this paragraph.
+The CLI catalog may omit exports. Use `npx kumo ls` and component docs first;
+when chart helpers are missing, inspect
+`node_modules/@cloudflare/kumo/dist/src/components/chart/*.d.ts` for the installed
+API. Optional `refs/kumo/` checkouts are reference material only: verify their
+revision matches the installed dependency before relying on them.
 
 `echarts` is Kumo's own declared **optional** peer dependency, so using it is
 policy-compliant. Kumo's chart components take the core instance as a prop
@@ -254,21 +241,13 @@ cannot read CSS variables anyway. Per-action breakdowns stay as `StatusBadge`
 plus a count — a dot, a label, and a number — rather than a stacked-by-action
 bar chart.
 
-### An accepted contrast deviation on Button
+### Contrast checks
 
-Kumo 2.6.0 gave the `primary` and `destructive` Button variants token-derived
-gradient fills. Measured white-on-fill contrast in light mode fell below WCAG AA
-as a result — primary 4.53:1 → 3.63:1, destructive 3.81:1 → 3.13:1. Dark mode
-improved. This is upstream styling, it was reviewed, and it is **accepted as-is**:
-do not override the variant tokens locally to "fix" it. Overriding would fork the
-button treatment away from Kumo for every future release, to chase a value
-upstream owns. Re-measure after each Kumo bump and revisit only if it regresses
-further or upstream ships a correction.
-
-Note that this is the button *fill*, not `text-kumo-danger`, which is a separate
-token (`--text-color-kumo-danger`) and measures 6.64:1 on `bg-kumo-base` in dark
-mode. The two are easy to conflate — a pre-upgrade review did exactly that and
-raised a false alarm about the publish strip being unreadable.
+Use Kumo semantic tokens and native component variants. Measure text, badges,
+buttons and chart marks in both themes after dependency upgrades. Test the actual
+foreground/background pair; button fills and danger text use different tokens.
+Document current findings with the tested dependency and computed styles rather
+than treating historical measurements as a permanent exception.
 
 **The server owns bucketing, zero-fill, and ordering.** Series points arrive
 contiguous and oldest-first; render them verbatim. Never bucket, fill, or sort
@@ -277,12 +256,12 @@ whenever the operator paged.
 
 ## Page contracts
 
-- Nodes owns enrollment, pause/resume, decommission/re-enroll, config and managed
+- Nodes owns enrollment, pause/resume, delete/fresh enrollment, config and managed
   component updates.
 - Proxies owns listener/protocol inventory; transport is server-derived and
   read-only.
-- Users owns identity, quota, access grants, connection details and legacy user
-  subscriptions.
+- Users owns identity, quota, access grants, connection details.
+  Subscription generation belongs to Mihomo Profiles.
 - Mihomo Profiles owns complete configuration pipelines, live templates,
   preview, and configuration-scoped subscriptions.
 - Network Events is the reference server-paginated, URL-synchronised table and

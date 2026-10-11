@@ -1,18 +1,18 @@
 # ADR 0001 — Network event telemetry source
 
-- Status: **accepted and current for the fleet default**; amended 2026-07-26 (see
+- Status: **accepted; historical evaluation**; amended 2026-07-26 (see
   "Amendment"); extended by
   [ADR 0002](0002-opt-in-connection-telemetry.md) (2026-07-27)
 - Date: 2026-07-26
 - Applies to: `internal/server/db/log_events.go`, `internal/v2raystats`,
   `internal/agent`, `internal/server/render`
 
-> **Read this with [ADR 0002](0002-opt-in-connection-telemetry.md).** A third
-> telemetry source — the 1.14 daemon gRPC connection stream described under
-> "Trigger for revisiting" below — now exists in the tree as an **opt-in per
-> node, off by default** path. Everything this ADR decides about the *default*
-> path is still in force, and the trigger for actually switching the fleet is
-> unchanged. No node is opted in.
+> This is a historical evaluation, including the upstream revisions evaluated
+> at the time. Connection streaming and unified Logs were implemented later.
+> For current operation and data contracts, see
+> [connection telemetry](../connection-telemetry.md) and
+> [database invariants](../db-schema.md). Deployment state and release targets
+> must not be inferred from this record.
 
 ## Decision
 
@@ -131,10 +131,9 @@ the Amendment; the resulting per-host byte view is a best-effort estimate, not
 a ledger.
 
 **Original trigger, restated after the amendment below:** the `v1.14.0`
-**stable** tag is published and a build passes the off-fleet checks. On
+**stable** tag is published. On
 2026-07-28 the operator explicitly accepted the prerelease risk and selected
-`v1.14.0-beta.2`. This is a narrow exception, not a weakening of the default
-policy: the full preflight remains mandatory and rollout is canary-first.
+`v1.14.0-beta.2`. This paragraph records the historical selection, not the current component pin.
 
 This section originally predicted that the migration would be a producer swap
 into the existing `model.LogEventInput` shape, deleting `parseSingBoxLogEvent`.
@@ -167,10 +166,9 @@ scraper, which is deleted at no point.
 - **Bytes cannot be attributed to a destination host on these two sources.**
   `traffic_usage_deltas` has no host column and `log_events` has no byte columns.
   The service audit view is a connections-per-service view and must never be
-  labelled traffic or bytes. This remains true of every node in the fleet. It is
-  a property of the two sources in use, not a permanent law: the 1.14 stream
-  answers it, for opted-in nodes only, in a separate table
-  (`connection_events`) that the service audit does not read.
+  labelled traffic or bytes. This limitation applies to those two sources. The daemon stream later added
+  lifetime byte estimates in `connection_events`; unified service activity still
+  measures connection counts.
 
 ## Amendment (2026-07-26)
 
@@ -231,33 +229,11 @@ Two gotchas for whoever implements it:
 - **Fields 14/15 (`uplink`/`downlink`) are never populated server-side.** Build
   nothing on them.
 
-### Release status
+### Release status at evaluation
 
-Latest stable is **v1.13.14** (2026-06-25). Latest tag is **v1.14.0-beta.2**
-(2026-07-25); the beta line is days old on top of large features landed in
-alpha.48-50. Config-compat risk for BoxFleet is genuinely low — 1.14's breaking
-surface is DNS, ACME and rule-sets, and BoxFleet emits no `dns` block — but the
-payoff is unreachable by pinning alone: it also needs a renderer `services`
-block, per-node secrets, a node-side aggregator, an ingest path and schema work.
-Carrying beta risk across remote edge nodes buys nothing until that lands.
-
-### Off-fleet checks required before the pin moves past 1.13
-
-Build the candidate at BoxFleet's `SING_BOX_TAGS` on a throwaway host and assert:
-
-1. `with_v2ray_api` and `with_clash_api` still appear in `sing-box version` —
-   `go build -tags` silently ignores unknown tags, so a rename is a silent
-   feature loss (CI already greps for this; replicate it against the candidate).
-2. `sing-box check -c` passes against the renderer's golden configs.
-3. Real traffic replayed through
-   `go test ./internal/server/db -run TestParseSingBoxLogEventGoldenFixtures`.
-   This is the highest-probability breakage and the one no gate catches — the
-   agent's health check asserts systemd `ActiveState` only, so a sing-box that
-   starts cleanly but changed its log wording sends the audit view silently to
-   zero. A golden diff here is a real regression: investigate, do not regenerate.
-4. `user>>>NAME>>>traffic>>>{uplink,downlink}` still increments.
-5. The opted-in rendered config parses, and BoxFleet's authenticated client
-   receives a `SubscribeConnections` event after the initial reset.
+The revision names in this amendment identify evaluated source code, not the
+latest upstream release or the current BoxFleet pin. Current component targets
+are recorded in the artifact workflow and each release manifest.
 
 ### Outcome
 

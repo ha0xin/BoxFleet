@@ -11,7 +11,7 @@
 | WSS 传输 | [coder/websocket](https://github.com/coder/websocket)，`dial.go`、`accept.go`、`read.go`、`conn.go`，ISC | 首选候选，直接依赖；使用 context、读限制、Ping、关闭握手 | 不提供自动持久化、业务 ACK 或跨重连重放；必须持续读取以处理控制帧 |
 | 追加日志存储 | [tidwall/wal](https://github.com/tidwall/wal)，`wal.go`、`wal_test.go`，MIT | Go 库候选；复用有序索引、批量写入、读取和截断 | WAL 不是完整发送队列；容量、ACK 水位、损坏策略和并发发送仍需适配 |
 | 文件 FIFO | [nsqio/go-diskqueue](https://github.com/nsqio/go-diskqueue)，`diskqueue.go`、测试，MIT | Go 库候选；单消费者先 Peek，再发送，业务 ACK 后消费 | `ReadChan` 会推进消费；Put 成功不等价于其后异步 fsync 成功，需审计同步错误与断电行为 |
-| 有界重试 | [sethvargo/go-retry](https://github.com/sethvargo/go-retry)，仓库已有 v0.4.0 | 直接复用已有指数退避、上限、full jitter 和 context 取消 | 重试策略不能把磁盘满或永久鉴权错误变成无限静默循环 |
+| 有界重试 | [sethvargo/go-retry](https://github.com/sethvargo/go-retry)，仓库已有依赖，版本以 go.mod 为准 | 直接复用已有指数退避、上限、full jitter 和 context 取消 | 重试策略不能把磁盘满或永久鉴权错误变成无限静默循环 |
 | 原子状态文件 | 现有 `google/renameio/v2` | 继续用于小型状态/ACK 检查点，不自行写临时文件替换逻辑 | 检查点与队列的提交顺序需故障验证；不能覆盖尚未确认报告 |
 | ClickHouse 客户端 | [clickhouse-go/v2](https://github.com/ClickHouse/clickhouse-go)，Apache-2.0 | 中央服务器直接复用连接池与批量写入 | 不自动解决累计快照归并或业务去重；本次只查文档，未获取或试用其代码 |
 

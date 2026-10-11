@@ -99,7 +99,7 @@ The final byte count must exactly match the release asset metadata.
 Versioned binaries live below `/opt/boxfleet/releases`. Stable executable
 paths are symbolic links switched atomically with
 `github.com/google/renameio/v2`. This retains the previous immutable target for
-rollback and never exposes a partial executable at the systemd `ExecStart`
+rollback and never exposes a partial executable at the service-manager executable
 path.
 
 Version ordering uses `golang.org/x/mod/semver`. Context-aware retry and jitter
@@ -108,7 +108,7 @@ dependency.
 
 Generic GitHub self-update packages are intentionally not used: they select a
 release and replace the current executable themselves, while BoxFleet needs a
-server-selected asset, versioned installation, systemd restart guard, durable
+server-selected asset, versioned installation, service-manager restart guard, durable
 operation resume, and a combined agent/sing-box transaction.
 
 ## Rollback
@@ -117,10 +117,10 @@ sing-box rollback is owned by the still-running agent. It restores the previous
 link and service state when candidate validation, restart, or health checks
 fail.
 
-Agent rollback is owned by a separate systemd update guard launched from the
-last confirmed version using `ExecStartPre`. Three failed candidate starts (or
+Agent rollback is owned by a separate update guard launched from the last
+confirmed version using systemd `ExecStartPre` or OpenRC `start_pre`. Three failed candidate starts (or
 a passed guard deadline on a subsequent start) restore the previous link before
-systemd launches the service again. The new agent promotes itself to the stable
+the service manager launches the service again. The new agent promotes itself to the stable
 guard only after its initial config/heartbeat cycle succeeds.
 
 ## Bulk Rollout
@@ -128,7 +128,9 @@ guard only after its initial config/heartbeat cycle succeeds.
 An update campaign owns child operations. It releases one online canary first,
 then at most two nodes per batch. A failed or rolled-back child pauses the
 campaign before later children become claimable. Pending, deleted, revoked, or
-incapable nodes are excluded; offline eligible nodes remain queued. An operator
+incapable nodes are excluded; offline eligible nodes initially remain queued. Unclaimed campaign updates
+time out after ten minutes and are cancelled and skipped so later batches can
+proceed. An operator
 can retry only the failed members of the current batch; every retry points back
 to the failed operation through `retry_of`. Cancelling a campaign requests safe
 cancellation for released children and never releases later batches.
@@ -177,7 +179,7 @@ assignment lease, exact event outbox, and committed installation phases. An
 event is saved before it is sent, so an ambiguous HTTP response is retried with
 the same attempt/sequence rather than duplicated.
 
-Agent updates return control to systemd after switching the versioned symlink.
+Agent updates return control to the service manager after switching the versioned symlink.
 The restarted process resumes the same server operation and local checkpoint.
 sing-box updates remain in the old agent process until the new service state is
 verified or the previous symlink has been restored.

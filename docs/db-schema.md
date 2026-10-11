@@ -63,7 +63,7 @@ nodes ──< node_operations ──< node_operation_events
 decommissioned node both have status `disabled`; active token presence
 distinguishes them.
 
-Proxy names are globally unique. Server inbounds support `vless_reality` and
+Proxy names are unique among undeleted proxies. Server inbounds support `vless_reality` and
 `shadowsocks_2022`. Technical credentials and stable `auth_name` values remain
 stored in the compatibility-named `proxy_accesses` table, but the domain model
 calls them `ProxyCredential`. They do not authorize publication.
@@ -120,10 +120,10 @@ scheduler on the server; network-event retention is piggy-backed inline on
 Every bucketed read derives its keys in one place, `series_common.go`, and both
 the SQL expression and the Go walk are pinned against each other by test.
 
-- Bucket on `window_start` / `window_end` (events) or `observed_at` (traffic).
-  Never on `created_at`: the log-event upsert bumps `created_at` to `now` on
-  every merge, so it is last-touched, not first-seen, and bucketing on it
-  silently shifts events into later buckets.
+- Unified network events filter and bucket on stable `event_time` with
+  `[start, end)` bounds: session creation time or legacy first observation.
+  Traffic uses `observed_at`. Never bucket on mutable `created_at` or a session's
+  last observation (`window_end`).
 - Hour buckets are UTC (`substr(col,1,13) || ':00:00Z'`).
 - Day buckets honour an `offset_minutes` parameter and resolve to the UTC
   instant of local midnight. Valid range is `-720`..`840` — real UTC offsets run
@@ -140,10 +140,10 @@ the SQL expression and the Go walk are pinned against each other by test.
 via sing-box timestamps and are unclamped; only `created_at` is server
 authoritative. A skewed node lands in the wrong bucket and nothing corrects it.
 
-Retention also skews the oldest buckets: pruning is on `window_end` while reads
-filter on both `window_end >= start` and `window_start <= end`, so a long-lived
-connection whose `window_start` predates the cutoff survives. Buckets near the
-retention boundary are partially populated and not reproducible afterwards.
+Retention and event-time selection have different purposes. An active session
+may survive because its last observation is recent while its start predates the
+selected window. Pruning makes older results incomplete; it does not move a
+session into a newer connection-start bucket.
 
 Soft-deleted users are handled **asymmetrically, deliberately**: traffic series
 exclude them, matching the existing traffic summaries; network-event series
@@ -173,58 +173,42 @@ aggregation must `GROUP BY lower(target_host)`.
 traffic-only and **bytes are never attributable to a destination host on this
 table**. The service audit is a connections-per-service view and must never be
 labelled bytes. `connection_events` answers that question for opted-in nodes
-only; it is a separate table and the service audit does not read it.
+only; the unified service audit reads connection counts from both sources, not their
+bytes.
 
 ## Connection telemetry
 
-Three tables added by `migrations/026_connection_telemetry.sql`, all inert until
-a node opts in. Operation and rationale are in
-[connection telemetry](connection-telemetry.md).
+The schema separates activation, report deduplication, source selection and
+connection data. See [connection telemetry](connection-telemetry.md).
 
-- `node_connection_telemetry` — the per-node opt-in, keyed by `node_id` with
-  `ON DELETE CASCADE`. **A missing row is the disabled state**, which is why the
-  fleet default is off structurally. `CHECK (length(secret) >= 32)` is
-  load-bearing, not cosmetic: sing-box's daemon `authenticate()` returns nil for
-  an empty secret, so an empty secret disables authentication on an endpoint that
-  also exposes `StopService` and `CloseAllConnections`. Deliberately a sidecar
-  table rather than columns on `nodes`, which is the hottest table in the schema.
-- `connection_reports` — one row per agent report window.
-  `UNIQUE (node_id, agent_boot_id, sequence)` mirrors `traffic_reports` and is
-  the entire idempotency mechanism. It matters more here than for traffic:
-  `UpsertConnectionEvent` *adds* into an existing row, so a partially applied
-  replay would inflate byte totals with no way to detect it afterwards. A
-  collision skips the whole batch before any bucket is applied. The eight
-  coverage counters live here.
-- `connection_events` — the aggregate rows, unique on `aggregate_key`
-  = `sha256(node_id || NUL || bucket.DimensionKey())`. The key is computed
-  server-side; a node-supplied key could collide onto another node's row.
+- `node_connection_telemetry` stores the per-node activation and loopback daemon
+  endpoint. A missing row disables the feature. Its secret must be at least 32
+  characters because the upstream daemon bypasses authentication for an empty
+  secret. Soft-deleting a node preserves historical telemetry; it is distinct
+  from a physical foreign-key cascade.
+- `connection_reports` deduplicates reports by
+  `(node_id, agent_boot_id, sequence)` and stores coverage counters. The report
+  and all its events are committed atomically; replay skips the whole batch.
+- `connection_events` stores individual sessions and legacy aggregates.
+  Session identity includes authenticated node ID, connection ID and creation
+  time. Cumulative bytes merge by maximum; legacy bucket deltas merge additively.
+  Keys are derived server-side to prevent cross-node collisions.
+- `network_event_source_intervals` tracks primary-source changes.
+  `network_event_records` is the unified read view used by Logs and count
+  analytics, avoiding overlap between journal and stream records.
 
-Schema choices that differ from `log_events`, each deliberate:
+Times used in text comparisons are normalized to fixed-width millisecond UTC
+strings. Stream hosts and domains are lowercased on ingest. Unattributed stream
+rows remain stored with a NULL user ID; journal ingest drops unattributed rows.
 
-- **`bucket_start` is a single sargable time axis.** Reads filter one column
-  instead of the `window_end >= ? AND window_start <= ?` straddle; the observed
-  extremes are kept in `window_start`/`window_end` and folded with `MIN()`/`MAX()`
-  on merge.
-- **Timestamps are fixed-width** (`model.ConnectionInstantLayout`,
-  millisecond precision). Those `MIN()`/`MAX()` folds compare TEXT, and
-  RFC3339Nano trims trailing zeros — `"…:11.482Z" < "…:11Z"`, so the later
-  instant would win a `MIN()`.
-- **Lowercasing is a CHECK constraint**, on both `target_host` and `domain`.
-  `log_events` skipped this, which is why `lower()` is scattered across every
-  read of it.
-- **Four secondary indexes and no more**, against `log_events`' twelve, on a
-  table that writes more. `idx_connection_events_bucket_host_bytes` serves the
-  unfiltered range read, the top-hosts ranking and the retention delete as a
-  covering index; the other three lead with `node_id`, `proxy_user_id`, or both.
-- **Unattributed rows are kept** with `proxy_user_id` NULL, where
-  `RecordLogEvents` would drop them. Single-user Shadowsocks never populates
-  `user`, and dropping those rows would understate every host total.
+Indexes support bounded event-time, observation-window and node/user reads.
+The authoritative index definitions are in `schema/schema.sql`; query-plan
+tests guard these paths rather than relying on a fixed index count.
 
-Retention is `connection_event_retention_days` (default 14, bounds 1..3650),
-applied inline on ingest in the same transaction — there is no scheduler.
-`connection_events` prunes on `bucket_start`, `connection_reports` on
-`window_end`. The default is shorter than the network-event 90 because these rows
-are wider and at a finer dimension tuple.
+`connection_event_retention_days` defaults to 14, with bounds 1..3650.
+Retention runs inline during ingest: sessions prune on last observation
+(`window_end`), legacy aggregates on `bucket_start`, and reports on `window_end`.
+Disabling or removing the activation row does not delete history.
 
 > `queries/*.sql` is sliced by byte offset from rune offsets by sqlc's SQLite
 > parser. **A single non-ASCII character in a comment silently corrupts every

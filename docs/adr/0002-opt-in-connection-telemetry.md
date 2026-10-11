@@ -7,6 +7,11 @@
   `internal/agent/connections.go`, `internal/server/db/connection_events.go`,
   `internal/server/render`, `migrations/026_connection_telemetry.sql`
 
+> This records the original implementation decision. The separate-source UI and
+> node-side aggregation decisions below were superseded by individual sessions
+> and unified Logs. See [connection telemetry](../connection-telemetry.md) for
+> current contracts; evaluated versions here are historical provenance.
+
 ## Decision
 
 Build BoxFleet's side of sing-box 1.14's `SubscribeConnections` stream now,
@@ -22,13 +27,9 @@ and off by default**.
   Absence of the row *is* the disabled state, so the default is off structurally
   rather than by convention.
 
-**This remains opt-in activation.** Moving `SING_BOX_REVISION` to
-`v1.14.0-beta.2` makes the service available but does not enable it on any node;
-an enabled `node_connection_telemetry` row is still required.
-
-The original stable-only trigger was overridden by an explicit operator choice
-on 2026-07-28. ADR 0001 records the exception. The preflight remains mandatory,
-including the opted-in config and authenticated stream checks added for 1.14.
+Activation remains per-node opt-in. Changing an artifact pin does not enable
+the service. The original prerelease selection is recorded in ADR 0001 as
+historical context.
 
 ## Context
 
@@ -55,7 +56,7 @@ clean.
 
 ## Consequences
 
-### The two sources are separate all the way down
+### Separate source storage (unified reads added later)
 
 ADR 0001 predicted the migration would be "a producer swap into the existing
 `model.LogEventInput` shape". That is not what was built, and the prediction was
@@ -73,7 +74,11 @@ Adding byte columns to `log_events` was rejected independently: a backfill would
 be a mass `UPDATE` over the highest-volume table, and every updated row fires
 five FTS triggers that delete and re-insert the row's FTS3 document.
 
-### Agents ship pre-aggregated buckets, not raw connections
+### Original aggregation decision (superseded)
+
+This decision was superseded by bounded cumulative session snapshots. Legacy
+aggregate reports remain supported. The estimates below were design assumptions
+at the time, not current deployment measurements.
 
 Raw per-connection rows were estimated at roughly 4M rows/day fleet-wide for ten
 nodes at twenty active users each — around 1 GB/day at this row width. Not viable
@@ -137,8 +142,8 @@ plane.
 
 ## Known gaps
 
-Recorded rather than hidden, because each is a deliberate stopping point for a
-feature nothing is meant to enable yet:
+These gaps were recorded at the time; consult current operation documentation
+before treating them as present implementation limits:
 
 - **No admin API or UI for the opt-in.** The db facade is complete; no HTTP route
   is mounted. Opting a node in means SQL or Go today.
@@ -153,14 +158,11 @@ feature nothing is meant to enable yet:
   collecting; the agent currently treats both as a failed report.
 - **`connection_event_retention_days` is not in `AdminSettings`.** Changeable
   only in the `settings` table.
-- **The preflight exercises the stream.** Its fifth check requires the real
-  BoxFleet client to receive an authenticated event after the initial reset.
 
 ## What this ADR does not change
 
 - ADR 0001's rejection of the Clash API `/connections` endpoint. Every reason
   still holds; nothing here reopens it.
-- The preflight's authority over moving `SING_BOX_REVISION`.
 - The journal scraper, its golden fixtures, or the rule that a golden diff after
   a pin bump is a regression to investigate rather than regenerate.
 - Per-user billing, which stays on the V2Ray counters.

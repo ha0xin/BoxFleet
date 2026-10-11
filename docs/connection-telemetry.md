@@ -1,24 +1,16 @@
-# Connection telemetry (sing-box 1.14)
+# Connection telemetry
 
-sing-box 1.14 exposes a daemon gRPC stream, `SubscribeConnections`, that reports
-every connection with its user, destination, byte totals and duration on one
-message. BoxFleet can consume it when a node is explicitly opted in.
+BoxFleet consumes sing-box's daemon gRPC `SubscribeConnections` stream for
+user, destination, cumulative bytes and session timing. It is **opt-in per node
+and off by default**. The installed sing-box build must support the daemon API;
+check release component targets in `.github/workflows/artifacts.yml` and exact
+artifact versions in the release manifest.
 
-This path is **opt-in per node and off by default**:
-
-- `SING_BOX_REVISION` in `.github/workflows/artifacts.yml` is
-  `v1.14.2`, the stable 1.14 target; rollout is canary-first.
-- 1.13's config parser rejects the `services` block this stream needs —
-  `services[0]: unknown inbound type: api`. Rendering it unconditionally would
-  break every node.
-- The journalctl regex scraper (`log_events`) is unchanged, still the fleet
-  default, and still the only source that covers every node. The two coexist during migration; removal of the old source follows the
-  fleet-wide switch described in [the roadmap](roadmap.md).
-
-The decision to build it ahead of the switch is
-[ADR 0002](adr/0002-opt-in-connection-telemetry.md). The operator-approved
-beta.2 exception and its required preflight are recorded in
-[ADR 0001](adr/0001-network-event-telemetry-source.md).
+The journal collector remains available during migration. Per-node source
+selection prevents duplicate counts; rollout and collection verification belong
+in deployment records. Historical rationale is in
+[ADR 0001](adr/0001-network-event-telemetry-source.md) and
+[ADR 0002](adr/0002-opt-in-connection-telemetry.md).
 
 ## Unified Logs
 
@@ -70,12 +62,10 @@ Byte figures from this source are an **estimate, not a ledger**. See
 
 ## Opting a node in
 
-> **There is no admin API or UI for this yet.** The `internal/server/db` facade
-> is complete (`SetNodeConnectionTelemetry`, `RotateNodeConnectionTelemetrySecret`,
-> `DeleteNodeConnectionTelemetry`, `NodeConnectionTelemetryConfig`) but no HTTP
-> route is mounted, so the opt-in is reachable only from Go or from SQL against
-> the server database. That is deliberate for a path nothing should be enabling
-> yet, and it is the first thing to build when the trigger fires.
+There is no admin mutation API or UI for enabling this feature. The db facade
+provides `SetNodeConnectionTelemetry`, `RotateNodeConnectionTelemetrySecret`,
+`DeleteNodeConnectionTelemetry` and `NodeConnectionTelemetryConfig`. Use the
+facade where possible; direct SQL requires equivalent validation.
 
 Absence of a `node_connection_telemetry` row *is* the disabled state, so the
 fleet-wide default is off structurally rather than by convention.
@@ -85,7 +75,7 @@ fleet-wide default is off structurally rather than by convention.
 -- CHECK refuses anything under 32.
 INSERT INTO node_connection_telemetry (node_id, enabled, listen_address, listen_port, secret)
 SELECT id, 1, '127.0.0.1', 9091, lower(hex(randomblob(32)))
-FROM nodes WHERE name = 'example-node';
+FROM nodes WHERE name = 'example-node' AND deleted_at IS NULL;
 ```
 
 Then publish. The change surfaces through the normal pipeline —
@@ -117,9 +107,9 @@ The agent needs no configuration. It discovers the endpoint by reading the
 authoritative statement of what sing-box is running, so enable and disable are
 pure renderer decisions with no second distribution channel to keep in sync.
 
-Two invariants are enforced at three layers (schema CHECK, db facade, renderer),
-and the renderer **fails the whole render** rather than emitting a block that
-violates either:
+The db facade and renderer enforce loopback binding and secret length. Schema
+CHECK constraints also reject empty addresses, invalid ports and short secrets.
+The renderer **fails the whole render** rather than emitting an unsafe block:
 
 - **Loopback only.** `listen` must be a loopback IP literal. `localhost` is
   rejected — sing-box parses `listen` as a `netip.Addr`, so a hostname would
@@ -137,75 +127,54 @@ fixed. Prefer the facade over raw SQL.
 
 **Lifecycle.** Minted on first `SetNodeConnectionTelemetry`, 32 random bytes
 rendered as 64 hex characters, from the same `internal/secret` package that mints
-Reality material. Disabling a node **keeps** the secret, so re-enabling does not
-force a config change. `RotateNodeConnectionTelemetrySecret` replaces it and
+Reality material. Disabling telemetry **keeps** the secret, so re-enabling can reuse it.
+`RotateNodeConnectionTelemetrySecret` replaces it and
 stamps `rotated_at` without touching the enabled flag or the endpoint; the node
 picks the new value up on its next config apply, and the collector is briefly
 unauthenticated in between — that gap is expected and shows up as a stream reset
 in the coverage counters. `DeleteNodeConnectionTelemetry` removes the row and
-returns the node to the structural default.
+returns telemetry to the structural default.
 
-**It is stored in the clear, and it has to be.** The renderer emits it into the
-node config, so the server is the *client* presenting this credential to sing-box,
-not the verifier of it. That is the exact inverse of a node token, which is
-hashed precisely because the server only ever calls `token.Verify`. A digest here
-is not a weaker option; it is a non-option.
+**Storage and access.** The secret is stored in plaintext because it must be
+rendered into the node configuration. Node bearer tokens instead use a
+nonreversible verifier: the server verifies them rather than redistributing them.
+Protect database backups and rendered configuration as credential material.
 
-**Blast radius, stated plainly.** If the server database leaks, the attacker
-already holds every Reality private key and Shadowsocks server password
-(`proxies.settings_json`), every per-user credential
-(`proxy_accesses.credential_json`), and every rendered config containing all of
-them (`config_versions.config_json`). The telemetry secret adds gRPC access to a
-**loopback-bound** endpoint, which is unreachable without already having code
-execution on that node — and anyone with node-local code execution can
-`systemctl stop sing-box` without any secret at all. The marginal exposure is
-approximately zero relative to what leaks in the same dump.
-
-That is not an argument for casualness, because the endpoint is a **control
-plane**, not read-only telemetry: the same port and the same secret carry
+The daemon endpoint is a full control plane: the same port and secret authorize
 `StopService`, `ReloadService`, `CloseAllConnections`, `SelectOutbound` and
-`TriggerDebugCrash`. Two things contain it. The bind is loopback-only, enforced
-above. And BoxFleet's client cannot call any of those RPCs — `internal/singboxapi`
-vendors one RPC, so `StartedServiceClient` has exactly one method and there is no
-`StopService` symbol to call. That is a compile-time property, not a review
-convention.
+`TriggerDebugCrash`. Loopback binding limits network exposure but does not
+protect it from every local process. BoxFleet's vendored client exposes only
+`SubscribeConnections`; this restricts BoxFleet's calls, not the upstream server's
+RPC surface.
 
-**Never put the secret in an admin API response.** `NodeConnectionTelemetry`
+**Telemetry inventory responses must omit the secret.** `NodeConnectionTelemetry`
 carries it because the renderer needs it;
 `GET /api/admin/connection-events/nodes` deliberately projects it away. Note that
 `GET /api/admin/nodes/{node}/config/render` *does* return it for an opted-in
 node — already true of Reality private keys on that same endpoint, but worth
 being deliberate about.
 
-## What happens on a 1.13 node
+## Unsupported installed builds
 
-Nothing silently. The renderer does **not** check the node's sing-box version or
-its advertised capability, so opting in a 1.13 node produces a config that node
-cannot parse. The failure is loud and safe:
+The renderer does not check reported sing-box versions or agent capabilities
+before rendering the optional service. Enabling a node whose binary does not
+support it causes candidate validation to fail:
 
-1. The agent fetches the new config and writes it to `<config>.candidate`.
-2. `sing-box check -c <config>.candidate` fails with
-   `services[0]: unknown inbound type: api`.
-3. The candidate is deleted. **The live config is never touched** — this is a
-   pre-install check, not a rollback, so sing-box keeps running exactly what it
-   was running.
-4. The agent reports `apply-result` as `failed` with the check output, and
-   retries on every poll until the opt-in is reverted or the node is upgraded.
+1. The agent writes a candidate configuration.
+2. The installed `sing-box check` rejects the unsupported configuration.
+3. The candidate is discarded without replacing the live configuration.
+4. The agent reports the apply failure; revert activation and publish, or install
+   a compatible component before retrying.
 
-The node keeps serving traffic throughout, and keeps producing journal-scraped
-`log_events`. The cost is a stuck config target and a node that shows as failed
-in the admin UI.
-
-Agents that ship the collector advertise `telemetry.connections.v1` on the
-heartbeat. That says only *this agent knows how to collect the stream* — never
-*this node's sing-box can serve it*. The `sing_box_version` already carried on
-every heartbeat is the better gate, and a version check in the renderer is the
-obvious hardening when an admin endpoint is built.
+A collector-capable agent advertises `telemetry.connections.v1`. This does not
+prove that the installed sing-box can serve the stream. Validate the actual
+build and stream before rollout.
 
 ## Reading the coverage figure
 
-Every response that carries bytes also carries a `coverage` block, so a client
-physically cannot render the estimate without the figure that qualifies it.
+Report diagnostics expose coverage counters. Unified session rows expose lifetime
+bytes without embedding a coverage block in each row. Treat those bytes as
+best-effort observations and consult collection diagnostics when assessing quality.
 
 | Field | Meaning |
 | --- | --- |
@@ -214,20 +183,21 @@ physically cannot render the estimate without the figure that qualifies it.
 | `connections_unattributed` | …that did not. Single-user Shadowsocks never attributes |
 | `connections_orphaned` | Closes seen without the matching open — a gap in the stream, recovered in full from the close event |
 | `stream_resets` | Subscriptions lost and re-established. Non-zero means sing-box restarted or the stream broke |
-| `dropped_buckets` | Aggregates the agent discarded on hitting its own map cap. Non-zero means the node is busier than the collector is sized for |
+| `dropped_buckets` | Identities, snapshots or legacy buckets the agent discarded on hitting its caps. Non-zero means the node is busier than the collector is sized for |
 | `bytes_observed` / `bytes_attributed` | The same two populations by volume |
 | `attribution_ratio` | `bytes_attributed / bytes_observed`, in `[0,1]` |
 | `reports` | Report windows summed into this figure |
 
 **`attribution_ratio` is by bytes, not by connection count** — a handful of
 unattributed bulk transfers matters more than many unattributed idle connections.
-**An empty window reports `1`**: nothing was observed, so nothing was lost, and
-rendering 0% coverage for an idle node would be misleading.
+**An empty observed window reports `1`** by convention; this is not evidence that
+all real traffic was collected.
 
 **Coverage is a property of a node's stream, not of a credential.**
-`connection_reports` has no user column, so filtering by `user` narrows the byte
-rankings but leaves the coverage figure node- or fleet-wide. Read it as "how
-complete is this node's telemetry", not "how much of this user's traffic we saw".
+`connection_reports` has no user column, so user filters narrow connection
+rows, while report coverage remains node- or
+fleet-wide. Attribution measures how much observed traffic had a user, not how
+complete collection was.
 
 Three structural loss modes upstream are why this is an estimate at all — a full
 subscriber buffer, an evicting closed-connection ring, and identity reset on
@@ -244,7 +214,8 @@ and correct. `dropped_buckets` growing steadily is a sizing problem, not a bug.
 `stream_resets` tracking sing-box restarts one-for-one is normal.
 
 **Per-user billing never reads this.** It stays on the V2Ray counters, whose
-`CounterEpoch` design already survives restarts and dropped reports.
+`CounterEpoch` handling tracks counter regression and retries failed reports; it
+cannot recover unread bytes after sing-box exits.
 
 ## Reading the data
 
@@ -283,28 +254,29 @@ It must not be derived by bucketing mutable lifetime snapshots.
 ```sql
 UPDATE node_connection_telemetry
 SET enabled = 0
-WHERE node_id = (SELECT id FROM nodes WHERE name = 'example-node');
+WHERE node_id = (SELECT id FROM nodes WHERE name = 'example-node' AND deleted_at IS NULL);
 ```
 
-Then publish, as for opting in. The rendered config returns to **byte-identical**
-pre-1.14 output — `services` is `omitempty` and nothing else changes — which
+Then publish, as for opting in. The rendered config returns to the default
+shape without the optional service — `services` is `omitempty` — which
 `TestRenderNodeConfigOptOutRestoresDefaultBytes` pins. The node applies it
 normally, and the agent's next poll sees a config with no api service and stops
 the collector.
 
 **Publishing is not optional here.** The collector follows the config on disk,
-not the database row, so a node that is disabled in the database but still
+not the database row, so a node whose telemetry is disabled in the database but still
 running the old config keeps collecting and keeps POSTing — and the server
 answers 403 to every one of those reports. The window stays staged, the collector
-keeps aggregating up to its caps, and nothing is lost or leaked, but the node
+keeps buffering up to its caps and may then discard new data. The node
 reports a failing step on every poll until the new config lands.
 
 Rolling back does not delete collected data. `connection_events` and
 `connection_reports` age out on their own retention (below), or can be deleted
-outright; nothing else reads them.
+outright; unified Logs continues to read retained historical data.
 
-To remove the opt-in entirely rather than disable it, delete the row. It
-cascades from `nodes`, so decommissioning a node cleans up after itself.
+To remove the opt-in entirely rather than disable it, delete the row. Removing
+activation closes its source interval; it does not delete telemetry
+history. Soft-deleting a node is distinct from physically deleting its row.
 
 ## Retention
 
@@ -319,8 +291,7 @@ Legacy `connection_events` rows prune on `bucket_start`; session rows prune on
 `window_end`.
 
 The setting is not in `AdminSettings` and not on the settings PATCH handler yet,
-so it is only changeable in the `settings` table directly. Same gap as the admin
-opt-in endpoint, same reason.
+so it is only changeable in the `settings` table directly. Use the same care as for direct activation edits.
 
 ## Node cost
 
@@ -328,17 +299,17 @@ Bounded by construction, because node memory is a hard constraint:
 
 | Bound | Value | On hitting it |
 | --- | --- | --- |
-| Live connection identities | 4096 (~1.6 MB) | Connection refused, `dropped_buckets`++. Recovered in full from its close event |
+| Live connection identities | 4096 (~1.6 MB) | Identity tracking dropped, `dropped_buckets`++; a later close may recover metadata |
 | Pending session snapshots | 2000 | Snapshot dropped, `dropped_buckets`++, its bytes excluded from `bytes_observed` so the denominator stays honest |
-| Accounted close ids | 2048 | Oldest evicted (FIFO). Larger than sing-box's 1000-entry replay ring, so a replay within one agent run can never double count |
+| Accounted close ids | 2048 | Oldest evicted (FIFO). Larger than sing-box's 1000-entry replay ring, to reduce duplicate close accounting within an agent run |
 
 sing-box's own tracker spends roughly 1 KB per live connection, so a node at the
 identity cap is already spending ~4 MB upstream before the collector's share.
 
-The collector paces traffic updates at 5 seconds rather than sing-box's 1-second
-default: data is bucketed at 5 minutes, so a 1-second tick on a busy node is
-thousands of proto messages per second for no resolution gain. It loses no bytes
-on its own, because a connection's final totals arrive on its close event.
+The collector requests periodic traffic updates to reduce event overhead.
+Session snapshots retain cumulative totals, and close events can supply final
+totals when received. A missed close, lost stream event or process restart can
+still leave gaps; the update interval does not guarantee complete bytes.
 
 The collector never touches sing-box supervision or the config-apply loop. Its
 `Run` returns no error and is not wired into the agent's error channel; every
@@ -359,17 +330,16 @@ daemon; none spawns a real `sing-box`. See
 [testing](testing.md#connection-telemetry) for the boundaries and the pinned
 invariants.
 
-**Schema.** Three tables, their indexes and the ingest idempotency rule are in
+**Schema.** Activation, reports, session rows and source selection are in
 [db-schema](db-schema.md#connection-telemetry).
 
 **Rendering.** The conditional `services` block is in
 [config generation](config-generation.md#connection-telemetry-service-optional).
 
-**Wire contract.** `internal/model/connection_telemetry.go` holds the payload
-shared by agent and server, plus the normalisation both sides must agree on
-(`Normalize`, `DimensionKey`, `TruncateConnectionBucket`). The bucket grain is
-`ConnectionBucketInterval` (5 minutes) and both sides read that constant; never
-re-derive it.
+**Wire contract.** `internal/model/connection_telemetry.go` defines the shared
+payload and normalization. Updated agents send cumulative session snapshots;
+`ConnectionBucketInterval` and bucket truncation apply to the legacy aggregate
+format. Do not use that grain to reinterpret individual session starts or totals.
 
 Ingest is `POST /api/node/connections`, idempotent on
 `(agent_boot_id, sequence)` — resending an identical body after a network

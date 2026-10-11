@@ -1,13 +1,12 @@
 # internal/singboxapi
 
-BoxFleet's client for sing-box's daemon gRPC connection stream — the 1.14
+BoxFleet's client for sing-box's daemon gRPC connection stream — the
 telemetry source that
 [ADR 0001](../../docs/adr/0001-network-event-telemetry-source.md) identifies as
 the eventual replacement for the journalctl regex scraper.
 
-**This package is inert until a node opts in.** The stable target is sing-box
-1.14.2. Older nodes remain on their existing collector until explicitly upgraded
-and configured for the daemon API.
+**This package is inert until a node opts in.** Nodes without daemon API support
+remain on their existing collector until explicitly upgraded and configured.
 
 - `daemonpb/` — the vendored proto, its generated stubs, and the committed
   upstream descriptor the conformance tests diff against. Trimmed to one RPC.
@@ -30,7 +29,8 @@ sing-box actually performs.
 The same tag appears in the proto header, in both generated files, and in the
 table above; `TestProvenanceIsRecorded` fails if any of them drifts.
 
-`refs/sing-box` is a local checkout of that revision for reference only. Per
+`refs/sing-box`, when present, is an optional local reference checkout. Verify
+its revision before using it. Per
 AGENTS.md, nothing under `refs/` may be imported — which is precisely why the
 proto is vendored rather than read from there.
 
@@ -49,7 +49,7 @@ bolted on. It is a **full control plane on the same port and the same secret**:
 `StopService` and `ReloadService` stop and reconfigure sing-box, `CloseConnection`
 and `CloseAllConnections` sever live user traffic, `SelectOutbound` reroutes it,
 and `TriggerDebugCrash` panics the process. BoxFleet applies configuration
-through the agent's atomic-write-plus-`systemctl` path and must never acquire a
+through the agent's atomic-write-plus-service-manager path and must never acquire a
 second, unaudited way to do any of that.
 
 Excluding them from the descriptor is stronger than a code-review convention:
@@ -118,7 +118,7 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.0
 # Generate, from this directory.
 PATH="$(go env GOPATH)/bin:$PATH" buf generate
 
-go test ./internal/singboxapi/...
+(cd ../.. && go test ./internal/singboxapi/...)
 ```
 
 `buf.gen.yaml` drives both plugins with `paths=source_relative`, so the `.pb.go`
@@ -131,26 +131,26 @@ the `grpc.ServerStreamingClient[T]` generics that grpc-go v1.81.1 provides.
 
 ## Re-verifying against a new sing-box tag
 
-Moving the pin is a deliberate act, gated by
-[`docs/singbox-preflight.md`](../../docs/singbox-preflight.md). Do the preflight
-first; this procedure covers only the proto contract, which the preflight does
-not check.
+Changing the upstream pin requires both protocol conformance and real-binary
+validation. This procedure covers the proto contract; see
+[testing](../../docs/testing.md) and [deployment](../../docs/deployment.md)
+for the broader boundaries.
 
 All commands run from the repository root.
 
 ```bash
 # 1. Move the reference checkout to the candidate and record what it resolves to.
 git -C refs/sing-box fetch --tags
-git -C refs/sing-box checkout v1.14.0        # the candidate tag
+: "${CANDIDATE:?Set CANDIDATE to the upstream tag being evaluated}"
+git -C refs/sing-box checkout "$CANDIDATE"
 git -C refs/sing-box describe --tags
 git -C refs/sing-box rev-parse HEAD
 
 # 2. Capture the candidate's compiled descriptor as the new conformance fixture.
-CANDIDATE=v1.14.0
 PATH="$(go env GOPATH)/bin:$PATH" buf build refs/sing-box/daemon \
   --path refs/sing-box/daemon/started_service.proto \
   -o "internal/singboxapi/daemonpb/testdata/upstream-${CANDIDATE}.descriptorset.binpb"
-git rm internal/singboxapi/daemonpb/testdata/upstream-v1.14.2.descriptorset.binpb
+# Remove the previous descriptor fixture once the replacement is verified.
 
 # 3. Update upstreamTag in daemonpb/contract_test.go, plus the tag and commit in
 #    the proto header and in the table at the top of this file. Then:
@@ -241,8 +241,8 @@ figures a best-effort estimate:
 - Connection ids and in-flight totals reset when sing-box restarts.
 
 Per-user billing stays on the V2Ray counters (`internal/v2raystats`), whose
-`CounterEpoch` design in `internal/agent` already survives restarts and dropped
-reports.
+`CounterEpoch` handling in `internal/agent` detects regression and retries failed
+reports; unread traffic at sing-box exit remains unrecoverable.
 
 Two shapes of the data catch people out:
 
