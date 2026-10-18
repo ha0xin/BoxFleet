@@ -63,6 +63,7 @@ type adminUserRow struct {
 }
 
 type adminRelease struct {
+	NodeRelease     string `json:"node_release"`
 	Repo            string `json:"repo"`
 	BoxFleetVersion string `json:"boxfleet_version"`
 	AgentVersion    string `json:"agent_version"`
@@ -169,13 +170,15 @@ type adminPathPatchPayload struct {
 }
 
 type adminPathAccess struct {
-	ID          string `json:"id"`
-	PathID      string `json:"path_id"`
-	ProxyUserID string `json:"proxy_user_id"`
-	Enabled     bool   `json:"enabled"`
-	DeletedAt   string `json:"deleted_at"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          string            `json:"id"`
+	PathID      string            `json:"path_id"`
+	ProxyUserID string            `json:"proxy_user_id"`
+	Enabled     bool              `json:"enabled"`
+	DeletedAt   string            `json:"deleted_at"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
+	DirectGrant *bool             `json:"direct_grant,omitempty"`
+	Groups      []db.PathGroupRef `json:"groups,omitempty"`
 }
 
 type adminUser struct {
@@ -642,9 +645,18 @@ func releaseVersion(options Options) string {
 func releaseAgentVersion(options Options) string {
 	version := strings.TrimSpace(options.AgentVersion)
 	if version == "" {
-		return releaseVersion(options)
+		return nodeReleaseVersion(options)
 	}
 	return version
+}
+
+// A server-only deployment can retain the published node artifact contract.
+// The server keeps its own truthful build identity in releaseVersion.
+func nodeReleaseVersion(options Options) string {
+	if release := strings.TrimSpace(options.NodeRelease); release != "" {
+		return release
+	}
+	return releaseVersion(options)
 }
 
 func releaseSingBoxVersion(options Options) string {
@@ -1320,8 +1332,17 @@ func adminUserPathsHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		out := make([]adminPathAccess, 0, len(accesses))
+		sources, err := store.UserPathSources(r.Context(), chi.URLParam(r, "user"))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
 		for _, access := range accesses {
-			out = append(out, adminPathAccessFromDB(access))
+			row := adminPathAccessFromDB(access)
+			source := sources[access.PathID]
+			row.DirectGrant = &source.Direct
+			row.Groups = source.Groups
+			out = append(out, row)
 		}
 		writeJSON(w, out)
 	}

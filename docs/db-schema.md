@@ -14,6 +14,15 @@ go test ./internal/server/db ./internal/server/api
 
 Only `internal/server/db` may import sqlc-generated types.
 
+## Path authorization sources
+
+Migration 034 introduced direct and sustained group authorization sources.
+Migration 035 snapshots legacy group contributions into `direct_path_grants` and
+clears `user_path_group_grants`. Groups now organize batch-selection shortcuts;
+permissions belong to individual user/Path pairs. `path_accesses` remains the
+projection for publication and credentials. Batch checkbox changes reconcile
+sources, credentials and projection atomically. See [Path groups](path-groups.md).
+
 ## Storage rules
 
 - SQLite runs in WAL mode with `synchronous=NORMAL`, a busy timeout, foreign

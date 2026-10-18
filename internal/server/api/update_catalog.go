@@ -57,7 +57,8 @@ func newUpdateCatalog(options Options) *updateCatalog {
 func adminReleaseHandler(options Options, catalog *updateCatalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		release := adminRelease{
-			Repo: releaseRepo(options), BoxFleetVersion: releaseVersion(options),
+			NodeRelease: nodeReleaseVersion(options),
+			Repo:        releaseRepo(options), BoxFleetVersion: releaseVersion(options),
 			AgentVersion:   releaseAgentVersion(options),
 			SingBoxVersion: releaseSingBoxVersion(options),
 		}
@@ -89,12 +90,12 @@ func (c *updateCatalog) assetsForNode(ctx context.Context, r *http.Request, goos
 		return model.UpdateAsset{}, model.UpdateAsset{}, err
 	}
 	return model.UpdateAsset{
-			Component: "agent", Version: platform.Agent.Version, URL: agentURL,
-			SHA256: platform.Agent.SHA256, Size: platform.Agent.Size,
-		}, model.UpdateAsset{
-			Component: "sing_box", Version: platform.SingBox.Version, URL: singBoxURL,
-			SHA256: platform.SingBox.SHA256, Size: platform.SingBox.Size,
-		}, nil
+		Component: "agent", Version: platform.Agent.Version, URL: agentURL,
+		SHA256: platform.Agent.SHA256, Size: platform.Agent.Size,
+	}, model.UpdateAsset{
+		Component: "sing_box", Version: platform.SingBox.Version, URL: singBoxURL,
+		SHA256: platform.SingBox.SHA256, Size: platform.SingBox.Size,
+	}, nil
 }
 
 func (c *updateCatalog) load(ctx context.Context) (*updateManifest, error) {
@@ -144,7 +145,7 @@ func (c *updateCatalog) readManifest(ctx context.Context) ([]byte, error) {
 		defer file.Close()
 		return readLimited(file, 1024*1024)
 	}
-	release := strings.TrimSpace(c.options.Version)
+	release := nodeReleaseVersion(c.options)
 	repo := releaseRepo(c.options)
 	if !semver.IsValid(release) {
 		return nil, fmt.Errorf("server version %q is not a formal release", release)
@@ -170,7 +171,7 @@ func (c *updateCatalog) readManifest(ctx context.Context) ([]byte, error) {
 }
 
 func (c *updateCatalog) validateManifest(manifest updateManifest) error {
-	release := strings.TrimSpace(c.options.Version)
+	release := nodeReleaseVersion(c.options)
 	if manifest.Release != release || !semver.IsValid(manifest.Release) {
 		return fmt.Errorf("update manifest release %q does not match server release %q", manifest.Release, release)
 	}

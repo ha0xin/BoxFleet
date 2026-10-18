@@ -332,6 +332,11 @@ func (db *DB) DisableProxyUser(ctx context.Context, name string) (ProxyUser, err
 }
 
 func (db *DB) SoftDeleteProxyUser(ctx context.Context, name string) (ProxyUser, error) {
+	if !db.transactional {
+		var result ProxyUser
+		err := db.atomic(ctx, func(tx *DB) error { var e error; result, e = tx.SoftDeleteProxyUser(ctx, name); return e })
+		return result, err
+	}
 	user, err := db.GetProxyUser(ctx, name)
 	if err != nil {
 		return ProxyUser{}, err
@@ -341,6 +346,18 @@ func (db *DB) SoftDeleteProxyUser(ctx context.Context, name string) (ProxyUser, 
 		return ProxyUser{}, err
 	}
 	if err := requireAffected(affected, "proxy user", name); err != nil {
+		return ProxyUser{}, err
+	}
+	if err := db.q.DeleteUserPathGroupGrants(ctx, user.ID); err != nil {
+		return ProxyUser{}, err
+	}
+	if err := db.q.DeleteUserDirectPathGrants(ctx, user.ID); err != nil {
+		return ProxyUser{}, err
+	}
+	if err := db.q.ArchiveUserPathAccesses(ctx, user.ID); err != nil {
+		return ProxyUser{}, err
+	}
+	if err := db.q.ArchiveGroupUserCredentials(ctx, user.ID); err != nil {
 		return ProxyUser{}, err
 	}
 	return db.getProxyUserIncludingDeleted(ctx, user.ID)

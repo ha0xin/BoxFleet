@@ -286,7 +286,7 @@ func adminCreateUpdateCampaignHandler(store *db.DB, catalog *updateCatalog, cont
 			return
 		}
 		detail, created, err := store.CreateNodeUpdateCampaign(r.Context(), db.CreateNodeUpdateCampaignParams{
-			Release: strings.TrimSpace(catalog.options.Version), Components: components,
+			Release: nodeReleaseVersion(catalog.options), Components: components,
 			IdempotencyKey: request.IdempotencyKey, BatchSize: request.BatchSize,
 			RequestedBy: "admin-api", Members: members,
 		})
@@ -509,7 +509,7 @@ func buildUpdateCampaignMembers(
 			(selected["sing_box"] && !containsCapability(status.Capabilities, model.CapabilitySingBoxUpdateV1)) {
 			continue
 		}
-		payload := model.NodeUpdatePayload{Release: strings.TrimSpace(catalog.options.Version)}
+		payload := model.NodeUpdatePayload{Release: nodeReleaseVersion(catalog.options)}
 		kind := ""
 		if selected["agent"] {
 			payload.Agent, kind = &agentAsset, "update.agent"

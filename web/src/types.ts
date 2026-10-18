@@ -198,6 +198,8 @@ export type AdminPath = {
 };
 
 export type AdminPathAccess = {
+	direct_grant?: boolean;
+	groups?: Array<{id: string; name: string}>;
   id: string;
   path_id: string;
   proxy_user_id: string;

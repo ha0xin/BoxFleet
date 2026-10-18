@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { getCoreRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Select, Switch, Table } from "@cloudflare/kumo";
+import { Badge, Banner, Button, Dialog, DropdownMenu, Input, Select, Switch, Table, Tabs } from "@cloudflare/kumo";
 import { CheckCircleIcon, PencilSimpleIcon, PlusIcon, ProhibitIcon, TrashIcon } from "@phosphor-icons/react";
 
 import { useAdminApi } from "@/admin/api";
@@ -18,6 +19,7 @@ import { AdminPagination, SortHead, TableCard, TableColgroup, TableEmpty, TableE
 import type { TableColumnWidth } from "@/components/admin-table";
 import type { AdminNode, AdminPath, AdminProxiesResponse } from "../types";
 import { SoftDeleteDialog } from "./soft-delete-dialog";
+import { PathGroupEditor, PathGroupsPanel } from "./path-groups";
 
 type EditorState = { path?: AdminPath } | null;
 
@@ -61,6 +63,9 @@ function pathEndpoint(path: AdminPath): string {
 
 export function PathsPage() {
   const { request } = useAdminApi();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "groups" ? "groups" : "paths";
+  const [createGroup, setCreateGroup] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminPath | null>(null);
   const pathsQuery = useQuery({
@@ -127,14 +132,27 @@ export function PathsPage() {
         title="Paths"
         description="Publish a Proxy through a specific Host, optionally using another Path as its Mihomo dialer."
         actions={
-          <Button variant="primary" icon={PlusIcon} onClick={() => setEditor({})}>
-            Create
+          <Button variant="primary" icon={PlusIcon} onClick={() => tab === "groups" ? setCreateGroup(true) : setEditor({})}>
+            {tab === "groups" ? "Create group" : "Create"}
           </Button>
         }
       />
       <main className="w-full grow bg-kumo-canvas">
         <div className="mx-auto flex w-full min-w-0 flex-col gap-4 px-4 pb-8">
-          <section className="flex flex-col gap-3">
+          <div className="border-b border-kumo-line">
+            <Tabs
+              variant="underline"
+              value={tab}
+              onValueChange={(value) => setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                if (value === "groups") next.set("tab", "groups");
+                else next.delete("tab");
+                return next;
+              })}
+              tabs={[{ value: "paths", label: "Paths" }, { value: "groups", label: "Path groups" }]}
+            />
+          </div>
+          {tab === "paths" ? <section className="flex flex-col gap-3">
             <TableCard tableId="paths-v2">
               <Table layout="fixed" style={{ minWidth: tableMinWidth(pathColumns) }}>
                 <TableColgroup widths={pathColumns} />
@@ -214,9 +232,10 @@ export function PathsPage() {
               </Table>
             </TableCard>
             <AdminPagination page={currentPage} setPage={setPage} perPage={perPage} setPerPage={setPerPage} total={paths.length} />
-          </section>
+          </section> : <PathGroupsPanel request={request} paths={paths} />}
         </div>
       </main>
+      {createGroup ? <PathGroupEditor request={request} paths={paths} onClose={() => setCreateGroup(false)} /> : null}
       {editor ? <PathEditor request={request} state={editor} paths={paths} onClose={() => setEditor(null)} /> : null}
       {deleteTarget ? (
         <SoftDeleteDialog

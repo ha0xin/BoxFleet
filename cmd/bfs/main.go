@@ -47,6 +47,7 @@ func newServerCommand() *cobra.Command {
 	cmd.Flags().String("addr", "127.0.0.1:8080", "HTTP listen address")
 	cmd.Flags().String("db", "boxfleet.db", "SQLite database path")
 	cmd.Flags().String("artifact-dir", "", "directory served under /artifacts")
+	cmd.Flags().String("node-release", "", "published release supplying node artifacts (defaults to server version)")
 	cmd.Flags().String("admin-token", "", "admin API bearer token")
 	cmd.Flags().String("admin-path-token", "", "path segment that gates admin UI and admin API routes")
 	cmd.Flags().Bool("allow-insecure-admin", false, "allow admin API without a bearer token")
@@ -54,7 +55,7 @@ func newServerCommand() *cobra.Command {
 	viper.SetEnvPrefix("BOXFLEET")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
-	for _, name := range []string{"addr", "db", "artifact-dir", "admin-token", "admin-path-token", "allow-insecure-admin"} {
+	for _, name := range []string{"addr", "db", "artifact-dir", "node-release", "admin-token", "admin-path-token", "allow-insecure-admin"} {
 		_ = viper.BindPFlag(name, cmd.Flags().Lookup(name))
 	}
 	return cmd
@@ -93,6 +94,7 @@ func runServer(ctx context.Context) error {
 		AdminPathToken:     adminPathToken,
 		AllowInsecureAdmin: allowInsecureAdmin,
 		Version:            version,
+		NodeRelease:        strings.TrimSpace(viper.GetString("node-release")),
 		AgentVersion:       agentVersion,
 		Repo:               install.DefaultRepo,
 		SingBoxVersion:     install.DefaultSingBoxVersion,

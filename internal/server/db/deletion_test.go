@@ -65,17 +65,23 @@ func TestDeletionCascadeAndPreviewPreserveSharedCredentials(t *testing.T) {
 				t.Fatal(err)
 			}
 			users := []ProxyUser{}
+			grantPath := d.GrantPathToUser
+			if mode == "migration" {
+				// Seed a pre-034 database through its historical projection writer;
+				// the new public API requires the authorization-source tables.
+				grantPath = d.grantPathToUser
+			}
 			for _, name := range []string{"alice", "bob"} {
 				u, err := d.CreateProxyUser(ctx, CreateProxyUserParams{Name: name, GlobalQuotaBytes: 1234})
 				if err != nil {
 					t.Fatal(err)
 				}
 				users = append(users, u)
-				if _, err := d.GrantPathToUser(ctx, name, paths[2].ID); err != nil {
+				if _, err := grantPath(ctx, name, paths[2].ID); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := d.GrantPathToUser(ctx, "bob", independent.ID); err != nil {
+			if _, err := grantPath(ctx, "bob", independent.ID); err != nil {
 				t.Fatal(err)
 			}
 			oldCredential, err := d.getProxyCredentialByIDs(ctx, users[0].ID, proxies[0].ID)
@@ -86,49 +92,52 @@ func TestDeletionCascadeAndPreviewPreserveSharedCredentials(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			blocked, err := d.ResourceDeletionImpact(ctx, "path", paths[0].ID)
-			if err != nil || blocked.Blocked == "" {
-				t.Fatalf("dependency deletion not blocked: %+v %v", blocked, err)
-			}
-			kind, id := "node", nodes[0].ID
-			if mode == "proxy" {
-				kind, id = "proxy", proxies[0].ID
-			}
-			preview, err := d.ResourceDeletionImpact(ctx, kind, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			predicted := map[string]string{}
-			for _, item := range preview.Items {
-				predicted[item.ID] = item.Effect
-			}
-			for _, path := range paths {
-				if predicted[path.ID] != "Disabled" {
-					t.Fatalf("missing dependent path %s: %+v", path.Name, preview)
+			if mode != "migration" {
+				blocked, err := d.ResourceDeletionImpact(ctx, "path", paths[0].ID)
+				if err != nil || blocked.Blocked == "" {
+					t.Fatalf("dependency deletion not blocked: %+v %v", blocked, err)
 				}
-			}
-			if predicted[oldCredential.ID] != "Archived" {
-				t.Fatal("retired credential missing from preview")
-			}
-			for _, u := range users {
-				for i, p := range proxies {
-					if i == 0 {
-						continue
+				kind, id := "node", nodes[0].ID
+				if mode == "proxy" {
+					kind, id = "proxy", proxies[0].ID
+				}
+				preview, err := d.ResourceDeletionImpact(ctx, kind, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				predicted := map[string]string{}
+				for _, item := range preview.Items {
+					predicted[item.ID] = item.Effect
+				}
+				for _, path := range paths {
+					if predicted[path.ID] != "Disabled" {
+						t.Fatalf("missing dependent path %s: %+v", path.Name, preview)
 					}
-					c, err := d.getProxyCredentialByIDs(ctx, u.ID, p.ID)
-					if err != nil {
-						t.Fatal(err)
+				}
+				if predicted[oldCredential.ID] != "Archived" {
+					t.Fatal("retired credential missing from preview")
+				}
+				for _, u := range users {
+					for i, p := range proxies {
+						if i == 0 {
+							continue
+						}
+						c, err := d.getProxyCredentialByIDs(ctx, u.ID, p.ID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						_, included := predicted[c.ID]
+						if included != (u.Name == "alice" || i == 1) {
+							t.Fatalf("wrong credential preview for %s/%s", u.Name, p.Name)
+						}
 					}
-					_, included := predicted[c.ID]
-					if included != (u.Name == "alice" || i == 1) {
-						t.Fatalf("wrong credential preview for %s/%s", u.Name, p.Name)
-					}
+				}
+
+				if _, ok := predicted[independent.ID]; ok {
+					t.Fatal("unrelated path included")
 				}
 			}
 
-			if _, ok := predicted[independent.ID]; ok {
-				t.Fatal("unrelated path included")
-			}
 			if mode != "migration" {
 				if _, err := d.sql.ExecContext(ctx, `CREATE TRIGGER fail_cascade BEFORE UPDATE OF deleted_at ON path_accesses BEGIN SELECT RAISE(ABORT,'cascade failure'); END`); err != nil {
 					t.Fatal(err)

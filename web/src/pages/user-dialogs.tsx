@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import {
-  CopyIcon,
-  PlusIcon,
-  TrashIcon
-} from "@phosphor-icons/react";
-import { Banner, Button, Checkbox, Dialog, Input, Loader, Select } from "@cloudflare/kumo";
+import { CaretDownIcon, CopyIcon } from "@phosphor-icons/react";
+import { Banner, Button, Checkbox, Collapsible, Dialog, Input, Loader, Select } from "@cloudflare/kumo";
 
 import type {
   AdminPath,
@@ -20,7 +16,7 @@ import { adminKeys } from "@/admin/query";
 import { useAdminMutation } from "@/admin/use-admin-mutation";
 import { useQuery } from "@tanstack/react-query";
 import { copyText as writeClipboard } from "@/utils";
-import { SoftDeleteDialog } from "./soft-delete-dialog";
+import { usePathGroups } from "./path-groups";
 
 export type UserDialogState =
   | { mode: "create" }
@@ -220,69 +216,9 @@ export function UserFormDialog({
   );
 }
 
-function AccessRow({
-  request,
-  user,
-  access,
-  path
-}: {
-  request: AdminRequest;
-  user: AdminUser;
-  access: AdminPathAccess;
-  path?: AdminPath;
+export function ManageAccessDialog({ request, user, onClose }: {
+  request: AdminRequest; user: AdminUser; onClose: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const label = path ? path.display_name || `${path.proxy_name} · ${path.name}` : access.path_id;
-
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-2 last:border-b-0">
-      <div className="min-w-0">
-        <div className="truncate text-sm font-medium text-kumo-default">{label}</div>
-        <div className="truncate text-xs text-kumo-subtle">
-          {path ? `${path.proxy_name} @ ${path.host_tag || path.host}` : "Path"}
-        </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        shape="square"
-        aria-label={`Revoke ${label}`}
-        onClick={() => setConfirming(true)}
-      >
-        <TrashIcon className="size-4 text-kumo-danger" />
-      </Button>
-      {confirming ? (
-        <SoftDeleteDialog
-          request={request}
-          title="Revoke access"
-          confirmLabel="Revoke"
-          description={
-            <>
-              Revoke access to <span className="font-medium text-kumo-default">{label}</span> for{" "}
-              <span className="font-medium text-kumo-default">{user.name}</span>? Credentials for this Path are removed
-              on the next publish.
-            </>
-          }
-          endpoint={`/api/admin/users/${encodeURIComponent(user.id)}/paths/${encodeURIComponent(access.path_id)}`}
-          onClose={() => setConfirming(false)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-export function ManageAccessDialog({
-  request,
-  user,
-  onClose
-}: {
-  request: AdminRequest;
-  user: AdminUser;
-  onClose: () => void;
-}) {
-  const [selectedIDs, setSelectedIDs] = useState<string[]>([]);
-  const [issueError, setIssueError] = useState("");
-
   const accessQuery = useQuery({
     queryKey: adminKeys.userAccess(user.name),
     queryFn: () => request<AdminPathAccess[]>(`/api/admin/users/${encodeURIComponent(user.id)}/paths`)
@@ -291,189 +227,90 @@ export function ManageAccessDialog({
     queryKey: adminKeys.paths,
     queryFn: () => request<AdminPath[]>("/api/admin/paths")
   });
+  const groupsQuery = usePathGroups(request);
+  type SelectionChange = { path_id: string; enabled: boolean };
+  const mutation = useAdminMutation<SelectionChange[]>(request, (req, changes) =>
+    req(`/api/admin/users/${encodeURIComponent(user.id)}/paths`, {
+      method: "PATCH", body: JSON.stringify({ changes })
+    }), { onSuccess: onClose, toastError: false });
+  const [draft, setDraft] = useState<{ initial: Set<string>; selected: Set<string> } | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const pending = mutation.isPending;
+  const initialSelection = draft?.initial ?? new Set((accessQuery.data ?? []).map((a) => a.path_id));
+  const selected = draft?.selected ?? initialSelection;
+  const paths = (pathsQuery.data ?? []).filter((p) => p.visibility === "selectable");
+  const pathsByID = new Map(paths.map((p) => [p.id, p]));
+  const groups = (groupsQuery.data ?? []).map((g) => ({ ...g, paths: g.path_ids.flatMap((id) => pathsByID.get(id) ? [pathsByID.get(id)!] : []) }));
+  const grouped = new Set(groups.flatMap((g) => g.path_ids));
+  const otherPaths = paths.filter((p) => !grouped.has(p.id));
+  const sections = [...groups, ...(otherPaths.length ? [{ id: "ungrouped", name: "Other", enabled: true, paths: otherPaths }] : [])];
+  const loading = accessQuery.isLoading || pathsQuery.isLoading || groupsQuery.isLoading;
+  const error = accessQuery.error ?? pathsQuery.error ?? groupsQuery.error ?? mutation.error;
+  const loadError = accessQuery.error ?? pathsQuery.error ?? groupsQuery.error;
+  const changes = paths.filter((p) => p.enabled && selected.has(p.id) !== initialSelection.has(p.id))
+    .map((p) => ({ path_id: p.id, enabled: selected.has(p.id) }));
+  const dirty = changes.length > 0;
+  function toggle(items: AdminPath[], checked: boolean) {
+    if (pending) return;
+    mutation.reset();
+    setDraft((current) => {
+      const initial = current?.initial ?? initialSelection;
+      const next = new Set(current?.selected ?? initial);
+      for (const p of items) {
+        if (!p.enabled) continue;
+        if (checked) next.add(p.id); else next.delete(p.id);
+      }
+      return { initial, selected: next };
+    });
+  }
 
-  const accesses = useMemo(() => accessQuery.data ?? [], [accessQuery.data]);
-  const existing = useMemo(
-    () => new Set(accesses.map((a) => a.path_id)),
-    [accesses]
-  );
-  const available = useMemo<AdminPath[]>(
-    () =>
-      (pathsQuery.data ?? []).filter(
-        (p) => p.enabled && p.visibility === "selectable" && !existing.has(p.id)
-      ),
-    [pathsQuery.data, existing]
-  );
-  const selected = useMemo(
-    () => available.filter((path) => selectedIDs.includes(path.id)),
-    [available, selectedIDs]
-  );
-  const issue = useAdminMutation<AdminPath[], { succeeded: AdminPath[]; failed: AdminPath[] }>(
-    request,
-    async (req, paths) => {
-      const results = await Promise.allSettled(
-        paths.map((path) =>
-          req(`/api/admin/users/${encodeURIComponent(user.id)}/paths`, {
-            method: "POST",
-            body: JSON.stringify({ path_id: path.id })
-          })
-        )
-      );
-      const succeeded: AdminPath[] = [];
-      const failed: AdminPath[] = [];
-      results.forEach((result, index) => {
-        (result.status === "fulfilled" ? succeeded : failed).push(paths[index]);
-      });
-      return { succeeded, failed };
-    },
-    {
-      onSuccess: ({ succeeded, failed }) => {
-        setSelectedIDs(failed.map((proxy) => proxy.id));
-        if (failed.length > 0) {
-          const labels = failed.map((path) => path.display_name || `${path.proxy_name} · ${path.name}`).join(", ");
-          setIssueError(
-            `${succeeded.length} granted; ${failed.length} failed. Still selected: ${labels}`
-          );
-        }
-      },
-      toastError: false
-    }
-  );
-
-  const loading = accessQuery.isLoading || pathsQuery.isLoading;
-  // A failed query leaves `accesses` / `available` empty, which reads as "fully
-  // granted" or "nothing granted". Never present either list until both loaded:
-  // granting against a stale access list would also re-grant existing Paths.
-  const loadError = accessQuery.error ?? pathsQuery.error;
-
-  return (
-    <Dialog.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Dialog size="xl" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
-        <Dialog.Title className="text-xl font-semibold text-kumo-default">Manage access</Dialog.Title>
-        <Dialog.Description className="mb-4 text-kumo-subtle">
-          Grant or revoke selectable Paths for <span className="font-medium text-kumo-default">{user.name}</span>.
-          Changes alter the rendered config on the next publish.
-        </Dialog.Description>
-
-        {loadError ? (
-          <Banner
-            variant="error"
-            title={loadError instanceof Error ? loadError.message : "Failed to load Paths and current access."}
-            className="mb-4"
-          />
-        ) : null}
-        {issueError ? <Banner variant="error" title={issueError} className="mb-4" /> : null}
-
-        <section>
-          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold text-kumo-default">Grant Paths</h3>
-              <p className="text-sm text-kumo-subtle">Credentials for every hop are created automatically.</p>
-            </div>
-            {available.length > 0 ? (
-              <Checkbox
-                label={<span className="whitespace-nowrap">Select all</span>}
-                checked={selectedIDs.length === available.length}
-                indeterminate={selectedIDs.length > 0 && selectedIDs.length < available.length}
-                disabled={issue.isPending}
-                onCheckedChange={(checked) =>
-                  setSelectedIDs(checked ? available.map((path) => path.id) : [])
-                }
-              />
-            ) : null}
-          </div>
-
-          {loading ? (
-            <div className="flex min-h-24 items-center justify-center">
-              <Loader size={20} />
-            </div>
-          ) : loadError ? (
-            <div className="flex min-h-20 items-center justify-center text-sm text-kumo-subtle">
-              Selectable Paths could not be loaded.
-            </div>
-          ) : available.length > 0 ? (
-            <div className="max-h-56 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
-              {available.map((path) => (
-                <div
-                  key={path.id}
-                  className="border-b border-kumo-line px-3 py-2 last:border-b-0"
-                >
-                  <Checkbox
-                    checked={selectedIDs.includes(path.id)}
-                    disabled={issue.isPending}
-                    onCheckedChange={(checked) =>
-                      setSelectedIDs((current) =>
-                        checked
-                          ? [...current, path.id]
-                          : current.filter((id) => id !== path.id)
-                      )
-                    }
-                    label={
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-kumo-default">
-                          {path.display_name || `${path.proxy_name} · ${path.name}`}
-                        </div>
-                        <div className="truncate text-xs text-kumo-subtle">
-                          {path.proxy_name} @ {path.host_tag || path.host}{path.dialer_path_id ? " · chained" : ""}
-                        </div>
-                      </div>
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex min-h-20 items-center justify-center text-sm text-kumo-subtle">
-              All selectable Paths have already been granted.
-            </div>
-          )}
-
-          <div className="mt-3 flex justify-end">
-            <Button
-              icon={PlusIcon}
-              loading={issue.isPending}
-              disabled={selected.length === 0}
-              onClick={() => {
-                setIssueError("");
-                issue.mutate(selected);
-              }}
-            >
-              Grant access{selected.length > 0 ? ` (${selected.length})` : ""}
-            </Button>
-          </div>
-        </section>
-
-        <section className="mt-4">
-          <h3 className="mb-2 font-semibold text-kumo-default">Current access</h3>
-          <div className="max-h-72 overflow-y-auto rounded-md border border-kumo-line bg-kumo-canvas">
-            {accessQuery.isLoading ? (
-              <div className="flex min-h-24 items-center justify-center">
-                <Loader size={20} />
+  return <Dialog.Root open onOpenChange={(open) => { if (!open && !pending && !dirty) onClose(); }}>
+    <Dialog size="lg" className="max-h-[calc(100dvh-2rem)] overflow-y-auto p-6">
+      <Dialog.Title className="text-xl font-semibold text-kumo-default">Manage access</Dialog.Title>
+      <Dialog.Description className="mb-4 text-kumo-subtle">{user.name}</Dialog.Description>
+      {error ? <Banner variant="error" title={error.message} className="mb-4" /> : null}
+      {loading ? <Loader size={20} /> : loadError ? null : <div className="max-h-[60dvh] overflow-y-auto rounded-md border border-kumo-line">
+        {sections.map((g) => {
+          const eligible = g.paths.filter((p) => p.enabled);
+          const count = eligible.filter((p) => selected.has(p.id)).length;
+          const open = openGroups.has(g.id);
+          return <Collapsible.Root key={g.id} open={open} onOpenChange={(next) => setOpenGroups((current) => {
+            const updated = new Set(current); if (next) updated.add(g.id); else updated.delete(g.id); return updated;
+          })} className="border-b border-kumo-line last:border-b-0">
+            <div className="flex min-w-0 items-center gap-3 px-3 py-2">
+              <div className="min-w-0 grow">
+                <Checkbox label={<span className="break-all">{g.name}</span>}
+                  checked={eligible.length > 0 && count === eligible.length}
+                  indeterminate={count > 0 && count < eligible.length}
+                  disabled={pending || !g.enabled || !eligible.length}
+                  onCheckedChange={() => { void toggle(eligible, count !== eligible.length); }} />
               </div>
-            ) : accessQuery.error ? (
-              <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">
-                Current access could not be loaded.
+              <span className="shrink-0 text-xs tabular-nums text-kumo-subtle" aria-label={`${count} of ${eligible.length} selected`}>{count}/{eligible.length}</span>
+              <Collapsible.Trigger render={<Button variant="ghost" size="sm" shape="square" aria-label={`${open ? "Collapse" : "Expand"} ${g.name}`} />}>
+                <CaretDownIcon className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />
+              </Collapsible.Trigger>
+            </div>
+            <Collapsible.Panel>
+              <div className="flex flex-col gap-3 border-t border-kumo-line py-3 pl-9 pr-3" role="group" aria-label={`${g.name} Paths`}>
+                {g.paths.map((p) => <div key={p.id} className="min-w-0 shrink-0">
+                  <Checkbox label={<span className="break-all">{p.display_name || `${p.proxy_name} · ${p.name}`}</span>}
+                    checked={selected.has(p.id)} disabled={pending || !p.enabled}
+                    onCheckedChange={(checked) => { void toggle([p], checked); }} />
+                </div>)}
+                {!g.paths.length ? <p className="text-sm text-kumo-subtle">No Paths</p> : null}
               </div>
-            ) : accesses.length > 0 ? (
-              accesses.map((access) => (
-                <AccessRow key={access.id} request={request} user={user} access={access} path={pathsQuery.data?.find((path) => path.id === access.path_id)} />
-              ))
-            ) : (
-              <div className="flex min-h-24 items-center justify-center text-sm text-kumo-subtle">
-                No access issued yet.
-              </div>
-            )}
-          </div>
-        </section>
-
-        <div className="mt-2 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Done
-          </Button>
-        </div>
-      </Dialog>
-    </Dialog.Root>
-  );
+            </Collapsible.Panel>
+          </Collapsible.Root>;
+        })}
+        {!sections.length ? <p className="p-3 text-sm text-kumo-subtle">No Paths yet.</p> : null}
+      </div>}
+      <div className="mt-4 flex items-center justify-end gap-2">
+        <Button variant="ghost" disabled={pending} onClick={onClose}>Cancel</Button>
+        <Button variant="primary" loading={pending} disabled={loading || Boolean(loadError) || !dirty || pending}
+          onClick={() => mutation.mutate(changes)}>Save</Button>
+      </div>
+    </Dialog>
+  </Dialog.Root>;
 }
 
 type ConnectionProxy = UserConnectionInfo["nodes"][number]["proxies"][number];

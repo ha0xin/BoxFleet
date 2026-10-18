@@ -210,6 +210,11 @@ func (db *DB) issueProxyCredential(
 // legacy admin API. New flows should issue a ProxyCredential as a dependency of
 // an explicitly granted Path.
 func (db *DB) IssueVLESSRealityAccess(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
+	if !db.transactional {
+		var result ProxyCredential
+		err := db.atomic(ctx, func(tx *DB) error { var e error; result, e = tx.IssueVLESSRealityAccess(ctx, params); return e })
+		return result, err
+	}
 	credential, err := db.IssueVLESSRealityCredential(ctx, params)
 	if err != nil {
 		return ProxyCredential{}, err
@@ -221,6 +226,11 @@ func (db *DB) IssueVLESSRealityAccess(ctx context.Context, params IssueCredentia
 }
 
 func (db *DB) IssueShadowsocks2022Access(ctx context.Context, params IssueCredentialParams) (ProxyCredential, error) {
+	if !db.transactional {
+		var result ProxyCredential
+		err := db.atomic(ctx, func(tx *DB) error { var e error; result, e = tx.IssueShadowsocks2022Access(ctx, params); return e })
+		return result, err
+	}
 	credential, err := db.IssueShadowsocks2022Credential(ctx, params)
 	if err != nil {
 		return ProxyCredential{}, err

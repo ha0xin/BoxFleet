@@ -61,7 +61,7 @@ func TestAdminNodeUpdateUsesOnlyFixedCatalogAssets(t *testing.T) {
 	}
 	server := httptest.NewServer(NewRouter(Options{
 		DB: store, ArtifactDir: artifactDir, AllowInsecureAdmin: true,
-		Version: "v0.2.0", AgentVersion: "v0.1.9", Repo: "ha0xin/BoxFleet", SingBoxVersion: "v1.13.13",
+		Version: "local-server-build", NodeRelease: "v0.2.0", AgentVersion: "v0.1.9", Repo: "ha0xin/BoxFleet", SingBoxVersion: "v1.13.13",
 	}))
 	t.Cleanup(server.Close)
 
@@ -86,6 +86,9 @@ func TestAdminNodeUpdateUsesOnlyFixedCatalogAssets(t *testing.T) {
 	var payload model.NodeUpdatePayload
 	if err := json.Unmarshal(operation.Payload, &payload); err != nil {
 		t.Fatal(err)
+	}
+	if payload.Release != "v0.2.0" {
+		t.Fatalf("node release follows server build instead of published assets: %q", payload.Release)
 	}
 	if payload.Agent == nil || payload.SingBox == nil {
 		t.Fatalf("payload = %+v", payload)

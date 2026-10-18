@@ -81,6 +81,12 @@ type ConnectionReport struct {
 	CreatedAt               string `json:"created_at"`
 }
 
+type DirectPathGrant struct {
+	ProxyUserID string `json:"proxy_user_id"`
+	PathID      string `json:"path_id"`
+	Enabled     int64  `json:"enabled"`
+}
+
 type DomainServiceOverride struct {
 	Suffix    string `json:"suffix"`
 	Service   string `json:"service"`
@@ -382,6 +388,31 @@ type PathAccess struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
+type PathGroup struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Enabled     int64          `json:"enabled"`
+	Revision    int64          `json:"revision"`
+	DeletedAt   sql.NullString `json:"deleted_at"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}
+
+type PathGroupChange struct {
+	ID         string `json:"id"`
+	GroupID    string `json:"group_id"`
+	ChangeJson string `json:"change_json"`
+	ImpactJson string `json:"impact_json"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type PathGroupMember struct {
+	GroupID   string `json:"group_id"`
+	PathID    string `json:"path_id"`
+	SortOrder int64  `json:"sort_order"`
+}
+
 type Proxy struct {
 	ID                string         `json:"id"`
 	NodeID            string         `json:"node_id"`
@@ -582,4 +613,9 @@ type UserNodeBinding struct {
 	DisabledReason    string          `json:"disabled_reason"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
+}
+
+type UserPathGroupGrant struct {
+	ProxyUserID string `json:"proxy_user_id"`
+	GroupID     string `json:"group_id"`
 }

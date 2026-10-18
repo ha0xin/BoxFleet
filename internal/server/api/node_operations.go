@@ -253,7 +253,7 @@ func adminCreateNodeUpdateHandler(store *db.DB, notifier *nodeOperationNotifier,
 			writeAdminError(w, err)
 			return
 		}
-		payload := model.NodeUpdatePayload{Release: strings.TrimSpace(catalog.options.Version)}
+		payload := model.NodeUpdatePayload{Release: nodeReleaseVersion(catalog.options)}
 		kind := ""
 		if selected["agent"] {
 			payload.Agent = &agentAsset

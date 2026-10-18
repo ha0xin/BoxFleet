@@ -25,9 +25,14 @@ const sqliteMaxOpenConnections = 4
 type DB struct {
 	sql *sql.DB
 	q   *store.Queries
+	// transactional is only set on a private, transaction-scoped facade.
+	transactional bool
 }
 
 func (db *DB) withTx(ctx context.Context, fn func(*store.Queries) error) error {
+	if db.transactional {
+		return fn(db.q)
+	}
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -38,6 +43,14 @@ func (db *DB) withTx(ctx context.Context, fn func(*store.Queries) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// atomic gives composed domain operations the same query handle and transaction.
+// The scoped facade never escapes the callback; it does not mutate the shared DB.
+func (db *DB) atomic(ctx context.Context, fn func(*DB) error) error {
+	return db.withTx(ctx, func(q *store.Queries) error {
+		return fn(&DB{sql: db.sql, q: q, transactional: true})
+	})
 }
 
 type MigrationStatus struct {

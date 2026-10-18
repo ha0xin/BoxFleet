@@ -366,6 +366,9 @@ func (db *DB) SetProxyDirectPublication(ctx context.Context, proxyID string, ena
 }
 
 func (db *DB) SyncLegacyDirectPathsForNode(ctx context.Context, nodeName string) error {
+	if !db.transactional {
+		return db.atomic(ctx, func(tx *DB) error { return tx.SyncLegacyDirectPathsForNode(ctx, nodeName) })
+	}
 	proxies, err := db.ListProxies(ctx, nodeName)
 	if err != nil {
 		return err
@@ -386,6 +389,16 @@ func (db *DB) SyncLegacyDirectPathsForNode(ctx context.Context, nodeName string)
 		return err
 	}
 	for _, credential := range credentials {
+		// A group or chained Path may require this credential without granting
+		// legacy direct publication. Host edits must not create a direct source
+		// that survives later group revocation.
+		direct, err := db.q.HasManagedDirectGrantForProxyUser(ctx, store.HasManagedDirectGrantForProxyUserParams{ProxyUserID: credential.ProxyUserID, ProxyID: credential.ProxyID})
+		if err != nil {
+			return err
+		}
+		if !direct {
+			continue
+		}
 		if err := db.GrantDirectPathsForCredential(ctx, credential); err != nil {
 			return err
 		}
@@ -394,6 +407,11 @@ func (db *DB) SyncLegacyDirectPathsForNode(ctx context.Context, nodeName string)
 }
 
 func (db *DB) UpdatePath(ctx context.Context, params UpdatePathParams) (Path, error) {
+	if !db.transactional {
+		var result Path
+		err := db.atomic(ctx, func(tx *DB) error { var e error; result, e = tx.UpdatePath(ctx, params); return e })
+		return result, err
+	}
 	existing, err := db.GetPath(ctx, params.ID)
 	if err != nil {
 		return Path{}, err
@@ -519,6 +537,17 @@ func (db *DB) validatePublishedNamesForUser(ctx context.Context, userName, extra
 }
 
 func (db *DB) normalizePath(ctx context.Context, path Path) (Path, error) {
+	if path.ID != "" && path.Visibility == PathVisibilityDependency {
+		members, err := db.q.ListPathGroupMembers(ctx)
+		if err != nil {
+			return Path{}, err
+		}
+		for _, m := range members {
+			if m.PathID == path.ID {
+				return Path{}, fmt.Errorf("remove Path from its groups before making it dependency-only")
+			}
+		}
+	}
 	path.ID = strings.TrimSpace(path.ID)
 	path.Name = strings.TrimSpace(path.Name)
 	path.DisplayName = strings.TrimSpace(path.DisplayName)
@@ -591,6 +620,9 @@ func (db *DB) ListPathsForAdmin(ctx context.Context) ([]Path, error) {
 }
 
 func (db *DB) DeletePath(ctx context.Context, pathID string) error {
+	if !db.transactional {
+		return db.atomic(ctx, func(tx *DB) error { return tx.DeletePath(ctx, pathID) })
+	}
 	path, err := db.GetPath(ctx, pathID)
 	if err != nil {
 		return err
@@ -688,7 +720,7 @@ func (db *DB) validatePathGraph(ctx context.Context, candidate Path) error {
 	return visit(candidate.ID, 1)
 }
 
-func (db *DB) GrantPathAccess(ctx context.Context, userName, pathID string) (PathAccess, error) {
+func (db *DB) grantPathAccess(ctx context.Context, userName, pathID string) (PathAccess, error) {
 	user, err := db.GetProxyUser(ctx, userName)
 	if err != nil {
 		return PathAccess{}, err
@@ -727,7 +759,11 @@ func (db *DB) GrantPathAccess(ctx context.Context, userName, pathID string) (Pat
 // GrantPathToUser is the product-level grant operation. It ensures the
 // technical node binding and ProxyCredential for every hop in the chain, then
 // grants only the selectable root Path to the user.
-func (db *DB) GrantPathToUser(ctx context.Context, userName, pathID string) (PathAccess, error) {
+func (db *DB) grantPathToUser(ctx context.Context, userName, pathID string) (PathAccess, error) {
+	user, err := db.GetProxyUser(ctx, userName)
+	if err != nil {
+		return PathAccess{}, err
+	}
 	path, err := db.GetPath(ctx, pathID)
 	if err != nil {
 		return PathAccess{}, err
@@ -753,8 +789,17 @@ func (db *DB) GrantPathToUser(ctx context.Context, userName, pathID string) (Pat
 		if err != nil {
 			return err
 		}
-		if _, err := db.BindUserToNode(ctx, userName, proxy.NodeName); err != nil {
-			return err
+		binding, bindingErr := db.q.GetUserNodeBinding(ctx, store.GetUserNodeBindingParams{ProxyUserID: user.ID, NodeID: proxy.NodeID})
+		if bindingErr == nil && binding.Enabled != 1 {
+			return fmt.Errorf("node binding for %s is disabled", proxy.NodeName)
+		}
+		if bindingErr != nil {
+			if !errors.Is(bindingErr, sql.ErrNoRows) {
+				return bindingErr
+			}
+			if _, err := db.BindUserToNode(ctx, userName, proxy.NodeName); err != nil {
+				return err
+			}
 		}
 		params := IssueCredentialParams{UserName: userName, NodeName: proxy.NodeName, ProxyName: proxy.Name}
 		switch proxy.Protocol {
@@ -780,37 +825,53 @@ func (db *DB) GrantPathToUser(ctx context.Context, userName, pathID string) (Pat
 	if err := ensure(path); err != nil {
 		return PathAccess{}, err
 	}
-	return db.GrantPathAccess(ctx, userName, path.ID)
+	return db.grantPathAccess(ctx, userName, path.ID)
 }
 
-func (db *DB) RevokePathAccess(ctx context.Context, userName, pathID string) (PathAccess, error) {
-	user, err := db.GetProxyUser(ctx, userName)
-	if err != nil {
-		return PathAccess{}, err
-	}
-	params := store.SoftDeletePathAccessParams{PathID: pathID, ProxyUserID: user.ID}
-	var row store.PathAccess
-	// The soft delete and the credential teardown it triggers must commit
-	// together; otherwise a partial failure leaves the user's proxy credentials
-	// enabled and still rendered into node configs.
-	err = db.withTx(ctx, func(q *store.Queries) error {
-		affected, err := q.SoftDeletePathAccess(ctx, params)
+// RevokePathAccess removes only the direct source. Group grants remain effective.
+func (db *DB) RevokePathAccess(ctx context.Context, userName, pathID string) (result PathAccess, err error) {
+	err = db.atomic(ctx, func(tx *DB) error {
+		user, err := tx.GetProxyUser(ctx, userName)
 		if err != nil {
 			return err
 		}
-		if err := requireAffected(affected, "path access", userName+"@"+pathID); err != nil {
+		if err := tx.q.DeleteDirectPathGrant(ctx, store.DeleteDirectPathGrantParams{ProxyUserID: user.ID, PathID: pathID}); err != nil {
 			return err
 		}
-		row, err = q.GetPathAccessByIDs(ctx, store.GetPathAccessByIDsParams(params))
-		if err != nil {
+		if err := tx.reconcilePathGrants(ctx, user.ID); err != nil {
 			return err
 		}
-		return disableUnusedProxyCredentialsTx(ctx, q, user)
+		row, err := tx.q.GetPathAccessByIDs(ctx, store.GetPathAccessByIDsParams{ProxyUserID: user.ID, PathID: pathID})
+		result = pathAccessFromRow(row)
+		return err
 	})
-	if err != nil {
-		return PathAccess{}, err
-	}
-	return pathAccessFromRow(row), nil
+	return
+}
+
+// Direct grant operations preserve their origin separately from effective access.
+func (db *DB) GrantPathAccess(ctx context.Context, userName, pathID string) (PathAccess, error) {
+	return db.grantDirectPath(ctx, userName, pathID, false)
+}
+func (db *DB) GrantPathToUser(ctx context.Context, userName, pathID string) (PathAccess, error) {
+	return db.grantDirectPath(ctx, userName, pathID, true)
+}
+func (db *DB) grantDirectPath(ctx context.Context, userName, pathID string, technical bool) (result PathAccess, err error) {
+	err = db.atomic(ctx, func(tx *DB) error {
+		user, e := tx.GetProxyUser(ctx, userName)
+		if e != nil {
+			return e
+		}
+		if e = tx.q.SetDirectPathGrant(ctx, store.SetDirectPathGrantParams{ProxyUserID: user.ID, PathID: pathID}); e != nil {
+			return e
+		}
+		if technical {
+			result, e = tx.grantPathToUser(ctx, user.ID, pathID)
+		} else {
+			result, e = tx.grantPathAccess(ctx, user.ID, pathID)
+		}
+		return e
+	})
+	return
 }
 
 func disableUnusedProxyCredentialsTx(ctx context.Context, q *store.Queries, user ProxyUser) error {

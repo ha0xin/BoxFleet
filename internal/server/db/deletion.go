@@ -233,6 +233,20 @@ func (db *DB) ResourceDeletionImpact(ctx context.Context, kind, resourceID strin
 			add("Credential", a.ID, a.UserName+" @ "+proxyNames[a.ProxyID], effect)
 		}
 	}
+	groups, err := db.ListPathGroups(ctx)
+	if err != nil {
+		return result, err
+	}
+	for _, g := range groups {
+		for _, pid := range g.PathIDs {
+			if affected[pid] {
+				add("Path group membership", g.ID+"/"+pid, g.Name+" → "+labels[pid], "Removed")
+			}
+		}
+		if kind == "user" && containsID(g.UserIDs, resourceID) {
+			add("Path group grant", g.ID+"/"+resourceID, g.Name, "Revoked")
+		}
+	}
 	sort.Slice(result.Items, func(i, j int) bool {
 		a, b := result.Items[i], result.Items[j]
 		if a.Kind != b.Kind {
@@ -266,6 +280,12 @@ func retireResourceDependenciesTx(ctx context.Context, q *store.Queries) error {
 			return err
 		}
 		if err := q.ArchivePathAccesses(ctx, pathID); err != nil {
+			return err
+		}
+		if err := q.RemoveRetiredPathGroupSources(ctx, pathID); err != nil {
+			return err
+		}
+		if err := q.RemoveRetiredPathDirectSources(ctx, pathID); err != nil {
 			return err
 		}
 	}

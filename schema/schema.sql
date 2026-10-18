@@ -904,3 +904,44 @@ SELECT e.id, e.node_id, e.proxy_user_id, e.auth_name, e.source_ip, e.target_host
 WHERE e.connection_id = '' OR EXISTS (SELECT 1 FROM network_event_source_intervals s WHERE s.node_id=e.node_id AND julianday(e.window_end)>=julianday(s.started_at) AND (s.ended_at IS NULL OR julianday(e.window_end)<julianday(s.ended_at)));
 CREATE INDEX idx_log_events_event_time ON log_events(window_start, id) WHERE proxy_user_id IS NOT NULL;
 CREATE INDEX idx_connection_events_event_time ON connection_events((CASE WHEN connection_id <> '' THEN bucket_start ELSE window_start END), id);
+
+CREATE TABLE path_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  revision INTEGER NOT NULL DEFAULT 1,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE UNIQUE INDEX idx_path_groups_active_name ON path_groups(name) WHERE deleted_at IS NULL;
+CREATE TABLE path_group_members (
+  group_id TEXT NOT NULL REFERENCES path_groups(id) ON DELETE CASCADE,
+  path_id TEXT NOT NULL REFERENCES paths(id) ON DELETE CASCADE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (group_id, path_id)
+);
+CREATE INDEX idx_path_group_members_path ON path_group_members(path_id);
+CREATE TABLE user_path_group_grants (
+  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+  group_id TEXT NOT NULL REFERENCES path_groups(id) ON DELETE CASCADE,
+  PRIMARY KEY (proxy_user_id, group_id)
+);
+CREATE INDEX idx_user_path_group_grants_group ON user_path_group_grants(group_id);
+CREATE TABLE direct_path_grants (
+  proxy_user_id TEXT NOT NULL REFERENCES proxy_users(id) ON DELETE CASCADE,
+  path_id TEXT NOT NULL REFERENCES paths(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  PRIMARY KEY (proxy_user_id, path_id)
+);
+CREATE INDEX idx_direct_path_grants_path ON direct_path_grants(path_id);
+
+CREATE TABLE path_group_changes (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES path_groups(id) ON DELETE RESTRICT,
+  change_json TEXT NOT NULL,
+  impact_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX idx_path_group_changes_group ON path_group_changes(group_id,created_at);

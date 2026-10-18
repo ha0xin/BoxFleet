@@ -34,10 +34,11 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Manage access" }).click();
   await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
+  await page.getByRole("button", { name: "Expand Other", exact: true }).click();
   await page.getByRole("checkbox", { name: /vless-ui/ }).check();
-  await page.getByRole("button", { name: "Grant access (1)" }).click();
-  await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "vless-ui", exact: true })).toBeChecked();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   const activation = await page.request.patch("/api/admin/nodes/edge-ui", { data: { status: "active" } });
   expect(activation.ok()).toBeTruthy();
   const beforeRotation = await (await page.request.get("/api/admin/users/alice-ui/connection-info")).json();
@@ -89,12 +90,12 @@ test("admin UI creates, grants, revokes, and deletes resources", async ({ page }
   await rotationDialog.getByRole("button", { name: "Done" }).click();
   await openRowActions(page, "alice-ui");
   await page.getByRole("menuitem", { name: "Manage access" }).click();
-  await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toBeVisible();
-  await page.getByRole("button", { name: "Revoke vless-ui" }).click();
-  await expect(page.getByRole("heading", { name: "Revoke access" })).toBeVisible();
-  await page.getByRole("button", { name: "Revoke", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Revoke vless-ui" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("button", { name: "Expand Other", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "vless-ui", exact: true })).toBeChecked();
+  await page.getByRole("checkbox", { name: "vless-ui", exact: true }).uncheck();
+  await expect(page.getByRole("checkbox", { name: "vless-ui", exact: true })).not.toBeChecked();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Proxies", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Proxies", exact: true })).toBeVisible();

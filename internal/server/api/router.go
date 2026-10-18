@@ -42,6 +42,7 @@ type Options struct {
 	AdminPathToken     string
 	AllowInsecureAdmin bool
 	Version            string
+	NodeRelease        string
 	AgentVersion       string
 	Repo               string
 	SingBoxVersion     string
@@ -81,6 +82,10 @@ func NewRouter(options Options) http.Handler {
 		r.Get("/proxies", adminProxiesHandler(options.DB))
 		r.Get("/deletion-impact", adminDeletionImpactHandler(options.DB))
 		r.Get("/paths", adminPathsHandler(options.DB))
+		r.Get("/path-groups", adminPathGroupsHandler(options.DB))
+		r.Get("/path-groups/{group}/history", adminPathGroupHistoryHandler(options.DB))
+		r.Post("/path-groups/preview", adminPathGroupChangeHandler(options.DB, true))
+		r.Post("/path-groups/changes", adminPathGroupChangeHandler(options.DB, false))
 		r.Post("/paths", adminCreatePathHandler(options.DB))
 		r.Patch("/paths/{path}", adminUpdatePathHandler(options.DB))
 		r.Delete("/paths/{path}", adminDeletePathHandler(options.DB))
@@ -120,7 +125,9 @@ func NewRouter(options Options) http.Handler {
 		r.Post("/users/{user}/proxies", adminIssueUserProxyCredentialHandler(options.DB))
 		r.Delete("/users/{user}/proxies/{node}/{proxy}", adminDeleteUserProxyCredentialHandler(options.DB))
 		r.Get("/users/{user}/paths", adminUserPathsHandler(options.DB))
+		r.Get("/users/{user}/path-sources", adminUserPathSourcesHandler(options.DB))
 		r.Post("/users/{user}/paths", adminGrantUserPathHandler(options.DB))
+		r.Patch("/users/{user}/paths", adminChangeUserPathSelectionHandler(options.DB))
 		r.Delete("/users/{user}/paths/{path}", adminRevokeUserPathHandler(options.DB))
 		r.Get("/users/{user}/connection-info", adminUserConnectionInfoHandler(options.DB))
 		r.Get("/users/{user}/node-info", adminUserNodeInfoHandler(options.DB))
@@ -170,7 +177,7 @@ func installScriptHandler(options Options) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		script, err := install.Script(install.ScriptData{
 			Repo:            options.Repo,
-			BoxFleetVersion: options.Version,
+			BoxFleetVersion: nodeReleaseVersion(options),
 			AgentVersion:    options.AgentVersion,
 			SingBoxVersion:  options.SingBoxVersion,
 		})

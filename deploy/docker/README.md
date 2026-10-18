@@ -77,6 +77,12 @@ artifacts. For unreleased source, prepare a real release identity plus manifest
 and artifact publication before production cutover; a local artifact mount alone
 does not fix the install script's GitHub download URLs.
 
+For a server-only build, `BOXFLEET_NODE_RELEASE` (or `--node-release`) can now
+explicitly retain an existing published release for node installation and update
+assets while VERSION identifies the new server build. Keep AGENT_VERSION and
+sing-box aligned with that release and verify its manifest and installer. This
+does not publish new node binaries or make unreleased agent features available.
+
 The multi-stage build builds the embedded UI before compiling bfs. Runtime
 contains the server and CA certificates, without the development toolchain.
 The process runs as UID/GID 10001 and has an HTTP healthcheck. UI/Go dependencies

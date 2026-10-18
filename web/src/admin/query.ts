@@ -30,6 +30,7 @@ export const adminKeys = {
   nodes: ["admin", "nodes-all"] as const,
   proxies: ["admin", "proxies-all"] as const,
   paths: ["admin", "paths"] as const,
+  pathGroups: ["admin", "path-groups"] as const,
   configChanges: ["admin", "config-changes"] as const,
   publishNodes: ["admin", "publish-nodes"] as const,
   mihomoProfiles: ["admin", "mihomo-profiles"] as const,
