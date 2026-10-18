@@ -51,6 +51,7 @@ func (e *operationAPIError) Error() string {
 func agentCapabilities() []string {
 	return []string{
 		model.CapabilityOperationsV1,
+		model.CapabilityNetworkInventoryV1,
 		model.CapabilityAgentUpdateV1,
 		model.CapabilitySingBoxUpdateV1,
 		model.CapabilityStreamingDownloadV1,

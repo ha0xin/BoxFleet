@@ -686,9 +686,15 @@ func (a *Agent) Run(ctx context.Context) error {
 	if interval <= 0 {
 		interval = DefaultPollInterval
 	}
-	a.poll(ctx)
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	inventoryDone := make(chan struct{})
+	go func() {
+		defer close(inventoryDone)
+		a.runNetworkInventory(runCtx, scanLocalAddresses, watchLocalAddresses)
+	}()
+	defer func() { cancel(); <-inventoryDone }()
+	a.poll(runCtx)
 	errorsOut := make(chan error, 2)
 	go func() {
 		ticker := time.NewTicker(interval)

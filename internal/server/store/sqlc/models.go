@@ -271,6 +271,25 @@ type NodeNameAlias struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type NodeNetworkSnapshot struct {
+	NodeID        string `json:"node_id"`
+	Revision      int64  `json:"revision"`
+	ContentHash   string `json:"content_hash"`
+	AddressesJson string `json:"addresses_json"`
+	CollectedAt   string `json:"collected_at"`
+	ReceivedAt    string `json:"received_at"`
+	AttemptedAt   string `json:"attempted_at"`
+	Error         string `json:"error"`
+}
+
+type NodeObservedIp struct {
+	NodeID     string `json:"node_id"`
+	Family     int64  `json:"family"`
+	Address    string `json:"address"`
+	Source     string `json:"source"`
+	ObservedAt string `json:"observed_at"`
+}
+
 type NodeOperation struct {
 	ID                       string         `json:"id"`
 	NodeID                   string         `json:"node_id"`

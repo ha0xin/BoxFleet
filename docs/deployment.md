@@ -35,6 +35,8 @@ file before use.
 
 ## Management server
 
+节点地址发现的 agent 升级、Cloudflare Tunnel 可信来源配置及观测边界见 [节点地址发现](node-addresses.md)。Server 默认不信任转发头；在 Tunnel 部署中按实际直连对端配置 `BOXFLEET_CLIENT_IP_SOURCE` 和 `BOXFLEET_TRUSTED_PROXY_CIDRS`。
+
 The supplied Compose configuration runs the production server as a Docker
 container with persistent storage. Development uses a separate checkout and
 database; production does not mount the source tree. See the

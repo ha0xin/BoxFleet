@@ -28,6 +28,7 @@ export const adminKeys = {
   overview: (authVersion: number) => ["admin", "overview", authVersion] as const,
   users: (deleted = false) => ["admin", "users", deleted] as const,
   nodes: ["admin", "nodes-all"] as const,
+ nodeAddresses: (id: string) => ["admin", "node-addresses", id] as const,
   proxies: ["admin", "proxies-all"] as const,
   paths: ["admin", "paths"] as const,
   pathGroups: ["admin", "path-groups"] as const,

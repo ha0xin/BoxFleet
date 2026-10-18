@@ -35,6 +35,8 @@ const (
 )
 
 type Options struct {
+	ClientIPSource     string
+	TrustedProxyCIDRs  []string
 	MaintenanceContext context.Context
 	DB                 *db.DB
 	ArtifactDir        string
@@ -64,7 +66,9 @@ func NewRouter(options Options) http.Handler {
 	router.Get("/sub/{token}/mihomo.yaml", subscriptionMihomoProfileHandler(options.DB))
 	router.Get("/api/node/config", nodeConfigHandler(options.DB))
 	router.Post("/api/node/apply-result", nodeApplyResultHandler(options.DB))
-	router.Post("/api/node/heartbeat", nodeHeartbeatHandler(options.DB))
+	router.With(nodeClientIPMiddleware(options)).Post("/api/node/heartbeat", nodeHeartbeatHandler(options.DB, options.ClientIPSource))
+	router.Get("/api/node/network-snapshot", nodeNetworkSnapshotHandler(options.DB))
+	router.Post("/api/node/network-snapshot", nodeNetworkSnapshotHandler(options.DB))
 	router.Post("/api/node/traffic", nodeTrafficHandler(options.DB))
 	router.Post("/api/node/logs", nodeLogsHandler(options.DB))
 	router.Post("/api/node/connections", nodeConnectionEventsHandler(options.DB))
@@ -93,6 +97,7 @@ func NewRouter(options Options) http.Handler {
 		r.Post("/nodes", adminCreateNodeHandler(options.DB))
 		r.Post("/nodes/bootstrap", adminCreateNodeBootstrapHandler(options.DB))
 		r.Get("/nodes/{node}", adminNodeHandler(options.DB))
+		r.Get("/nodes/{node}/addresses", adminNodeAddressesHandler(options.DB))
 		r.Patch("/nodes/{node}", adminUpdateNodeHandler(options.DB))
 		r.Delete("/nodes/{node}", adminDeleteNodeHandler(options.DB))
 		r.Post("/nodes/{node}/restore", adminRestoreNodeHandler(options.DB))
@@ -278,7 +283,7 @@ func nodeApplyResultHandler(store *db.DB) http.HandlerFunc {
 	}
 }
 
-func nodeHeartbeatHandler(store *db.DB) http.HandlerFunc {
+func nodeHeartbeatHandler(store *db.DB, source string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodeName, ok := authenticateNode(w, r, store)
 		if !ok {
@@ -289,7 +294,7 @@ func nodeHeartbeatHandler(store *db.DB) http.HandlerFunc {
 			return
 		}
 		heartbeat.NodeName = nodeName
-		if err := store.RecordHeartbeat(r.Context(), heartbeat); err != nil {
+		if err := store.RecordHeartbeatWithObservedIP(r.Context(), heartbeat, observedRequestIP(r, source)); err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
