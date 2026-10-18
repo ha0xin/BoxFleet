@@ -1,0 +1,319 @@
+{
+  "checked_on": "2026-10-18",
+  "projects": [
+    {
+      "repo": "vishvananda/netlink",
+      "ref": "v1.3.1",
+      "commit": "17daef607c6442d47b0565343cf8a69f985a4cb7",
+      "commit_date": "2025-05-09T18:59:25Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/17daef607c6442d47b0565343cf8a69f985a4cb7/go.mod",
+          "sha256": "7465f5b2b9852d84281d6ad9cf7c31933d109127fdca6dd4c6b2d4261fc9f007"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/17daef607c6442d47b0565343cf8a69f985a4cb7/LICENSE",
+          "sha256": "04cf148229e562c643203d1ee8c43aae2022e5130e95ceb8ba8357a27c1a9abe"
+        },
+        {
+          "path": "addr.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/17daef607c6442d47b0565343cf8a69f985a4cb7/addr.go",
+          "sha256": "6a2f0e158fc9c8bc39b017969dd962d49c0ff75ddf0ebff717bc67f43f90ebfa"
+        },
+        {
+          "path": "addr_linux.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/17daef607c6442d47b0565343cf8a69f985a4cb7/addr_linux.go",
+          "sha256": "281501e4faf0c2cbd543d76ddaa0ec65e8e0a44da19300636a9c0142dbb5ff62"
+        },
+        {
+          "path": "addr_test.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/17daef607c6442d47b0565343cf8a69f985a4cb7/addr_test.go",
+          "sha256": "40ba15a21748f86ff49748beb179f2fbe7a352b3bef778e16472a6bf7196cab0"
+        }
+      ],
+      "module_sum": "h1:3AEMt62VKqz90r0tmNhog0r/PpWKmrEShJU0wJW6bV0="
+    },
+    {
+      "repo": "vishvananda/netlink",
+      "ref": "main",
+      "commit": "3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b",
+      "commit_date": "2026-10-15T18:42:44Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/go.mod",
+          "sha256": "a81d07e9b28ab85287b862d320c3dcbe2ea62c489213d4c1bbbbbbf860c25f3f"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/LICENSE",
+          "sha256": "04cf148229e562c643203d1ee8c43aae2022e5130e95ceb8ba8357a27c1a9abe"
+        },
+        {
+          "path": "addr.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/addr.go",
+          "sha256": "00973ab44dcfec9f1f403772074fbd05479d36a46789a0263b57c9333940cdd6"
+        },
+        {
+          "path": "addr_linux.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/addr_linux.go",
+          "sha256": "f6571d190d5e6c2d740fc058d03607e24a07144946fdce518aa8c8bede9b1c49"
+        },
+        {
+          "path": "addr_test.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/addr_test.go",
+          "sha256": "d5861d4743f5600e929defce25089541f9a77358f01b577ec397d3bd475d67f8"
+        },
+        {
+          "path": "link_linux.go",
+          "url": "https://raw.githubusercontent.com/vishvananda/netlink/3fdd74264153d2d34a4b3b5fc9d6bb0d69c52c5b/link_linux.go",
+          "sha256": "1121d4d66aff1cab77ee788c14056c037d8e958cf919847f41151bd6b1b7c30a"
+        }
+      ]
+    },
+    {
+      "repo": "jsimonetti/rtnetlink",
+      "ref": "master",
+      "commit": "9498c7a8aec537cfc4efb4ff7e817540415c9069",
+      "commit_date": "2026-09-04T06:09:52Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/jsimonetti/rtnetlink/9498c7a8aec537cfc4efb4ff7e817540415c9069/go.mod",
+          "sha256": "eb5ea37f1539d53cda0bdbb408fb096ca6e839a52e6b2d31287f26e078f9b145"
+        },
+        {
+          "path": "conn.go",
+          "url": "https://raw.githubusercontent.com/jsimonetti/rtnetlink/9498c7a8aec537cfc4efb4ff7e817540415c9069/conn.go",
+          "sha256": "9d8ebeecfa1913cfc827b3708ed608f75abfeffe592b4ed80dad81f9c82a8df2"
+        },
+        {
+          "path": "address.go",
+          "url": "https://raw.githubusercontent.com/jsimonetti/rtnetlink/9498c7a8aec537cfc4efb4ff7e817540415c9069/address.go",
+          "sha256": "9a436798704c217cfd419912ac2c72554715cef1a1a7cecc19567a67cb33cacc"
+        },
+        {
+          "path": "example_address_list_test.go",
+          "url": "https://raw.githubusercontent.com/jsimonetti/rtnetlink/9498c7a8aec537cfc4efb4ff7e817540415c9069/example_address_list_test.go",
+          "sha256": "6389fbb88f7b3188c092547fd552a769e3d77db8181559509dc3b65ef2aabf2c"
+        },
+        {
+          "path": "LICENSE.md",
+          "url": "https://raw.githubusercontent.com/jsimonetti/rtnetlink/9498c7a8aec537cfc4efb4ff7e817540415c9069/LICENSE.md",
+          "sha256": "1f61baf667aacf74c2d17abcfc0ba6e9267265460a508629307c08020dcae39c"
+        }
+      ]
+    },
+    {
+      "repo": "prometheus/blackbox_exporter",
+      "ref": "master",
+      "commit": "d18e9bed33270911c09826234a4e4f500f775087",
+      "commit_date": "2026-10-14T13:02:07Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/go.mod",
+          "sha256": "a66203e4b5027a92396878d83796dfcbaebc90aab28331f1425537deab125712"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "CONFIGURATION.md",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/CONFIGURATION.md",
+          "sha256": "30fe9afad8540b433a89286d0f2200977de579a10d6f48565100c8146301adb5"
+        },
+        {
+          "path": "prober/http.go",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/prober/http.go",
+          "sha256": "4d9e7ba321c5001f824e05638cee92d42b32ddee290bf1488afed09336a9c023"
+        },
+        {
+          "path": "prober/utils.go",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/prober/utils.go",
+          "sha256": "955c4c14d2a4e89e64872ae3f69e4f791df0604fbc9deb93a3d845aaa1767c83"
+        },
+        {
+          "path": "prober/tcp.go",
+          "url": "https://raw.githubusercontent.com/prometheus/blackbox_exporter/d18e9bed33270911c09826234a4e4f500f775087/prober/tcp.go",
+          "sha256": "b7a5bf1d421f6ba1039ba14a9fc59499fed2d726c406229b2b6e7becb8b8ed6d"
+        }
+      ]
+    },
+    {
+      "repo": "tailscale/tailscale",
+      "ref": "main",
+      "commit": "e3c3ef18a51a2d70c902c28f465939888464fb86",
+      "commit_date": "2026-10-17T01:02:33Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/tailscale/tailscale/e3c3ef18a51a2d70c902c28f465939888464fb86/go.mod",
+          "sha256": "74a97b56fc6b3f8974a9fd1563dbca27158de588612ed0ebe7edfc0a2bdb768f"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/tailscale/tailscale/e3c3ef18a51a2d70c902c28f465939888464fb86/LICENSE",
+          "sha256": "a7ca6186a7963a0a60740f6047760eecd7a0234e8c38bd7e1e0bbcb324bda45b"
+        },
+        {
+          "path": "net/netmon/netmon.go",
+          "url": "https://raw.githubusercontent.com/tailscale/tailscale/e3c3ef18a51a2d70c902c28f465939888464fb86/net/netmon/netmon.go",
+          "sha256": "fe353cb9c8921768105b65c19e8143eaa92d1fecd4ee6a4a9a279362ba151139"
+        },
+        {
+          "path": "net/netmon/netmon_linux.go",
+          "url": "https://raw.githubusercontent.com/tailscale/tailscale/e3c3ef18a51a2d70c902c28f465939888464fb86/net/netmon/netmon_linux.go",
+          "sha256": "6bff97010039098d36070bf3791bdf44515c940c4f90088e9ce6b3d7b7a5cdce"
+        },
+        {
+          "path": "net/netmon/netmon_test.go",
+          "url": "https://raw.githubusercontent.com/tailscale/tailscale/e3c3ef18a51a2d70c902c28f465939888464fb86/net/netmon/netmon_test.go",
+          "sha256": "0129d9bd03f993c302022cbcee53eac2f2056f07a291205a72c5fa8b62f076bf"
+        }
+      ]
+    },
+    {
+      "repo": "libdns/libdns",
+      "ref": "master",
+      "commit": "43599001f01ca904aa17a7f6f5857d0b94691bcd",
+      "commit_date": "2026-06-25T19:57:21Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/libdns/libdns/43599001f01ca904aa17a7f6f5857d0b94691bcd/go.mod",
+          "sha256": "34648bbfa1c4592fbceec277ea079886f0c5c0f61f635e02fb2666c96694ca4b"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/libdns/libdns/43599001f01ca904aa17a7f6f5857d0b94691bcd/LICENSE",
+          "sha256": "e75b5c81dc881b74f84c306c2d0b7db1affbe78d9c0feb5722eb432fd534bea5"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/libdns/libdns/43599001f01ca904aa17a7f6f5857d0b94691bcd/README.md",
+          "sha256": "b0bec1095d2a676b3315ddb487ef89d56a4851734a4aa73ee1c933b4b489bb96"
+        },
+        {
+          "path": "libdns.go",
+          "url": "https://raw.githubusercontent.com/libdns/libdns/43599001f01ca904aa17a7f6f5857d0b94691bcd/libdns.go",
+          "sha256": "1fffcdbc86018c4f0c72746ab010ed6f05fbbbab37ecbf04925356490fe72e63"
+        }
+      ]
+    },
+    {
+      "repo": "SagerNet/sing-box",
+      "ref": "v1.14.2",
+      "commit": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
+      "commit_date": "2026-09-24T10:52:34Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/go.mod",
+          "sha256": "4f06c36333154e114f458de7328cf794e5ceb72f2399a565f88ab936882369aa"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/LICENSE",
+          "sha256": "650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c"
+        },
+        {
+          "path": "option/outbound.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/option/outbound.go",
+          "sha256": "811dfffc1f9bbbbc05c3e7e0afcfe291a5706e357558939d87b0a2a600332b12"
+        },
+        {
+          "path": "route/route.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/route/route.go",
+          "sha256": "6f26cb2a37223cf029dd1b7d2d74aa3082e3cf1ed74e0f7f51c0e481c4d68c25"
+        },
+        {
+          "path": "common/dialer/resolve.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/common/dialer/resolve.go",
+          "sha256": "1761e8653bbbb2cf092460cbe6643ca5d90795c672ef56c1a67204ce38092722"
+        },
+        {
+          "path": "route/rule/rule_default.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/route/rule/rule_default.go",
+          "sha256": "8964e87c3497e5f3cf986ca908d67a149e06f8afdcf9de0d697c4afff5528737"
+        },
+        {
+          "path": "option/route.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/option/route.go",
+          "sha256": "43998a79dbf8e6a5fa5fe3d5ca2f5ccbbcf550a554559e232c98b2b52f02edb7"
+        },
+        {
+          "path": "option/rule.go",
+          "url": "https://raw.githubusercontent.com/SagerNet/sing-box/af6e64c3b69e6132ebaee0e1a3d24e93903f6709/option/rule.go",
+          "sha256": "4db39462c6460dc97610ee115ff589a5913c8f4332f442011aac3ed9fdcdc0b7"
+        }
+      ]
+    },
+    {
+      "repo": "realclientip/realclientip-go",
+      "ref": "main",
+      "commit": "545b12e0e8c797c02889d850f5bfd2d2738c7048",
+      "commit_date": "2026-06-15T10:41:52Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/realclientip/realclientip-go/545b12e0e8c797c02889d850f5bfd2d2738c7048/go.mod",
+          "sha256": "2974c218343be1d93871484cccebfb913f298e06c945718974012bba34dc5f25"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/realclientip/realclientip-go/545b12e0e8c797c02889d850f5bfd2d2738c7048/LICENSE",
+          "sha256": "0db3336be1d50c18d8d0f844a996cdddaf66a018dbdee58ab94933c1c6ffc2e9"
+        },
+        {
+          "path": "realclientip.go",
+          "url": "https://raw.githubusercontent.com/realclientip/realclientip-go/545b12e0e8c797c02889d850f5bfd2d2738c7048/realclientip.go",
+          "sha256": "10b7f0cb19d0c4f1ec0de81c7d870136a7f360936564e36542758cbbbd3e7ea6"
+        },
+        {
+          "path": "realclientip_test.go",
+          "url": "https://raw.githubusercontent.com/realclientip/realclientip-go/545b12e0e8c797c02889d850f5bfd2d2738c7048/realclientip_test.go",
+          "sha256": "c908a6ade511bb4a6d4232c6985c6c141c8fbb182e53cfbffb24ddbc6bd12aa1"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/realclientip/realclientip-go/545b12e0e8c797c02889d850f5bfd2d2738c7048/README.md",
+          "sha256": "fdded7cc56e895b3ff303ec727a597173f84b4f58cf6ed13214be23cd45b58bf"
+        }
+      ]
+    },
+    {
+      "repo": "go-chi/chi",
+      "ref": "v5.5.0",
+      "commit": "3a33ba578e0dd93444e0ff386cc26e665d92e31e",
+      "commit_date": "2026-10-14T13:20:04Z",
+      "files": [
+        {
+          "path": "go.mod",
+          "url": "https://raw.githubusercontent.com/go-chi/chi/3a33ba578e0dd93444e0ff386cc26e665d92e31e/go.mod",
+          "sha256": "7eb620f0fce870d93eaba87bf6f8c36284db786108030ca229a5016461797090"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/go-chi/chi/3a33ba578e0dd93444e0ff386cc26e665d92e31e/LICENSE",
+          "sha256": "a2d51b7515acfaff2f7a88688650f2fc4fd99561383e72bba2305e3db59a1647"
+        },
+        {
+          "path": "middleware/client_ip.go",
+          "url": "https://raw.githubusercontent.com/go-chi/chi/3a33ba578e0dd93444e0ff386cc26e665d92e31e/middleware/client_ip.go",
+          "sha256": "661ffdd7bb1098fd5f5e3e24287010969de1f473941b540484a29563d00aadc0"
+        },
+        {
+          "path": "middleware/client_ip_test.go",
+          "url": "https://raw.githubusercontent.com/go-chi/chi/3a33ba578e0dd93444e0ff386cc26e665d92e31e/middleware/client_ip_test.go",
+          "sha256": "c6cb382942585c6d67c1e6c066407b890ad97fd413c66b7fb051fad877e70b19"
+        }
+      ]
+    }
+  ],
+  "scope": "Source snapshots fetched for research; only files discussed in the companion document were inspected. No dependencies added to the application module."
+}

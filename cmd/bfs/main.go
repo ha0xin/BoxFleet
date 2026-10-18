@@ -50,12 +50,14 @@ func newServerCommand() *cobra.Command {
 	cmd.Flags().String("node-release", "", "published release supplying node artifacts (defaults to server version)")
 	cmd.Flags().String("admin-token", "", "admin API bearer token")
 	cmd.Flags().String("admin-path-token", "", "path segment that gates admin UI and admin API routes")
+	cmd.Flags().String("client-ip-source", "direct", "node source IP observation: direct or cloudflare")
+	cmd.Flags().String("trusted-proxy-cidrs", "", "comma-separated CIDRs of directly connecting trusted proxies")
 	cmd.Flags().Bool("allow-insecure-admin", false, "allow admin API without a bearer token")
 
 	viper.SetEnvPrefix("BOXFLEET")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
-	for _, name := range []string{"addr", "db", "artifact-dir", "node-release", "admin-token", "admin-path-token", "allow-insecure-admin"} {
+	for _, name := range []string{"addr", "db", "artifact-dir", "node-release", "admin-token", "admin-path-token", "allow-insecure-admin", "client-ip-source", "trusted-proxy-cidrs"} {
 		_ = viper.BindPFlag(name, cmd.Flags().Lookup(name))
 	}
 	return cmd
@@ -72,6 +74,16 @@ func runServer(ctx context.Context) error {
 		return errors.New("admin token is required; set BOXFLEET_ADMIN_TOKEN or pass --allow-insecure-admin for local development")
 	}
 
+	source := viper.GetString("client-ip-source")
+	var proxyCIDRs []string
+	for _, cidr := range strings.Split(viper.GetString("trusted-proxy-cidrs"), ",") {
+		if cidr = strings.TrimSpace(cidr); cidr != "" {
+			proxyCIDRs = append(proxyCIDRs, cidr)
+		}
+	}
+	if err := api.ValidateClientIPOptions(source, proxyCIDRs); err != nil {
+		return err
+	}
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
 	store, err := db.OpenSQLite(dbPath)
 	if err != nil {
@@ -88,6 +100,8 @@ func runServer(ctx context.Context) error {
 	}
 	router := api.NewRouter(api.Options{
 		MaintenanceContext: ctx,
+		ClientIPSource:     source,
+		TrustedProxyCIDRs:  proxyCIDRs,
 		DB:                 store,
 		ArtifactDir:        artifactDir,
 		AdminToken:         adminToken,

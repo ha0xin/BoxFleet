@@ -73,23 +73,24 @@ type adminRelease struct {
 }
 
 type adminNode struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	PublicHost      string            `json:"public_host"`
-	Status          string            `json:"status"`
-	SingBoxVersion  string            `json:"sing_box_version"`
-	LastSeenAt      string            `json:"last_seen_at"`
-	DeletedAt       string            `json:"deleted_at"`
-	TargetVersion   string            `json:"target_version,omitempty"`
-	CurrentVersion  string            `json:"current_version,omitempty"`
-	ApplyStatus     string            `json:"apply_status,omitempty"`
-	ApplyError      string            `json:"apply_error,omitempty"`
-	LatestHeartbeat string            `json:"latest_heartbeat,omitempty"`
-	AgentVersion    string            `json:"agent_version,omitempty"`
-	AgentGOOS       string            `json:"agent_goos,omitempty"`
-	AgentGOARCH     string            `json:"agent_goarch,omitempty"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
-	ActiveOperation *db.NodeOperation `json:"active_operation,omitempty"`
+	Network         *db.NodeNetworkSummary `json:"network,omitempty"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	PublicHost      string                 `json:"public_host"`
+	Status          string                 `json:"status"`
+	SingBoxVersion  string                 `json:"sing_box_version"`
+	LastSeenAt      string                 `json:"last_seen_at"`
+	DeletedAt       string                 `json:"deleted_at"`
+	TargetVersion   string                 `json:"target_version,omitempty"`
+	CurrentVersion  string                 `json:"current_version,omitempty"`
+	ApplyStatus     string                 `json:"apply_status,omitempty"`
+	ApplyError      string                 `json:"apply_error,omitempty"`
+	LatestHeartbeat string                 `json:"latest_heartbeat,omitempty"`
+	AgentVersion    string                 `json:"agent_version,omitempty"`
+	AgentGOOS       string                 `json:"agent_goos,omitempty"`
+	AgentGOARCH     string                 `json:"agent_goarch,omitempty"`
+	Capabilities    []string               `json:"capabilities,omitempty"`
+	ActiveOperation *db.NodeOperation      `json:"active_operation,omitempty"`
 	// HasActiveToken distinguishes a reversible pause (disabled, token intact)
 	// from a decommission (disabled, tokens revoked) so the UI does not offer to
 	// re-enable a node whose agent could never authenticate.
@@ -1756,11 +1757,24 @@ func adminNodesFromDB(ctx context.Context, store *db.DB, nodes []db.Node) ([]adm
 	for _, operation := range activeOperations {
 		operationByNodeID[operation.NodeID] = operation
 	}
+	ids := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if !node.DeletedAt.Valid {
+			ids = append(ids, node.ID)
+		}
+	}
+	networks, err := store.NodeNetworkSummaries(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]adminNode, 0, len(nodes))
 	for _, node := range nodes {
 		// Base off adminNodeFromNode so list responses carry the same fields as
 		// single-node responses (notably Hosts) instead of a divergent literal.
 		item := adminNodeFromNode(node)
+		if network, ok := networks[node.ID]; ok {
+			item.Network = &network
+		}
 		item.HasActiveToken = !node.DeletedAt.Valid && hasToken[node.Name]
 		if operation, ok := operationByNodeID[node.ID]; ok {
 			operationCopy := operation
@@ -1804,6 +1818,12 @@ func adminNodeResponse(ctx context.Context, store *db.DB, node db.Node) (adminNo
 		return adminNode{}, err
 	}
 	item.HasActiveToken = has
+	networks, err := store.NodeNetworkSummaries(ctx, []string{node.ID})
+	if err != nil {
+		return adminNode{}, err
+	}
+	network := networks[node.ID]
+	item.Network = &network
 	return item, nil
 }
 

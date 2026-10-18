@@ -96,3 +96,7 @@ export function useAdminApi() {
   if (!value) throw new Error("useAdminApi must be used inside AdminApiProvider");
   return value;
 }
+
+export function getNodeNetwork(request: AdminRequest, id: string) {
+ return request<import("../types").NodeNetwork>(`/api/admin/nodes/${encodeURIComponent(id)}/addresses`);
+}

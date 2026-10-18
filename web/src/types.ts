@@ -9,6 +9,7 @@ export type AdminNodeHost = {
 };
 
 export type AdminNode = {
+  network?: NodeNetworkSummary;
   id: string;
   name: string;
   public_host: string;
@@ -29,6 +30,42 @@ export type AdminNode = {
   has_active_token?: boolean;
   deleted_at: string;
 };
+
+export type NodeObservedIP = {
+  address: string;
+  family: number;
+  source: "direct" | "cloudflare";
+  observed_at: string;
+  stale: boolean;
+};
+
+export type NodeNetworkSummary = {
+  revision: number;
+  address_count: number;
+  collected_at: string;
+  received_at: string;
+  attempted_at: string;
+  error: string;
+  stale: boolean;
+  observed_ips: NodeObservedIP[];
+};
+
+export type NodeAddress = {
+  address: string;
+  family: number;
+  prefix_length: number;
+  interface: string;
+  interface_index: number;
+  interface_up: boolean;
+  scope: string;
+  flags_known: boolean;
+  temporary: boolean;
+  deprecated: boolean;
+  tentative: boolean;
+  dad_failed: boolean;
+};
+
+export type NodeNetwork = NodeNetworkSummary & { addresses: NodeAddress[] };
 
 export type NodeOperationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
 

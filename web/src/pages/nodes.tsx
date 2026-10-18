@@ -38,6 +38,7 @@ import {
 import type { TableColumnWidth } from "@/components/admin-table";
 import { DeleteNodeDialog, EditNodeDialog, EnrollNodeDialog, ReenrollNodeDialog } from "./node-dialogs";
 import type { NodeDialogState } from "./node-dialogs";
+import { NodeAddressesDialog } from "./node-addresses";
 import { NodeUpdateDialog, phaseLabel, UpdateAllDialog, versionsEqual } from "./node-update-dialogs";
 
 /**
@@ -194,6 +195,7 @@ export function nodeUpdateStatus(node: AdminNode, release?: AdminRelease): {
 }
 
 export function NodesPage() {
+ const [addressesNode, setAddressesNode] = useState<AdminNode | null>(null);
   const { request } = useAdminApi();
   const { filters, page, perPage, offset, setFilters, setPage, setPerPage } = useUrlFilters(nodeUrlFilters);
   const [dialog, setDialog] = useState<NodeDialogState>(null);
@@ -402,6 +404,9 @@ export function NodesPage() {
                                 <span className="text-kumo-inactive"> +{node.hosts.length - 1}</span>
                               ) : null}
                             </span>
+                            {!node.deleted_at ? <Button variant="ghost" size="sm" className="mt-1 max-w-full" onClick={() => setAddressesNode(node)} aria-label={`View addresses for ${node.name}`}>
+                              <span className="truncate">{node.network?.observed_ips.length ? node.network.observed_ips.map((ip) => `${ip.address}${ip.stale ? " (stale)" : ""}`).join(" · ") : "View addresses"}</span>
+                            </Button> : null}
                           </Table.Cell>
                           <Table.Cell>
                             <VersionTarget current={node.agent_version} target={release?.agent_version ?? node.agent_version ?? "n/a"} />
@@ -505,6 +510,7 @@ export function NodesPage() {
       {dialog?.mode === "delete" ? (
         <DeleteNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
       ) : null}
+      {addressesNode ? <NodeAddressesDialog node={addressesNode} onClose={() => setAddressesNode(null)} /> : null}
       {dialog?.mode === "reenroll" ? (
         <ReenrollNodeDialog request={request} node={dialog.node} onClose={() => setDialog(null)} />
       ) : null}

@@ -1,5 +1,7 @@
 # Testing
 
+节点地址发现的测试边界见 [节点地址发现](node-addresses.md)。`web/e2e/node-addresses.spec.ts` 验证多个本机/公网 IPv4、IPv6，失败快照保留及窄屏布局；E2E bfs 仅信任本地回环代理，用 CF-Connecting-IP 头模拟 Tunnel，不访问生产服务。
+
 The release gate is:
 
 ```bash

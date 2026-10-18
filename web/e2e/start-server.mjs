@@ -16,6 +16,10 @@ const server = spawn(
     `127.0.0.1:${serverPort}`,
     "--db",
     dbPath,
+    "--client-ip-source",
+    "cloudflare",
+    "--trusted-proxy-cidrs",
+    "127.0.0.1/32",
     "--allow-insecure-admin"
   ],
   { cwd: repositoryRoot, stdio: "inherit" }
