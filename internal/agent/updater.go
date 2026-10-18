@@ -148,6 +148,9 @@ func (a *Agent) updateAgent(
 		if !versionsEquivalent(Version, asset.Version) {
 			return false, fmt.Errorf("agent restarted as %q, expected %q", Version, asset.Version)
 		}
+		if guard != nil && guard.Status == "pending" {
+			return false, errors.New("new agent has not confirmed its heartbeat and service definitions")
+		}
 		checkpoint.AgentSwitched = true
 		checkpoint.AgentConfirmed = true
 		if err := a.saveUpdateCheckpoint(state, *checkpoint); err != nil {
@@ -211,12 +214,6 @@ func (a *Agent) updateAgent(
 		OperationID: state.Assignment.ID, ExpectedVersion: asset.Version,
 		PreviousTarget: previous, CandidateTarget: candidate, Status: "pending",
 	}); err != nil {
-		return false, err
-	}
-	if err := a.installServiceUnits(); err != nil {
-		return false, err
-	}
-	if err := a.reloadServices(ctx); err != nil {
 		return false, err
 	}
 	if err := switchVersionedBinary(a.Config.AgentPath, candidate, previous); err != nil {
@@ -325,6 +322,9 @@ func (a *Agent) updateSingBox(
 		if activateErr == nil {
 			activateErr = a.waitServiceActive(criticalCtx, a.Config.SingBoxService)
 		}
+	}
+	if errors.Is(activateErr, errServiceOperationUncertain) {
+		return activateErr
 	}
 	if activateErr != nil {
 		rollbackErr := switchVersionedBinary(a.Config.SingBoxPath, previous, candidate)

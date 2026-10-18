@@ -749,7 +749,7 @@ func TestInstallScriptEndpoint(t *testing.T) {
 		`SING_BOX_VERSION="${BOXFLEET_SING_BOX_VERSION:-v1.13.13}"`,
 		`agent_asset="boxfleet-agent-${AGENT_VERSION}-linux-amd64"`,
 		`sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"`,
-		"boxfleet-agent\" bootstrap \"$BOOTSTRAP_STRING\"",
+		`boxfleet-agent" bootstrap --from-file -`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("install script missing %q:\n%s", want, body)

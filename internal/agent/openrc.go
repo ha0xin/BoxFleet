@@ -36,13 +36,13 @@ func renderOpenRCScript(name, raw string, data openRCData) (string, error) {
 	return out.String(), nil
 }
 
-func (a *Agent) InstallOpenRCScripts() error {
+func (a *Agent) openRCFiles() ([]serviceFile, error) {
 	if err := os.MkdirAll(filepath.Dir(a.Config.SingBoxConfig), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	logDir := filepath.Join(a.Config.InstallDir, "log")
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return err
+		return nil, err
 	}
 	singName := serviceName(InitSystemOpenRC, a.Config.SingBoxService)
 	agentName := serviceName(InitSystemOpenRC, a.Config.AgentService)
@@ -52,7 +52,7 @@ func (a *Agent) InstallOpenRCScripts() error {
 		ErrorLog: filepath.Join(logDir, singName+".log"),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	agentScript, err := renderOpenRCScript("boxfleet-agent", agentOpenRCTemplate, openRCData{
 		Command: a.Config.AgentPath, Arguments: "run --config " + strconv.Quote(a.Config.AgentConfigPath),
@@ -61,10 +61,18 @@ func (a *Agent) InstallOpenRCScripts() error {
 		ErrorLog: filepath.Join(logDir, agentName+".log"),
 	})
 	if err != nil {
+		return nil, err
+	}
+	return []serviceFile{
+		{Path: filepath.Join(a.serviceDir(), singName), Data: []byte(singScript), Mode: 0o755},
+		{Path: filepath.Join(a.serviceDir(), agentName), Data: []byte(agentScript), Mode: 0o755},
+	}, nil
+}
+
+func (a *Agent) InstallOpenRCScripts() error {
+	files, err := a.openRCFiles()
+	if err != nil {
 		return err
 	}
-	if err := atomicWrite(filepath.Join("/etc/init.d", singName), []byte(singScript), 0o755); err != nil {
-		return err
-	}
-	return atomicWrite(filepath.Join("/etc/init.d", agentName), []byte(agentScript), 0o755)
+	return writeServiceFiles(files)
 }

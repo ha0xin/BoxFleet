@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/haoxin/boxfleet/internal/agent"
 )
@@ -59,6 +62,7 @@ func main() {
 func runBootstrapCommand() {
 	fs := flag.NewFlagSet("bootstrap", flag.ExitOnError)
 	fromFile := fs.String("from-file", "", `read the bootstrap string from a file ("-" for stdin)`)
+	timeout := fs.Duration("timeout", 10*time.Minute, "maximum bootstrap duration")
 	allowInsecure := fs.Bool("allow-insecure-transport", false, "permit plaintext http server and sing-box URLs (development only)")
 	_ = fs.Parse(os.Args[2:])
 	value, err := bootstrapValue(fs, *fromFile)
@@ -66,7 +70,13 @@ func runBootstrapCommand() {
 		fmt.Fprintf(os.Stderr, "boxfleet-agent bootstrap: %v\n", err)
 		os.Exit(1)
 	}
-	if err := agent.Bootstrap(context.Background(), value, *allowInsecure); err != nil {
+	ctx, cancel := commandContext(*timeout)
+	defer cancel()
+	if *timeout <= 0 {
+		fmt.Fprintln(os.Stderr, "timeout must be positive")
+		os.Exit(2)
+	}
+	if err := agent.Bootstrap(ctx, value, *allowInsecure); err != nil {
 		fmt.Fprintf(os.Stderr, "boxfleet-agent bootstrap: %v\n", err)
 		os.Exit(1)
 	}
@@ -109,13 +119,36 @@ func bootstrapValue(fs *flag.FlagSet, fromFile string) (string, error) {
 func runAgentCommand(name string, fn func(context.Context, *agent.Agent) error) {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	configPath := fs.String("config", agent.DefaultConfigPath, "agent config path")
+	var timeout *time.Duration
+	if name == "install" {
+		timeout = fs.Duration("timeout", 10*time.Minute, "maximum installation duration")
+	}
 	_ = fs.Parse(os.Args[2:])
 	config, err := agent.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "boxfleet-agent %s: %v\n", name, err)
 		os.Exit(1)
 	}
-	if err := fn(context.Background(), agent.New(config)); err != nil {
+	limit := time.Duration(0)
+	if timeout != nil {
+		if *timeout <= 0 {
+			fmt.Fprintln(os.Stderr, "timeout must be positive")
+			os.Exit(2)
+		}
+		limit = *timeout
+	}
+	ctx, cancel := commandContext(limit)
+	defer cancel()
+	a := agent.New(config)
+	if name == "once" {
+		unlock, err := a.LockForOneShot()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent once: %v\n", err)
+			os.Exit(1)
+		}
+		defer unlock()
+	}
+	if err := fn(ctx, a); err != nil {
 		fmt.Fprintf(os.Stderr, "boxfleet-agent %s: %v\n", name, err)
 		os.Exit(1)
 	}
@@ -135,4 +168,13 @@ Usage:
   boxfleet-agent once [--config /etc/boxfleet/agent.json]
   boxfleet-agent check [--config /etc/boxfleet/agent.json]
   boxfleet-agent version`)
+}
+
+func commandContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	if timeout <= 0 {
+		return ctx, stop
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return ctx, func() { cancel(); stop() }
 }

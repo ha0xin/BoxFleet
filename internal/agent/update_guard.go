@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +76,12 @@ func (a *Agent) RunAgentGuard() error {
 	if err != nil || state == nil {
 		return err
 	}
-	if state.Status == "rolled_back" || state.Status == "confirmed" {
+	if state.Status == "rolled_back" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return a.restoreServiceBackup(ctx)
+	}
+	if state.Status == "confirmed" {
 		return nil
 	}
 	if state.Status != "pending" {
@@ -93,6 +99,11 @@ func (a *Agent) RunAgentGuard() error {
 	}
 	previous, _ := filepath.EvalSymlinks(state.PreviousTarget)
 	if samePath(current, previous) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := a.restoreServiceBackup(ctx); err != nil {
+			return err
+		}
 		state.Status = "rolled_back"
 		state.Error = "agent service path already points to the previous version"
 		return a.writeAgentUpdateGuard(*state)
@@ -108,6 +119,11 @@ func (a *Agent) RunAgentGuard() error {
 	}
 	if err := renameio.Symlink(state.PreviousTarget, a.Config.AgentPath); err != nil {
 		return fmt.Errorf("agent guard rollback: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := a.restoreServiceBackup(ctx); err != nil {
+		return err
 	}
 	state.Status = "rolled_back"
 	state.Error = fmt.Sprintf("candidate did not confirm after %d service starts", state.Attempts)
@@ -134,14 +150,38 @@ func (a *Agent) validateGuardTarget(target string) error {
 // used for the next update.
 func (a *Agent) ConfirmAgentUpdateGuard() error {
 	state, err := a.loadAgentUpdateGuard()
-	if err != nil || state == nil || state.Status != "pending" {
+	if err != nil || state == nil || (state.Status != "pending" && state.Status != "confirmed") {
 		return err
 	}
 	if !versionsEquivalent(Version, state.ExpectedVersion) {
 		return nil
 	}
+	if state.Status == "confirmed" {
+		if err := a.clearServiceBackup(); err != nil {
+			return err
+		}
+		return os.Remove(a.Config.AgentGuardStatePath)
+	}
+	if !a.heartbeatConfirmed.Load() {
+		return errors.New("agent heartbeat has not been confirmed")
+	}
+	// The heartbeat proves the new executable runs. Refresh the rollback helper
+	// before migrating files, so even the first upgrade from a legacy guard can
+	// restore both binaries and service definitions after a crash.
 	if err := atomicCopyFile(a.Config.AgentPath, a.Config.AgentGuardPath, defaultBinaryFilePerm); err != nil {
-		return fmt.Errorf("promote confirmed agent guard: %w", err)
+		return fmt.Errorf("refresh healthy agent guard: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), a.serviceCommandTimeout())
+	defer cancel()
+	if err := a.syncServiceUnits(ctx); err != nil {
+		return err
+	}
+	state.Status = "confirmed"
+	if err := a.writeAgentUpdateGuard(*state); err != nil {
+		return err
+	}
+	if err := a.clearServiceBackup(); err != nil {
+		return err
 	}
 	if err := os.Remove(a.Config.AgentGuardStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

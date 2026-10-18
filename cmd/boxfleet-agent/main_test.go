@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBootstrapValueSources(t *testing.T) {
@@ -49,4 +52,13 @@ func parseBootstrapArgs(t *testing.T, args ...string) *flag.FlagSet {
 		t.Fatal(err)
 	}
 	return fs
+}
+
+func TestCommandContextDeadline(t *testing.T) {
+	ctx, cancel := commandContext(time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("unexpected cause: %v", ctx.Err())
+	}
 }

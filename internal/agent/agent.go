@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/renameio/v2"
@@ -51,6 +52,7 @@ const (
 )
 
 type Config struct {
+	ServiceTimeout      string `json:"service_timeout,omitempty"`
 	InitSystem          string `json:"init_system,omitempty"`
 	NodeName            string `json:"node_name"`
 	Token               string `json:"token"`
@@ -82,9 +84,15 @@ type Agent struct {
 	Client *http.Client
 	// ServiceReadyWait bounds how long a restarted unit is polled for an active
 	// state. Zero uses defaultServiceReadyWait.
-	ServiceReadyWait time.Duration
-	TrafficReporter  func(context.Context) error
-	maintenanceMu    sync.Mutex
+	ServiceReadyWait      time.Duration
+	ServiceCommandTimeout time.Duration
+	// ServiceDir overrides the init-system directory in filesystem-isolated tests.
+	ServiceDir         string
+	initialSync        bool
+	prepareInstall     func() error
+	heartbeatConfirmed atomic.Bool
+	TrafficReporter    func(context.Context) error
+	maintenanceMu      sync.Mutex
 	// configMu guards the mutable parts of Config. Only the canonical node name
 	// changes at runtime, and it is read by every request goroutine.
 	configMu sync.RWMutex
@@ -316,6 +324,12 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
+	if c.ServiceTimeout != "" {
+		timeout, err := time.ParseDuration(c.ServiceTimeout)
+		if err != nil || timeout <= 0 {
+			return errors.New("service_timeout must be a positive duration")
+		}
+	}
 	if c.InitSystem != "" && c.InitSystem != InitSystemSystemd && c.InitSystem != InitSystemOpenRC {
 		return fmt.Errorf("init_system must be %q or %q", InitSystemSystemd, InitSystemOpenRC)
 	}
@@ -363,10 +377,12 @@ func New(config Config) *Agent {
 	if config.AllowInsecureTransport {
 		fmt.Fprintln(os.Stderr, "boxfleet-agent: WARN allow_insecure_transport is enabled; the node token travels in cleartext and bootstrap binaries are unauthenticated — development only")
 	}
+	serviceTimeout, _ := time.ParseDuration(config.ServiceTimeout)
 	return &Agent{
-		Config: config,
-		Runner: ExecRunner{},
-		Client: &http.Client{Timeout: DefaultHTTPTimeout},
+		ServiceCommandTimeout: serviceTimeout,
+		Config:                config,
+		Runner:                ExecRunner{},
+		Client:                &http.Client{Timeout: DefaultHTTPTimeout},
 	}
 }
 
@@ -383,39 +399,6 @@ func (a *Agent) Check(ctx context.Context) error {
 	if _, err := os.Stat(a.Config.SingBoxConfig); err == nil {
 		return a.Runner.Run(ctx, a.Config.SingBoxPath, "check", "-c", a.Config.SingBoxConfig)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
-func (a *Agent) Install(ctx context.Context) error {
-	if a.Config.SingBoxURL != "" {
-		if err := a.DownloadSingBox(ctx); err != nil {
-			return err
-		}
-	}
-	if err := a.CheckSingBoxV2RayAPI(ctx); err != nil {
-		return err
-	}
-	if err := a.ensureAgentGuardBinary(); err != nil {
-		return err
-	}
-	if err := a.installServiceUnits(); err != nil {
-		return err
-	}
-	if err := a.reloadServices(ctx); err != nil {
-		return err
-	}
-	if err := a.enableService(ctx, a.Config.SingBoxService); err != nil {
-		return err
-	}
-	if err := a.Once(ctx); err != nil {
-		return err
-	}
-	if err := a.enableService(ctx, a.Config.AgentService); err != nil {
-		return err
-	}
-	if err := a.restartService(ctx, a.Config.AgentService); err != nil {
 		return err
 	}
 	return nil
@@ -449,6 +432,10 @@ func (a *Agent) Once(ctx context.Context) error {
 }
 
 func (a *Agent) once(ctx context.Context) error {
+	a.heartbeatConfirmed.Store(false)
+	if a.initialSync {
+		fmt.Fprintln(os.Stderr, "boxfleet-agent install: fetching initial configuration...")
+	}
 	response, err := a.FetchConfigVersioned(ctx)
 	if err != nil {
 		return err
@@ -474,8 +461,7 @@ func (a *Agent) once(ctx context.Context) error {
 		// read as "up" — otherwise a single D-Bus hiccup would leave the
 		// re-enabled node stopped until a later poll. Unknown ⇒ restart (idempotent).
 		if state.AppliedConfigHash == configHash && a.singBoxConfirmedActive(ctx) {
-			a.reportRuntimeState(ctx, response)
-			return nil
+			return a.finishConfigCycle(ctx, response)
 		}
 		// The bytes on disk are already the desired config, so there is nothing to
 		// roll back to — but a unit that stays down must still be reported as
@@ -484,12 +470,14 @@ func (a *Agent) once(ctx context.Context) error {
 			_ = a.ReportApplyResult(ctx, response, "failed", err.Error())
 			return err
 		}
-		a.reportRuntimeState(ctx, response)
-		return nil
+		return a.finishConfigCycle(ctx, response)
 	}
 	candidatePath := a.Config.SingBoxConfig + ".candidate"
 	if err := atomicWrite(candidatePath, config, defaultRuntimeFilePerm); err != nil {
 		return err
+	}
+	if a.initialSync {
+		fmt.Fprintln(os.Stderr, "boxfleet-agent install: validating sing-box configuration...")
 	}
 	checkErr := a.Runner.Run(ctx, a.Config.SingBoxPath, "check", "-c", candidatePath)
 	_ = os.Remove(candidatePath)
@@ -506,12 +494,14 @@ func (a *Agent) once(ctx context.Context) error {
 		return err
 	}
 	if err := a.restartSingBoxVerified(ctx); err != nil {
+		if errors.Is(err, errServiceOperationUncertain) || ctx.Err() != nil {
+			return err
+		}
 		applyErr := a.rollbackToLastGoodConfig(ctx, err, currentErr == nil)
 		_ = a.ReportApplyResult(ctx, response, "failed", applyErr.Error())
 		return applyErr
 	}
-	a.reportRuntimeState(ctx, response)
-	return nil
+	return a.finishConfigCycle(ctx, response)
 }
 
 func (a *Agent) lastGoodConfigPath() string {
@@ -525,12 +515,18 @@ func (a *Agent) lastGoodConfigPath() string {
 // probe stays "unknown" and is never treated as proof of failure, so a D-Bus
 // hiccup cannot trigger a rollback of a healthy config.
 func (a *Agent) restartSingBoxVerified(ctx context.Context) error {
+	if a.initialSync {
+		fmt.Fprintln(os.Stderr, "boxfleet-agent install: starting sing-box...")
+	}
 	if err := a.restartService(ctx, a.Config.SingBoxService); err != nil {
 		return err
 	}
 	activeErr := a.waitServiceActive(ctx, a.Config.SingBoxService)
 	if activeErr == nil {
 		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if _, err := a.singBoxActiveState(ctx); err != nil {
 		return nil
@@ -609,9 +605,26 @@ func (a *Agent) applyDisabled(ctx context.Context, response ConfigResponse) erro
 			return err
 		}
 	}
-	if err := a.ReportHeartbeat(ctx, response, "disabled"); err != nil {
-		fmt.Fprintf(os.Stderr, "boxfleet-agent disabled heartbeat failed: %v\n", err)
+	if !a.initialSync {
+		if err := a.ReportHeartbeat(ctx, response, "disabled"); err != nil {
+			fmt.Fprintf(os.Stderr, "boxfleet-agent disabled heartbeat failed: %v\n", err)
+		} else {
+			a.confirmHeartbeat(ctx)
+		}
 	}
+	return nil
+}
+
+func (a *Agent) finishConfigCycle(ctx context.Context, response ConfigResponse) error {
+	if a.initialSync {
+		state, err := a.LoadState()
+		if err != nil {
+			return err
+		}
+		state.AppliedConfigHash = response.Hash
+		return a.SaveState(state)
+	}
+	a.reportRuntimeState(ctx, response)
 	return nil
 }
 
@@ -620,8 +633,8 @@ func (a *Agent) reportRuntimeState(ctx context.Context, response ConfigResponse)
 		name string
 		run  func(context.Context) error
 	}{
-		{"apply result", func(ctx context.Context) error { return a.ReportApplyResult(ctx, response, "applied", "") }},
 		{"heartbeat", func(ctx context.Context) error { return a.ReportHeartbeat(ctx, response, "ok") }},
+		{"apply result", func(ctx context.Context) error { return a.ReportApplyResult(ctx, response, "applied", "") }},
 		{"traffic", a.ReportTraffic},
 		// Connection telemetry is a no-op unless the node is opted in and the
 		// collector produced something, so it costs an idle node nothing.
@@ -632,6 +645,8 @@ func (a *Agent) reportRuntimeState(ctx context.Context, response ConfigResponse)
 	for _, report := range reports {
 		if err := report.run(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "boxfleet-agent report %s failed: %v\n", report.name, err)
+		} else if report.name == "heartbeat" {
+			a.confirmHeartbeat(ctx)
 		}
 	}
 	if response.Hash != "" {
@@ -648,6 +663,22 @@ func (a *Agent) reportRuntimeState(ctx context.Context, response ConfigResponse)
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	unlock, err := a.lockRuntime()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	guard, err := a.loadAgentUpdateGuard()
+	if err != nil {
+		return err
+	}
+	// Legacy guards only roll back binaries. During a pending upgrade, wait for
+	// the first heartbeat and refresh the guard before changing service files.
+	if guard == nil || guard.Status != "pending" {
+		if err := a.syncServiceUnits(ctx); err != nil {
+			return fmt.Errorf("synchronize service definitions: %w", err)
+		}
+	}
 	interval, err := time.ParseDuration(a.Config.PollInterval)
 	if err != nil {
 		return err
@@ -701,9 +732,6 @@ func (a *Agent) poll(ctx context.Context) {
 			fmt.Fprintf(os.Stderr, "boxfleet-agent once failed: %v\n", err)
 		}
 		return
-	}
-	if err := a.ConfirmAgentUpdateGuard(); err != nil {
-		fmt.Fprintf(os.Stderr, "boxfleet-agent confirm update guard failed: %v\n", err)
 	}
 }
 
@@ -1247,12 +1275,12 @@ func (a *Agent) adoptCanonicalNodeName(name string) error {
 	return nil
 }
 
-func (a *Agent) InstallSystemdUnits() error {
+func (a *Agent) systemdFiles() ([]serviceFile, error) {
 	if err := os.MkdirAll(filepath.Dir(a.Config.SingBoxPath), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(a.Config.SingBoxConfig), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	data := systemdUnitData{
 		SingBoxPath:       a.Config.SingBoxPath,
@@ -1266,18 +1294,26 @@ func (a *Agent) InstallSystemdUnits() error {
 	}
 	singBoxUnit, err := renderSystemdUnit("sing-box", singBoxUnitTemplate, data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data.Restart = "always"
 	data.RestartSec = "10s"
 	agentUnit, err := renderSystemdUnit("boxfleet-agent", agentUnitTemplate, data)
 	if err != nil {
+		return nil, err
+	}
+	return []serviceFile{
+		{Path: filepath.Join(a.serviceDir(), a.Config.SingBoxService), Data: []byte(singBoxUnit), Mode: 0o644},
+		{Path: filepath.Join(a.serviceDir(), a.Config.AgentService), Data: []byte(agentUnit), Mode: 0o644},
+	}, nil
+}
+
+func (a *Agent) InstallSystemdUnits() error {
+	files, err := a.systemdFiles()
+	if err != nil {
 		return err
 	}
-	if err := atomicWrite(filepath.Join("/etc/systemd/system", a.Config.SingBoxService), []byte(singBoxUnit), 0o644); err != nil {
-		return err
-	}
-	return atomicWrite(filepath.Join("/etc/systemd/system", a.Config.AgentService), []byte(agentUnit), 0o644)
+	return writeServiceFiles(files)
 }
 
 func (a *Agent) client() *http.Client {
@@ -1319,4 +1355,16 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return renameio.WriteFile(path, data, perm)
+}
+
+// Called while the config cycle holds maintenanceMu. Confirm before optional
+// telemetry uploads, which may be slow or temporarily unavailable.
+func (a *Agent) confirmHeartbeat(ctx context.Context) {
+	a.heartbeatConfirmed.Store(true)
+	if ctx.Err() != nil {
+		return
+	}
+	if err := a.ConfirmAgentUpdateGuard(); err != nil {
+		fmt.Fprintf(os.Stderr, "boxfleet-agent confirm update guard failed: %v\n", err)
+	}
 }

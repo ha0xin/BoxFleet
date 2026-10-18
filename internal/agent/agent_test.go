@@ -784,6 +784,7 @@ func TestPollRetriesAgentUpdateGuardConfirmation(t *testing.T) {
 		StatePath:       filepath.Join(installDir, "state", "agent-state.json"),
 		V2RayAPIAddress: "127.0.0.1:1",
 	})
+	a.ServiceDir = t.TempDir()
 	a.Runner = &recordingRunner{running: true}
 	if err := a.SaveState(State{AppliedConfigHash: hash}); err != nil {
 		t.Fatal(err)

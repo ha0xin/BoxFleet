@@ -45,13 +45,14 @@ func Bootstrap(ctx context.Context, value string, allowInsecureTransport bool) e
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	if err := installCurrentBinary(config.AgentPath); err != nil {
-		return err
+	a := New(config)
+	a.prepareInstall = func() error {
+		if err := installCurrentBinary(config.AgentPath); err != nil {
+			return err
+		}
+		return WriteConfig(config.AgentConfigPath, config)
 	}
-	if err := WriteConfig(config.AgentConfigPath, config); err != nil {
-		return err
-	}
-	return New(config).Install(ctx)
+	return a.Install(ctx)
 }
 
 func installCurrentBinary(target string) error {

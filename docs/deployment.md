@@ -104,6 +104,37 @@ Bootstrap writes `/etc/boxfleet/agent.json`, checks for `with_v2ray_api`,
 detects systemd or OpenRC, installs the matching services, applies config, and starts the agent. Alpine Linux nodes use OpenRC with `supervise-daemon`; Debian and Ubuntu nodes continue to use systemd. The node begins
 `pending`; its first authenticated heartbeat promotes it to `active`.
 
+### Interrupted installation and recovery
+
+Installation prints each phase and elapsed time, with a progress message every
+10 seconds during slow phases. Bootstrap and `install` have a 10-minute overall
+limit (override with `--timeout 15m`); service-manager commands default to 30
+seconds (override with `"service_timeout": "60s"` in `agent.json`). Downloads
+have connection/read limits and bounded retries. Ctrl+C and SIGTERM cancel the
+foreground installer and print service states and a recovery command. A timed-out
+`systemctl` process does not prove that its systemd job was cancelled; inspect
+`systemctl list-jobs` and service logs before intervening.
+
+Resume using the saved identity and configuration, without re-enrollment:
+
+```bash
+sudo /opt/boxfleet/bin/boxfleet-agent install --config /etc/boxfleet/agent.json
+```
+
+Recovery stops the agent before changing runtime files and uses a process lock to
+prevent concurrent writers. It preserves traffic counters, epochs, and pending
+reports. Initial installation waits for config validation and service state,
+then starts the daemon; regular telemetry uploads are performed by the daemon.
+Local installation success is distinct from the server receiving the first
+heartbeat. For a paused node, the expected state is agent running and sing-box
+stopped.
+
+BoxFleet systemd services use `After=network.target`, without pulling in
+`network-online.target`. They do not alter the host's network manager or
+wait-online configuration. Failed starts keep retrying, including when a
+configured listen address arrives late. Ordinary agent startup synchronizes
+its embedded service templates without restarting sing-box.
+
 ## Managed updates
 
 Agents claim durable operations through outbound HTTPS. Downloads stream to
@@ -114,8 +145,27 @@ same-filesystem partial files, verify size and SHA256, then install under:
 ```
 
 Stable paths are atomically switched symlinks. sing-box failures restore the
-previous target; an agent update guard restores an agent candidate after three
-failed starts. Disabled nodes stay disabled throughout updates.
+previous target; a timed-out service operation reports an uncertain outcome
+without switching files underneath a possibly pending manager job. An agent
+update guard restores an agent candidate after three unconfirmed starts.
+Disabled nodes stay disabled throughout updates.
+
+During an agent upgrade, the old process only stages and switches the binary.
+The new process first applies config and sends a successful heartbeat. It then
+refreshes the rollback helper before synchronizing **both** agent and sing-box
+service definitions from its own templates and running `daemon-reload` on
+systemd. This ordering also upgrades legacy rollback helpers before any template
+migration. Only then can the resumed operation report success. Slow optional
+telemetry uploads cannot delay this confirmation. Same-version managed updates
+skip the binary switch; startup still reconciles service files.
+
+Service migration keeps a durable snapshot of previous contents and permissions,
+including absent files, until upgrade confirmation. Write/reload failures restore
+the prior files; an unconfirmed candidate rollback restores the binary and the
+snapshot. OpenRC uses the same lifecycle for its executable service scripts.
+BoxFleet owns these files: put local systemd overrides in drop-in files rather
+than editing generated units directly. Template synchronization reloads unit
+metadata without restarting an already running sing-box.
 
 Existing agents without `operations.v1` need one manual agent installation
 before managed updates can reach them. After that, capability names—not one

@@ -65,6 +65,20 @@ func agentCapabilities() []string {
 
 func (a *Agent) RunOperations(ctx context.Context) error {
 	for {
+		guard, err := a.loadAgentUpdateGuard()
+		if err != nil {
+			return err
+		}
+		if guard != nil && guard.Status == "pending" && versionsEquivalent(Version, guard.ExpectedVersion) {
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return context.Cause(ctx)
+			case <-timer.C:
+				continue
+			}
+		}
 		state, err := a.LoadOperationState()
 		if err != nil {
 			return err

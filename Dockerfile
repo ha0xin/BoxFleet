@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --prefix web
 COPY . .
 RUN npm --prefix web run build
 ARG VERSION=dev
-ARG AGENT_VERSION=v0.8.1
+ARG AGENT_VERSION=v0.8.2
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.agentVersion=${AGENT_VERSION}" \

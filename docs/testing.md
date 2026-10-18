@@ -163,3 +163,25 @@ the regular suite. Follow [deployment](deployment.md) and the
 Performance-sensitive releases also follow [performance.md](performance.md).
 Query-plan tests protect bounded access paths, while absolute P95 measurements
 run against a production-shaped database on the release host.
+
+### Installation and service migration smoke checks
+
+Unit tests fake service managers and isolate unit/script files under `t.TempDir()`.
+Before releasing installation or updater changes, validate on disposable nodes:
+
+- systemd-networkd manages the NIC normally.
+- ifupdown/networking manages the NIC while networkd wait-online is enabled:
+  BoxFleet startup must not pull in or wait for that service.
+- Network and a specifically configured public listen address arrive late:
+  agent keeps polling and sing-box eventually starts without manual reset-failed.
+- Interrupt each installer phase, including a pending systemd start job; recover
+  using the saved config and confirm both services and preserved traffic state.
+- Upgrade from the legacy agent: both units migrate using the new templates,
+  the helper refreshes before template mutation, and upgrade succeeds only after
+  a successful heartbeat and daemon-reload.
+- Force a service migration reload failure and an unconfirmed candidate restart:
+  old service files (including modes) and the previous binary are restored.
+- Repeat installation/recovery and run competing writers; paused nodes must keep
+  sing-box stopped. Repeat update/recovery on an OpenRC node.
+
+These real-service cases belong to deployment smoke validation, not unit tests.

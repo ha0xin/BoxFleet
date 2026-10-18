@@ -23,15 +23,21 @@ fi
 cleanup() {
   rm -rf "$TMP_DIR"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'echo "BoxFleet installation interrupted; resume using boxfleet-agent install --config /etc/boxfleet/agent.json once configuration exists" >&2; exit 130' INT
+trap 'echo "BoxFleet installation terminated; resume using boxfleet-agent install --config /etc/boxfleet/agent.json once configuration exists" >&2; exit 143' TERM
 
 download() {
   url="$1"
   dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest"
+    curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 "$url" -o "$dest"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$dest" "$url"
+    if ! command -v timeout >/dev/null 2>&1; then
+      echo "timeout is required for bounded wget downloads (or install curl)" >&2
+      exit 1
+    fi
+    timeout 300 wget -q --timeout=30 --tries=3 -O "$dest" "$url"
   else
     echo "curl or wget is required" >&2
     exit 1
@@ -46,6 +52,7 @@ release_url() {
 agent_asset="boxfleet-agent-${AGENT_VERSION}-linux-amd64"
 sing_box_asset="sing-box-${SING_BOX_VERSION}-linux-amd64"
 
+echo "BoxFleet: downloading agent, sing-box and checksums..." >&2
 mkdir -p "$TMP_DIR/artifacts"
 download "$(release_url "$agent_asset")" "$TMP_DIR/artifacts/$agent_asset"
 download "$(release_url "$sing_box_asset")" "$TMP_DIR/artifacts/$sing_box_asset"
@@ -61,12 +68,15 @@ if [ "$(wc -l < "$TMP_DIR/SHA256SUMS.selected")" -ne 2 ]; then
   echo "SHA256SUMS does not contain expected artifact checksums" >&2
   exit 1
 fi
+echo "BoxFleet: verifying downloaded artifacts..." >&2
 (cd "$TMP_DIR" && sha256sum -c SHA256SUMS.selected)
 
 chmod 0755 "$TMP_DIR/artifacts/$agent_asset" "$TMP_DIR/artifacts/$sing_box_asset"
 
+echo "BoxFleet: installing binaries..." >&2
 install -d -m 0755 "$BIN_DIR"
 install -m 0755 "$TMP_DIR/artifacts/$agent_asset" "$BIN_DIR/boxfleet-agent"
 install -m 0755 "$TMP_DIR/artifacts/$sing_box_asset" "$BIN_DIR/sing-box"
 
-"$BIN_DIR/boxfleet-agent" bootstrap "$BOOTSTRAP_STRING"
+echo "BoxFleet: bootstrapping node and starting services..." >&2
+printf '%s\n' "$BOOTSTRAP_STRING" | "$BIN_DIR/boxfleet-agent" bootstrap --from-file -
